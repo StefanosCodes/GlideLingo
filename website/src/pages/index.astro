@@ -2,6 +2,8 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import SiteFooter from '../components/SiteFooter.astro';
+import SiteHeader from '../components/SiteHeader.astro';
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { resolveMacDownload } from '../lib/download-config.mjs';
 
@@ -21,20 +23,7 @@ const description =
 ---
 
 <BaseLayout title="GlideLingo — Language learning, redesigned" description={description}>
-  <header class="site-header">
-    <div class="shell header-inner">
-      <a class="brand-link" href="/" aria-label="GlideLingo home">
-        <span class="brand-lockup">
-          <img class="brand-symbol" src="/brand/glidelingo-bird-black.svg" width="102" height="101" alt="" />
-          <span class="brand-name">GlideLingo</span>
-        </span>
-      </a>
-      <nav class="site-nav" aria-label="Primary navigation">
-        <a href="#pricing">Pricing</a>
-        <a href="#demo">How it works</a>
-      </nav>
-    </div>
-  </header>
+  <SiteHeader />
 
   <main id="main-content">
     <section class="hero shell" aria-labelledby="hero-heading">
@@ -165,17 +154,6 @@ const description =
 
   </main>
 
-  <footer class="site-footer">
-    <div class="shell footer-inner">
-      <a class="brand-link footer-brand" href="/" aria-label="GlideLingo home">
-        <span class="brand-lockup">
-          <img class="brand-symbol" src="/brand/glidelingo-bird-black.svg" width="102" height="101" alt="" />
-          <span class="brand-name">GlideLingo</span>
-        </span>
-      </a>
-      <p>© {new Date().getFullYear()} GlideLingo</p>
-      <a href="https://github.com/StefanosCodes/GlideLingo/releases">GitHub releases</a>
-    </div>
-  </footer>
+  <SiteFooter />
   <script src="/scripts/video-player.js" defer is:inline></script>
 </BaseLayout>

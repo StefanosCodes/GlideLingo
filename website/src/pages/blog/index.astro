@@ -1,0 +1,90 @@
+---
+import { getCollection } from 'astro:content';
+
+import SiteFooter from '../../components/SiteFooter.astro';
+import SiteHeader from '../../components/SiteHeader.astro';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const posts = (await getCollection('blog', ({ data }) => !data.draft)).sort(
+  (a, b) => b.data.publishedAt.valueOf() - a.data.publishedAt.valueOf(),
+);
+const [featuredPost, ...morePosts] = posts;
+const formatDate = (date: Date) =>
+  new Intl.DateTimeFormat('en-US', {
+    day: 'numeric',
+    month: 'long',
+    timeZone: 'UTC',
+    year: 'numeric',
+  }).format(date);
+const description =
+  'Ideas from GlideLingo about learning languages, building better practice, and joining real conversations.';
+---
+
+<BaseLayout title="Blog — GlideLingo" description={description} canonicalPath="/blog/">
+  <SiteHeader activePage="blog" />
+
+  <main id="main-content" class="blog-index">
+    <section class="shell blog-masthead" aria-labelledby="blog-heading">
+      <h1 id="blog-heading">Blog</h1>
+      <p>Ideas for learning with purpose and speaking with confidence.</p>
+    </section>
+
+    {
+      featuredPost && (
+        <section class="shell blog-latest" aria-labelledby="latest-heading">
+          <div class="blog-section-heading">
+            <h2 id="latest-heading">Latest</h2>
+          </div>
+
+          <a class="featured-post" href={`/blog/${featuredPost.id}/`}>
+            <span class="featured-post-image">
+              <img
+                src={featuredPost.data.heroImage}
+                width="1672"
+                height="941"
+                alt={featuredPost.data.heroAlt}
+              />
+            </span>
+            <span class="featured-post-copy">
+              <span class="post-meta">
+                <span>{featuredPost.data.category}</span>
+                <time datetime={featuredPost.data.publishedAt.toISOString()}>
+                  {formatDate(featuredPost.data.publishedAt)}
+                </time>
+                <span>{featuredPost.data.readMinutes} min read</span>
+              </span>
+              <span class="featured-post-title">{featuredPost.data.title}</span>
+              <span class="featured-post-description">{featuredPost.data.description}</span>
+              <span class="post-link-label">Read story <span aria-hidden="true">↗</span></span>
+            </span>
+          </a>
+        </section>
+      )
+    }
+
+    {
+      morePosts.length > 0 && (
+        <section class="shell more-stories" aria-labelledby="more-stories-heading">
+          <div class="blog-section-heading">
+            <h2 id="more-stories-heading">More stories</h2>
+          </div>
+          <div class="story-grid">
+            {morePosts.map((post) => (
+              <a class="story-card" href={`/blog/${post.id}/`}>
+                <img src={post.data.heroImage} width="1672" height="941" alt={post.data.heroAlt} />
+                <span class="post-meta">
+                  <span>{post.data.category}</span>
+                  <time datetime={post.data.publishedAt.toISOString()}>{formatDate(post.data.publishedAt)}</time>
+                </span>
+                <span class="story-card-title">{post.data.title}</span>
+                <span class="story-card-description">{post.data.description}</span>
+              </a>
+            ))}
+          </div>
+        </section>
+      )
+    }
+  </main>
+
+  <SiteFooter />
+</BaseLayout>

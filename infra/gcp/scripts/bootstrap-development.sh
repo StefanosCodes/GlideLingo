@@ -20,7 +20,8 @@ if [[ "${active_project}" != "${expected_project}" ]]; then
   exit 1
 fi
 
-terraform_version="$(terraform version -json | sed -n 's/.*"terraform_version":"\([^"]*\)".*/\1/p')"
+terraform_version="$(terraform version -json \
+  | sed -n 's/.*"terraform_version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
 terraform_major="${terraform_version%%.*}"
 terraform_minor_patch="${terraform_version#*.}"
 terraform_minor="${terraform_minor_patch%%.*}"

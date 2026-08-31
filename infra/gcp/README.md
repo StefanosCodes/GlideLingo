@@ -2,8 +2,9 @@
 
 This directory owns the smallest GCP platform needed to deploy GlideLingo's public
 FastAPI/PostgreSQL API and dormant IAM-private tutor. It configures Clerk verification inputs and
-tutor secret containers, but intentionally does not provision RevenueCat server authorization,
-workers, media storage, web hosting, or production resources.
+tutor and RevenueCat configuration containers. RevenueCat authorization remains disabled until its
+explicit activation gates pass. This environment intentionally does not provision workers, media
+storage, web hosting, or production resources.
 
 ## Architecture
 
@@ -39,8 +40,8 @@ either URL is not authorization to learner data.
 - a Secret Manager secret containing the SQLAlchemy Cloud SQL connection URL;
 - a public, scale-to-zero Cloud Run service capped at three instances;
 - an IAM-private, scale-to-zero tutor service whose only invoker is the API runtime identity;
-- distinct API and tutor runtime identities plus development-only pseudonym and OpenAI secret
-  containers (Terraform creates no secret values or versions);
+- distinct API and tutor runtime identities plus development-only tutor and RevenueCat configuration
+  containers (Terraform creates no provider-supplied secret values or versions);
 - a project-scoped monthly budget with default IAM-recipient alerts.
 
 The database password is generated once as a sensitive Terraform value in the protected,
@@ -143,6 +144,39 @@ The Clerk values are non-secret configuration pinned to the development instance
 Terraform defaults. Rotate the Terraform values and deployment-workflow values together, and inspect
 the Cloud Run environment diff before approval. Do not put local `.env` contents in committed tfvars.
 
+## RevenueCat authorization activation gates
+
+`revenuecat_enabled` defaults to `false`. Terraform always creates four regional Secret Manager
+containers for the app public SDK key, actor pseudonym key, webhook Authorization value, and webhook
+HMAC signing secret. It never creates their values. The API runtime receives accessor access only to
+those four containers, and Cloud Run mounts only the immutable versions named in
+`revenuecat_secret_versions`; `latest` is never used.
+
+Keep the integration disabled while staging all four versions. The `api_key` value is the least-
+privileged app public SDK key accepted by RevenueCat's read-only v1 Customer Info endpoint (`test_...`
+for Test Store sandbox or `rcb_...` for desktop production), never a project-wide `sk_...` key. Add
+the other three high-entropy values out of band so they never enter Terraform state, committed
+tfvars, shell history, or CI logs.
+
+Before changing `revenuecat_enabled` to `true`, independently verify:
+
+1. `backend/migrations/002_revenuecat_entitlements.sql` is applied and the runtime grants are exact.
+2. Daily bounded cleanup from `backend/migrations/maintenance_revenuecat_webhooks.sql` runs under a
+   separate delete-capable maintenance identity.
+3. RevenueCat has a sandbox-only webhook pointing to
+   `https://glidelingo-api-50843312405.us-west1.run.app/v1/billing/revenuecat/webhook`, with the exact
+   Authorization value and HMAC signing enabled; the one-time signing secret is stored as its own
+   immutable version.
+4. `revenuecat_secret_versions` names all four exact positive version numbers and Terraform applies
+   them while the flag remains false.
+5. A signed dashboard test webhook reaches the disabled deployment as expected, then a reviewed
+   enabled candidate passes webhook, reconcile, entitlement, and negative-auth smoke checks before
+   promotion.
+
+Terraform refuses an enabled configuration unless every version is pinned. For the development
+rollout, `revenuecat_environment` stays `SANDBOX`; production requires a separate future environment,
+project, keys, secrets, and state.
+
 ## Private tutor activation gates
 
 Both `lesson_tutor_enabled` and `private_lesson_tutor_enabled` default to `false`. Leave them false
@@ -197,10 +231,12 @@ than create a second copy.
 
 - Clerk JWT verification is configured on Cloud Run with the public development issuer, JWKS URL,
   and exact authorized-party origins. These values are not secrets.
-- RevenueCat server authorization remains a separate application-integration change and a tutor
-  activation gate. Never trust the client entitlement snapshot.
-- RevenueCat and OpenAI server credentials belong in Secret Manager and must be exposed only to
-  the API components that require them.
+- RevenueCat server authorization is implemented but remains a disabled activation gate. Never trust
+  the client entitlement snapshot; mount exact Secret Manager versions only after the migration,
+  webhook, retention, and sandbox evidence exist.
+- RevenueCat webhook credentials and OpenAI server credentials belong in Secret Manager and must be
+  exposed only to the API components that require them. The RevenueCat app SDK key is public but is
+  mounted through the same version-pinned server configuration contract.
 - Do not add workers, queues, media storage, or additional services until a product feature needs
   them.
 - The current bootstrap script intentionally refuses any project except
@@ -240,7 +276,8 @@ Use the `api_url` Terraform output as `EXPO_PUBLIC_API_BASE_URL` for development
 - Clerk: FastAPI verifies standard Clerk session tokens from the public JWKS endpoint; no Clerk
   secret key is required for this verifier. Keep Cloud Run publicly invokable so the application
   can reach it, and enforce authentication inside FastAPI on protected routes.
-- RevenueCat: add an authenticated, idempotent webhook endpoint and its signing secret.
+- RevenueCat: FastAPI exposes an authenticated, HMAC-signed, idempotent webhook and server-owned
+  entitlement reconciliation. Terraform keeps it disabled and refuses partial secret-version input.
 - OpenAI tutor activation: add an immutable version to the tutor-only development secret container,
   deploy an enabled private revision, and satisfy every activation gate above.
 - Workers and media: add Cloud Tasks and private Cloud Storage only when durable speech work

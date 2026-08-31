@@ -74,5 +74,7 @@ operator-approved privacy purge; those operations must derive the same `rcusr_v1
 with the production pseudonym key and run through a non-runtime maintenance identity.
 
 Keep `GLIDELINGO_REVENUECAT_ENABLED=false` and `GLIDELINGO_LESSON_TUTOR_ENABLED=false` until this
-migration, recurring webhook-ledger maintenance, webhook secrets, the server API key, environment
-filter, and live sandbox evidence are all in place.
+migration, recurring webhook-ledger maintenance, webhook secrets, the least-privileged app public SDK
+key used by the server's read-only Customer Info request, environment filter, and live sandbox evidence
+are all in place. The development Terraform contract must pin all four RevenueCat Secret Manager
+version numbers before the flag can be enabled.

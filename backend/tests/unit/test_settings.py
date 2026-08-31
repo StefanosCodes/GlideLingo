@@ -79,7 +79,7 @@ def test_enabled_revenuecat_accepts_complete_fail_closed_configuration() -> None
         _env_file=None,
         revenuecat_enabled=True,
         revenuecat_environment="PRODUCTION",
-        revenuecat_api_key="secret-key",
+        revenuecat_api_key="rcb_public-web-key",
         revenuecat_pseudonym_key="p" * 32,
         revenuecat_webhook_authorization="Bearer webhook-secret-value",
         revenuecat_webhook_signing_secret="s" * 32,
@@ -87,6 +87,19 @@ def test_enabled_revenuecat_accepts_complete_fail_closed_configuration() -> None
 
     assert settings.revenuecat_enabled is True
     assert settings.revenuecat_environment == "PRODUCTION"
+
+
+def test_enabled_revenuecat_rejects_overprivileged_project_secret_key() -> None:
+    with pytest.raises(ValidationError, match="app public SDK key"):
+        Settings(
+            _env_file=None,
+            revenuecat_enabled=True,
+            revenuecat_environment="PRODUCTION",
+            revenuecat_api_key="sk_overprivileged-project-key",
+            revenuecat_pseudonym_key="p" * 32,
+            revenuecat_webhook_authorization="Bearer webhook-secret-value",
+            revenuecat_webhook_signing_secret="s" * 32,
+        )
 
 
 def test_enabled_lesson_tutor_requires_bounded_database_timeouts() -> None:

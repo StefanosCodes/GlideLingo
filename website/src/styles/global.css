@@ -304,11 +304,6 @@ h3 {
   background: #f8f8f7;
 }
 
-.section-pills .is-current {
-  color: var(--ink);
-  background: var(--paper-soft);
-}
-
 .product-showcase {
   padding-block: 34px 140px;
   scroll-margin-top: 104px;

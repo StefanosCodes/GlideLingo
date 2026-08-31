@@ -5,13 +5,14 @@ const downloadUrl =
   'https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/GlideLingo-0.1.0-universal.dmg';
 const checksumUrl =
   'https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/SHA256SUMS.txt';
+const testOrigin = `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? '4322'}`;
 
 test('renders the complete landing page without third-party requests or horizontal overflow', async ({ page }) => {
   /** @type {string[]} */
   const unexpectedRequests = [];
   page.on('request', (request) => {
     const requestUrl = new URL(request.url());
-    if (requestUrl.origin !== 'http://127.0.0.1:4322') {
+    if (requestUrl.origin !== testOrigin) {
       unexpectedRequests.push(request.url());
     }
   });
@@ -21,6 +22,7 @@ test('renders the complete landing page without third-party requests or horizont
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Build a language habit that feels clear.');
   await expect(page.getByRole('heading', { name: 'Everything you need to make steady progress.' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Your next lesson, ready on Mac.' })).toBeVisible();
+  await expect(page.locator('.section-pills [aria-current], .section-pills .is-current')).toHaveCount(0);
   await expect(page.locator('[data-download-state="available"]')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Download GlideLingo 0.1.0 for Mac' }).last()).toHaveAttribute(
     'href',

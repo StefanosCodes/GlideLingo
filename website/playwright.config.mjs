@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const port = Number.parseInt(process.env.PLAYWRIGHT_PORT ?? '4322', 10);
+const baseURL = `http://127.0.0.1:${port}`;
+
 const viewports = [
   { name: 'mobile', width: 375, height: 812 },
   { name: 'tablet', width: 768, height: 1024 },
@@ -13,7 +16,7 @@ export default defineConfig({
   retries: 0,
   reporter: 'list',
   use: {
-    baseURL: 'http://127.0.0.1:4322',
+    baseURL,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
   },
@@ -29,7 +32,8 @@ export default defineConfig({
   ],
   webServer: {
     command: 'node scripts/serve-dist.mjs',
-    url: 'http://127.0.0.1:4322',
+    env: { PORT: String(port) },
+    url: baseURL,
     reuseExistingServer: false,
     timeout: 30_000,
   },

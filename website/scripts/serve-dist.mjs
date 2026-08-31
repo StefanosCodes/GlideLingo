@@ -4,7 +4,7 @@ import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const host = '127.0.0.1';
-const port = 4322;
+const port = Number.parseInt(process.env.PORT ?? '4322', 10);
 const distRoot = resolve(fileURLToPath(new URL('../dist/', import.meta.url)));
 /** @type {Record<string, string>} */
 const contentTypes = {

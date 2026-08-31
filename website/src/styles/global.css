@@ -106,11 +106,9 @@ a {
 }
 
 .header-inner {
-  display: grid;
-  grid-template-columns: 1fr auto;
+  display: flex;
   align-items: center;
   min-height: 82px;
-  gap: 32px;
 }
 
 .brand-link {
@@ -142,37 +140,12 @@ a {
   line-height: 1;
 }
 
-.brand-lockup-inverse {
-  color: var(--white);
-}
-
-.brand-lockup-inverse .brand-symbol {
-  filter: invert(1);
-}
-
-.site-nav {
-  display: flex;
-  align-items: center;
-  gap: 34px;
-  color: var(--ink-muted);
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.site-nav a,
-.site-footer a,
-.checksum-link {
+.site-footer a {
   text-decoration-thickness: 1px;
   text-underline-offset: 4px;
 }
 
-.site-nav a {
-  text-decoration: none;
-}
-
-.site-nav a:hover,
-.site-footer a:hover,
-.checksum-link:hover {
+.site-footer a:hover {
   color: var(--brand-blue);
 }
 
@@ -190,14 +163,6 @@ a {
   text-decoration: none;
 }
 
-.button-platform-icon {
-  width: 19px;
-  height: 19px;
-  flex: none;
-  margin-right: 9px;
-  fill: currentColor;
-}
-
 .button-primary {
   color: var(--white);
   border-color: var(--black);
@@ -208,13 +173,6 @@ a {
 .button-primary:hover {
   border-color: var(--navy);
   background: var(--navy);
-}
-
-.button-disabled {
-  color: var(--ink-muted);
-  border-color: var(--line-strong);
-  background: var(--paper-soft);
-  cursor: not-allowed;
 }
 
 .hero {
@@ -299,19 +257,6 @@ h3 {
   color: var(--ink-muted);
   font-size: 20px;
   line-height: 1.5;
-}
-
-.hero-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 36px;
-}
-
-.release-meta {
-  margin: 16px 0 0;
-  color: var(--ink-faint);
-  font-size: 13px;
 }
 
 .product-showcase {
@@ -442,167 +387,6 @@ h3 {
   font-size: 12px;
 }
 
-.download-section {
-  position: relative;
-  overflow: hidden;
-  color: var(--white);
-  border-block: 0;
-  background-color: var(--navy);
-}
-
-.download-section::before {
-  position: absolute;
-  inset: -35% -10% -45% 28%;
-  background:
-    radial-gradient(circle at 36% 36%, rgb(77 124 255 / 42%), transparent 38%),
-    radial-gradient(circle at 70% 46%, rgb(34 211 238 / 30%), transparent 35%),
-    radial-gradient(circle at 58% 72%, rgb(184 247 230 / 14%), transparent 40%);
-  content: '';
-  filter: blur(16px);
-  pointer-events: none;
-}
-
-.download-grid {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
-  align-items: center;
-  gap: 96px;
-  padding-block: 120px;
-}
-
-.download-copy {
-  position: relative;
-}
-
-.download-lockup {
-  width: fit-content;
-  margin-bottom: 34px;
-}
-
-.download-lockup .brand-symbol {
-  width: 36px;
-  height: 36px;
-}
-
-.download-lockup .brand-name {
-  font-size: 28px;
-}
-
-.download-copy > p:not(.eyebrow) {
-  max-width: 600px;
-  margin: 22px 0 0;
-  color: rgb(255 255 255 / 72%);
-  font-size: 18px;
-}
-
-.checksum-link {
-  display: inline-block;
-  margin-top: 12px;
-  color: rgb(255 255 255 / 72%);
-  font-size: 13px;
-}
-
-.download-section .eyebrow {
-  color: var(--sky-blue);
-}
-
-.download-section .button-primary {
-  color: var(--black);
-  border-color: var(--white);
-  background: var(--white);
-}
-
-.download-section .button-primary:hover {
-  border-color: var(--aqua);
-  background: var(--aqua);
-}
-
-.download-section .button-disabled {
-  color: rgb(255 255 255 / 72%);
-  border-color: rgb(255 255 255 / 22%);
-  background: rgb(255 255 255 / 8%);
-}
-
-.download-section .release-meta {
-  color: rgb(255 255 255 / 58%);
-}
-
-.platform-cards {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.platform-card {
-  display: flex;
-  min-height: 302px;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 28px;
-  border: 1px solid rgb(255 255 255 / 18%);
-  border-radius: 18px;
-  background: rgb(255 255 255 / 8%);
-  box-shadow: inset 0 1px rgb(255 255 255 / 8%);
-  backdrop-filter: blur(14px);
-}
-
-.platform-card-ready {
-  background: rgb(255 255 255 / 12%);
-}
-
-.platform-card-heading {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.platform-card h3 {
-  font-size: 21px;
-}
-
-.platform-status {
-  display: block;
-  margin-top: 5px;
-  color: rgb(255 255 255 / 64%);
-  font-size: 13px;
-}
-
-.platform-status-ready {
-  color: var(--aqua);
-}
-
-.platform-icon {
-  display: grid;
-  width: 46px;
-  height: 46px;
-  place-items: center;
-  flex: none;
-  border: 1px solid rgb(255 255 255 / 18%);
-  border-radius: 13px;
-  color: var(--white);
-  background: rgb(255 255 255 / 10%);
-}
-
-.platform-icon svg {
-  width: 24px;
-  height: 24px;
-}
-
-.platform-icon-apple svg,
-.platform-icon-windows svg {
-  fill: currentColor;
-}
-
-.platform-card .download-actions {
-  margin-top: 36px;
-}
-
-.platform-card .button {
-  width: 100%;
-}
-
 .site-footer {
   padding-block: 40px;
   background: var(--white);
@@ -679,15 +463,6 @@ h3 {
   .hero-copy {
     max-width: 780px;
   }
-
-  .download-grid {
-    grid-template-columns: 1fr;
-    gap: 64px;
-  }
-
-  .download-section::before {
-    inset: -20% -35% -45% 10%;
-  }
 }
 
 @media (max-width: 700px) {
@@ -696,9 +471,7 @@ h3 {
   }
 
   .header-inner {
-    grid-template-columns: 1fr auto;
     min-height: 68px;
-    gap: 12px;
   }
 
   .brand-symbol {
@@ -708,10 +481,6 @@ h3 {
 
   .brand-name {
     font-size: 21px;
-  }
-
-  .site-nav {
-    display: none;
   }
 
   .hero {
@@ -729,8 +498,7 @@ h3 {
   }
 
   .hero-lede,
-  .demo-intro > p:last-child,
-  .download-copy > p:not(.eyebrow) {
+  .demo-intro > p:last-child {
     font-size: 17px;
   }
 
@@ -746,15 +514,6 @@ h3 {
     display: none;
   }
 
-  .platform-cards {
-    grid-template-columns: 1fr;
-  }
-
-  .download-grid {
-    gap: 52px;
-    padding-block: 88px;
-  }
-
   .footer-inner {
     grid-template-columns: 1fr;
     gap: 16px;
@@ -766,12 +525,6 @@ h3 {
 }
 
 @media (max-width: 440px) {
-  .hero-actions {
-    align-items: stretch;
-    flex-direction: column;
-    padding-inline: 18px;
-  }
-
   .product-frame {
     border-radius: 12px;
   }
@@ -785,11 +538,6 @@ h3 {
   .demo-play {
     width: 32px;
     height: 32px;
-  }
-
-  .platform-card {
-    min-height: 274px;
-    padding: 24px;
   }
 }
 

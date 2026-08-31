@@ -3,7 +3,6 @@ import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const root = new URL('../dist/', import.meta.url);
-const active = process.env.PUBLIC_MAC_DOWNLOAD_STATE === 'active';
 /** @param {string} path */
 const read = (path) => readFile(new URL(path, root), 'utf8');
 
@@ -30,10 +29,8 @@ assert.match(home, /glidelingo-bird-black\.svg/);
 assert.match(home, /brand-name/);
 assert.match(home, /data-video-state="awaiting-source"/);
 assert.match(home, /Video coming soon/);
-assert.match(home, /Platform availability/);
-assert.match(home, /Download for Windows/);
-assert.match(home, /button-platform-icon-apple/);
-assert.doesNotMatch(home, /Apple silicon and Intel|Universal Mac app/);
+assert.doesNotMatch(home, /Desktop apps|Choose your desktop|Download for Mac|Download for Windows/);
+assert.doesNotMatch(home, /releases\/download/);
 assert.doesNotMatch(home, /<script(?:\s|>)/i);
 assert.doesNotMatch(home, /<form(?:\s|>)/i);
 assert.doesNotMatch(home, /document\.cookie|localStorage|sessionStorage/i);
@@ -43,19 +40,4 @@ assert.match(headers, /script-src 'none'/);
 assert.match(headers, /Permissions-Policy:/);
 assert.match(robots, /Sitemap: https:\/\/glidelingo\.com\/sitemap-index\.xml/);
 
-if (active) {
-  const downloadUrl = process.env.PUBLIC_MAC_DOWNLOAD_URL?.trim();
-  const checksumUrl = process.env.PUBLIC_MAC_CHECKSUM_URL?.trim();
-
-  assert.ok(downloadUrl, 'Active output verification requires PUBLIC_MAC_DOWNLOAD_URL.');
-  assert.ok(checksumUrl, 'Active output verification requires PUBLIC_MAC_CHECKSUM_URL.');
-  assert.match(home, /data-download-state="available"/);
-  assert.ok(home.includes(downloadUrl), 'Active output must contain the configured DMG URL.');
-  assert.ok(home.includes(checksumUrl), 'Active output must contain the configured checksum URL.');
-} else {
-  assert.match(home, /data-download-state="unavailable"/);
-  assert.match(home, /Download for Mac/);
-  assert.doesNotMatch(home, /releases\/download/);
-}
-
-console.log(`Verified ${active ? 'active-download' : 'coming-soon'} static output in ${join(root.pathname)}.`);
+console.log(`Verified static landing page output in ${join(root.pathname)}.`);

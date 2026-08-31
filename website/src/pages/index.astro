@@ -1,8 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import { resolveMacDownload } from '../lib/download-config.mjs';
 
-const download = resolveMacDownload(process.env);
 const description =
   'GlideLingo redesigns language learning around clear lessons, focused review, and a calm weekly rhythm you can keep.';
 ---
@@ -16,10 +14,6 @@ const description =
           <span class="brand-name">GlideLingo</span>
         </span>
       </a>
-      <nav class="site-nav" aria-label="Primary navigation">
-        <a href="#demo">Demo</a>
-        <a href="#download">Download</a>
-      </nav>
     </div>
   </header>
 
@@ -31,18 +25,6 @@ const description =
           Build a clear, sustainable path from first sound to real conversation—with focused lessons, useful review,
           and a weekly rhythm you can keep.
         </p>
-        <div class="hero-actions">
-          <a
-            class="button button-primary"
-            href={download.available ? download.downloadUrl : '#download'}
-            aria-label={download.available ? `Download GlideLingo ${download.version} for Mac` : 'See Mac availability'}
-          >
-            <svg class="button-platform-icon button-platform-icon-apple" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.79 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.09ZM12.03 7.25C11.88 5.02 13.69 3.18 15.77 3c.29 2.58-2.34 4.5-3.74 4.25Z"></path>
-            </svg>
-            Download for Mac
-          </a>
-        </div>
       </div>
     </section>
 
@@ -72,87 +54,6 @@ const description =
       </figure>
     </section>
 
-    <section class="download-section" id="download" aria-labelledby="download-heading">
-      <div class="shell download-grid">
-        <div class="download-copy">
-          <div class="brand-lockup brand-lockup-inverse download-lockup">
-            <img class="brand-symbol" src="/brand/glidelingo-bird-black.svg" width="102" height="101" alt="" />
-            <span class="brand-name">GlideLingo</span>
-          </div>
-          <p class="eyebrow">Desktop apps</p>
-          <h2 id="download-heading">Choose your desktop.</h2>
-          <p>Download GlideLingo for Mac today. Windows will be available here with its signed installer.</p>
-        </div>
-
-        <div class="platform-cards" aria-label="Platform availability">
-          <article class="platform-card platform-card-ready">
-            <div class="platform-card-heading">
-              <span class="platform-icon platform-icon-apple" aria-hidden="true">
-                <svg viewBox="0 0 24 24">
-                  <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.79 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.09ZM12.03 7.25C11.88 5.02 13.69 3.18 15.77 3c.29 2.58-2.34 4.5-3.74 4.25Z"></path>
-                </svg>
-              </span>
-              <div>
-                <h3>Mac</h3>
-                <span class:list={['platform-status', { 'platform-status-ready': download.available }]}>
-                  {download.available ? 'Available' : 'Coming soon'}
-                </span>
-              </div>
-            </div>
-            {
-              download.available ? (
-                <div class="download-actions" data-download-state="available">
-                  <a
-                    class="button button-primary"
-                    href={download.downloadUrl}
-                    aria-label={`Download GlideLingo ${download.version} for Mac`}
-                  >
-                    <svg class="button-platform-icon button-platform-icon-apple" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.79 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.09ZM12.03 7.25C11.88 5.02 13.69 3.18 15.77 3c.29 2.58-2.34 4.5-3.74 4.25Z"></path>
-                    </svg>
-                    Download for Mac
-                  </a>
-                  <p class="release-meta">
-                    Version {download.version} · <time datetime={download.releaseDate}>{download.formattedReleaseDate}</time>
-                  </p>
-                  <a class="checksum-link" href={download.checksumUrl}>View SHA-256 checksum</a>
-                </div>
-              ) : (
-                <div class="download-actions" data-download-state="unavailable">
-                  <span class="button button-disabled" aria-disabled="true">
-                    <svg class="button-platform-icon button-platform-icon-apple" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.79 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.09ZM12.03 7.25C11.88 5.02 13.69 3.18 15.77 3c.29 2.58-2.34 4.5-3.74 4.25Z"></path>
-                    </svg>
-                    Download for Mac
-                  </span>
-                  <p class="release-meta">The signed and notarized build is in final release preparation.</p>
-                </div>
-              )
-            }
-          </article>
-
-          <article class="platform-card platform-card-pending" data-platform-state="coming-soon">
-            <div class="platform-card-heading">
-              <span class="platform-icon platform-icon-windows" aria-hidden="true">
-                <svg viewBox="0 0 24 24" role="img">
-                  <path d="M3 4.5 10.7 3.4v7.8H3V4.5Zm9.3-1.3L21 2v9.2h-8.7v-8Zm-9.3 9h7.7V20L3 18.9v-6.7Zm9.3 0H21V22l-8.7-1.2v-8.6Z"></path>
-                </svg>
-              </span>
-              <div>
-                <h3>Windows</h3>
-                <span class="platform-status">Coming soon</span>
-              </div>
-            </div>
-            <span class="button button-disabled" aria-disabled="true">
-              <svg class="button-platform-icon button-platform-icon-windows" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M3 4.5 10.7 3.4v7.8H3V4.5Zm9.3-1.3L21 2v9.2h-8.7v-8Zm-9.3 9h7.7V20L3 18.9v-6.7Zm9.3 0H21V22l-8.7-1.2v-8.6Z"></path>
-              </svg>
-              Download for Windows
-            </span>
-          </article>
-        </div>
-      </div>
-    </section>
   </main>
 
   <footer class="site-footer">

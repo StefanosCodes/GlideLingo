@@ -1,8 +1,9 @@
 # RevenueCat billing MVP
 
-This slice establishes an account-scoped client subscription boundary without committing store credentials, prices, or
-premium curriculum rules. Clerk owns authentication. RevenueCat owns purchases and the exact `pro` entitlement. Do not
-enable Clerk Billing for the same subscription.
+This slice establishes an account-scoped subscription boundary for **lesson tutor assistance** without committing store
+credentials or prices. Clerk owns authentication. RevenueCat owns purchases and the exact `pro` entitlement. RevenueCat
+Billing uses Stripe as its web payment gateway; GlideLingo does not embed a Stripe SDK or Stripe secret. Do not enable
+Clerk Billing for the same subscription.
 
 ## Integration contract
 
@@ -15,6 +16,10 @@ enable Clerk Billing for the same subscription.
   different Clerk account during rapid sign-out or account switching.
 - Never pass an email address or phone number as the RevenueCat App User ID.
 - Register the `/subscription` route inside the authenticated Expo Router boundary and add the desired in-app entry point.
+- Treat checkout state separately from entitlement state. Cancellation, a declined payment, or an ambiguous checkout error
+  must not erase a previously confirmed entitlement. A successful checkout is followed by a `getCustomerInfo()` refresh.
+- Use `CustomerInfo.managementURL` for subscription management. RevenueCat Billing returns its customer portal there;
+  the React Native SDK's native `showManageSubscriptions()` method is not supported on Web/Electron.
 - The client entitlement makes the UI responsive. A future paid API operation must verify access independently in FastAPI;
   it must never trust a client `isPro` boolean.
 
@@ -31,20 +36,59 @@ EXPO_PUBLIC_REVENUECAT_WEB_API_KEY=
 EXPO_PUBLIC_ENABLE_MOCK_BILLING=true # development only
 ```
 
-The Test Store key overrides platform keys only in development. Mock access requires both a development bundle and the
-explicit `EXPO_PUBLIC_ENABLE_MOCK_BILLING=true` opt-in. A release build with no platform key fails closed and exposes no
-mock package or Pro state. Never expose a RevenueCat secret API key through `EXPO_PUBLIC_*`.
+Web/Electron prefers an explicit `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY` even in development, which makes local desktop builds
+exercise the real RevenueCat Billing checkout. When the web key is absent, the Test Store key is a local-development
+fallback only. Native development continues to prefer the Test Store key. Mock access requires both a development bundle
+and the explicit `EXPO_PUBLIC_ENABLE_MOCK_BILLING=true` opt-in. A release build with no platform key fails closed and
+exposes no mock package or Pro state. Never expose a RevenueCat secret API key through `EXPO_PUBLIC_*`.
+
+The signed desktop workflow receives `GLIDELINGO_REVENUECAT_WEB_API_KEY` in its protected GitHub environment and exports
+it to the renderer as `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY`. For local work, put the public `rcb_...` key in the ignored
+root `.env`. Do not put Stripe credentials, RevenueCat secret keys, or RevenueCat v1/v2 REST authorization keys there.
 
 ## RevenueCat dashboard setup
 
 1. Create the entitlement with the exact identifier `pro`.
-2. In the Test Store, create one monthly and one annual product.
-3. Attach both products to `pro`.
-4. Add monthly and annual packages to the current offering.
-5. Add the Test Store public SDK key locally and restart Metro.
-6. Sign in through Clerk, open `/subscription`, and test success, cancellation, failure, refresh, and sign-out/account switch.
-7. Set RevenueCat restore behavior to **Keep with original App User ID** so restoring one store account cannot transfer a
+2. Under **Web**, create a **RevenueCat Billing** app/config and connect the intended Stripe account or sandbox as its
+   payment gateway. Follow RevenueCat's [Web SDK setup](https://www.revenuecat.com/docs/web/web-billing/web-sdk).
+3. Create one recurring monthly product and one recurring annual product for Web. Prices, currencies, tax behavior, trials,
+   and customer-facing names remain dashboard-owned.
+4. Attach both products to `pro`, then add them to the current offering using RevenueCat's predefined Monthly and Annual
+   package types. The client uses package type rather than hard-coded product IDs.
+5. Enable and brand the RevenueCat Billing customer portal. Confirm an active web subscription returns a secure
+   `managementURL`; see [Customer Portal](https://www.revenuecat.com/docs/web/web-billing/customer-portal).
+6. Copy the Web **public SDK key** (`rcb_...`) into `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY` locally and
+   `GLIDELINGO_REVENUECAT_WEB_API_KEY` in the protected desktop release environment. Restart Metro after local env changes.
+7. Sign in through Clerk, open `/subscription`, and verify the exact stable Clerk `userId` appears as the RevenueCat App
+   User ID. Never use email or phone number as the App User ID.
+8. Exercise the acceptance matrix below in RevenueCat Billing's Stripe test/sandbox mode before using live mode.
+9. Set RevenueCat restore behavior to **Keep with original App User ID** so restoring one store account cannot transfer a
    subscription between different Clerk accounts.
+
+For development without a configured web app, create Test Store monthly and annual products, attach them to `pro`, add
+Monthly and Annual packages to the current offering, and use `EXPO_PUBLIC_REVENUECAT_TEST_API_KEY`. Remove or temporarily
+unset the explicit Web key to select that fallback. The in-memory mock remains a UI-only fallback and proves no RevenueCat
+or Stripe behavior.
+
+## Desktop acceptance matrix
+
+Run these against a development Electron build using the `rcb_...` key and Stripe test/sandbox payment methods:
+
+| Scenario | Required evidence |
+| --- | --- |
+| Monthly success | Hosted checkout completes, the post-checkout CustomerInfo refresh contains active `pro`, and the screen shows Pro tutor assistance. |
+| Annual success | Same as monthly using the Annual package and the dashboard-configured annual price. |
+| User cancellation | Screen reports cancellation, no Pro grant is invented, and the known entitlement state is preserved. |
+| Declined/invalid payment | Screen reports that payment was not accepted, exposes a retry path, and preserves known entitlement state. |
+| Ambiguous/network failure | Screen asks the user to refresh before retrying and does not claim purchase success. |
+| Portal | An active customer opens the secure RevenueCat customer portal and can inspect/cancel the subscription. |
+| Portal unavailable | Missing/null `managementURL` produces an explicit unavailable state without removing Pro. |
+| Account switch | Switching Clerk users never paints or purchases against the previous user's entitlement. |
+| Sign-out/in | Signed-out UI holds no Pro state; signing back in refreshes the matching RevenueCat customer. |
+| Release config | A build without the Web key fails closed; development mock/Test Store settings cannot grant release access. |
+
+Record the RevenueCat customer history and Stripe test/sandbox transaction for both successful plans. These external
+artifacts are required before claiming live billing works; repository tests alone prove only client behavior.
 
 With the explicit development-only mock flag and no public SDK key, the screen uses an in-memory mock package scoped to
 the current signed-in account. Without either a real key or that development opt-in, billing is unavailable. Real native
@@ -53,18 +97,19 @@ purchases require an Expo development build; Expo Go is preview-only for this in
 ## Platform behavior
 
 - iOS and Android use their separate public SDK keys and native purchase/restore flows.
-- Browser and Electron use the web key. Electron follows the web path because it packages the Expo web bundle. Its CSP
+- Browser and Electron use the Web key. Electron follows the web path because it packages the Expo web bundle. Its CSP
   includes the RevenueCat API/static endpoints and the Stripe/Paddle script, frame, form, and connection origins used by
   RevenueCat Web checkout.
 - Web refreshes CustomerInfo rather than invoking the native restore API.
+- Active customers open the RevenueCat/Stripe/Paddle management destination supplied by `CustomerInfo.managementURL`.
 - Every platform uses the same authenticated Clerk user ID so a single RevenueCat customer receives the same `pro`
   entitlement across devices.
 
 ## Deferred production work
 
-- Apple App Store, Google Play, and web billing products and prices.
+- Apple App Store and Google Play billing products and prices.
 - RevenueCat webhooks, server-owned entitlement persistence, reconciliation, and paid API authorization.
-- Premium feature gates, remote paywalls, Customer Center, analytics, trials, and launch copy.
+- Remote paywalls, analytics, trials, and launch copy.
 - Account deletion and subscription-management policy/copy required for store release.
 
 Before release, verify the Test Store key is absent, exercise every shipping platform in its real store sandbox, and add

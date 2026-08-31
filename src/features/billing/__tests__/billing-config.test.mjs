@@ -24,6 +24,29 @@ test('uses the Test Store key only in development', () => {
   );
 });
 
+test('prefers an explicit RevenueCat Web key for Web and Electron development', () => {
+  assert.equal(
+    selectRevenueCatApiKey({
+      development: true,
+      platform: 'web',
+      testKey: 'test_public',
+      webKey: ' rcb_web_public ',
+    }),
+    'rcb_web_public',
+  );
+});
+
+test('uses the Test Store as a Web fallback only during local development', () => {
+  assert.equal(
+    selectRevenueCatApiKey({ development: true, platform: 'web', testKey: ' test_public ' }),
+    'test_public',
+  );
+  assert.equal(
+    selectRevenueCatApiKey({ development: false, platform: 'web', testKey: 'test_public' }),
+    undefined,
+  );
+});
+
 test('selects a separate public key for each release platform', () => {
   const environment = {
     development: false,

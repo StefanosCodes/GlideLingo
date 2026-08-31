@@ -9,13 +9,39 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useBilling } from '@/providers/billing-provider';
 
-const benefits = ['The complete learning path', 'Speaking and listening practice', 'Your Pro access across devices'];
+const benefits = [
+  'On-demand tutor help inside lessons',
+  'Clear explanations when a step feels confusing',
+  'Tutor access connected to your GlideLingo account',
+];
+
+function planName(interval: 'monthly' | 'annual' | 'other', fallback: string) {
+  if (interval === 'monthly') return 'Monthly Pro';
+  if (interval === 'annual') return 'Annual Pro';
+  return fallback;
+}
 
 export default function SubscriptionScreen() {
   const router = useRouter();
   const theme = useTheme();
-  const { mode, status, isPro, packages, errorMessage, purchase, refresh, restore, resetMockAccess } = useBilling();
+  const {
+    mode,
+    status,
+    isPro,
+    packages,
+    purchaseState,
+    managementState,
+    errorMessage,
+    manage,
+    purchase,
+    refresh,
+    restore,
+    resetMockAccess,
+  } = useBilling();
   const loading = status === 'loading';
+  const purchaseLoading = purchaseState.status === 'loading';
+  const managementLoading = managementState.status === 'loading';
+  const actionBusy = loading || purchaseLoading || managementLoading;
 
   return (
     <ScreenFrame chrome={false} includeTabInset={false} testID="subscription-screen">
@@ -23,10 +49,10 @@ export default function SubscriptionScreen() {
         <ThemedText type="eyebrow" themeColor="textSecondary">
           GLIDELINGO PRO · {mode === 'mock' ? 'MVP PREVIEW' : mode === 'unavailable' ? 'UNAVAILABLE' : 'REVENUECAT'}
         </ThemedText>
-        <ThemedText type="display">Keep the full path open.</ThemedText>
+        <ThemedText type="display">Get tutor help when you need it.</ThemedText>
         <ThemedText type="body" themeColor="textSecondary" style={styles.copy}>
-          Choose a simple monthly or annual plan. Your purchase stays connected to your GlideLingo account, not your email
-          address or phone number.
+          Choose monthly or annual Pro for lesson tutor assistance. Your purchase stays connected to your GlideLingo
+          account, not your email address or phone number.
         </ThemedText>
       </View>
 
@@ -63,7 +89,7 @@ export default function SubscriptionScreen() {
             <GlideSurface key={item.identifier} padding="roomy" style={styles.card}>
               <View style={styles.planHeading}>
                 <View style={styles.planCopy}>
-                  <ThemedText type="title3">{item.title}</ThemedText>
+                  <ThemedText type="title3">{planName(item.interval, item.title)}</ThemedText>
                   <ThemedText type="footnote" themeColor="textSecondary">
                     {item.description}
                   </ThemedText>
@@ -71,9 +97,15 @@ export default function SubscriptionScreen() {
                 <ThemedText type="headline">{item.priceLabel}</ThemedText>
               </View>
               <GlideButton
-                disabled={loading}
+                disabled={actionBusy}
                 fullWidth
-                label={mode === 'mock' ? 'Simulate purchase' : `Choose ${item.title}`}
+                label={
+                  purchaseLoading && purchaseState.packageIdentifier === item.identifier
+                    ? 'Opening secure checkout…'
+                    : mode === 'mock'
+                      ? `Simulate ${planName(item.interval, item.title)}`
+                      : `Choose ${planName(item.interval, item.title)}`
+                }
                 onPress={() => void purchase(item.identifier)}
                 testID={`purchase-${item.identifier}`}
               />
@@ -91,6 +123,28 @@ export default function SubscriptionScreen() {
         </View>
       ) : null}
 
+      {purchaseState.status !== 'idle' && purchaseState.status !== 'loading' ? (
+        <GlideSurface
+          accessibilityRole={purchaseState.status === 'declined' || purchaseState.status === 'error' ? 'alert' : undefined}
+          padding="regular"
+          variant={purchaseState.status === 'success' ? 'success' : 'tinted'}>
+          <ThemedText
+            type="headline"
+            style={purchaseState.status === 'declined' || purchaseState.status === 'error' ? { color: theme.danger } : undefined}>
+            {purchaseState.status === 'success'
+              ? 'Purchase confirmed'
+              : purchaseState.status === 'cancelled'
+                ? 'Checkout cancelled'
+                : purchaseState.status === 'declined'
+                  ? 'Payment not accepted'
+                  : 'Purchase not confirmed'}
+          </ThemedText>
+          <ThemedText type="footnote" themeColor="textSecondary">
+            {purchaseState.message}
+          </ThemedText>
+        </GlideSurface>
+      ) : null}
+
       {errorMessage ? (
         <GlideSurface accessibilityRole="alert" padding="regular">
           <ThemedText type="headline" style={{ color: theme.danger }}>
@@ -106,18 +160,39 @@ export default function SubscriptionScreen() {
         {mode === 'unavailable' ? null : mode === 'mock' && isPro ? (
           <GlideButton label="Reset mock access" onPress={resetMockAccess} variant="secondary" />
         ) : (
-          <GlideButton
-            disabled={loading || status === 'signed-out'}
-            label={Platform.OS === 'web' ? 'Refresh access' : 'Restore purchases'}
-            onPress={() => void restore()}
-            variant="secondary"
-          />
+          <>
+            {isPro && mode === 'revenuecat' ? (
+              <GlideButton
+                disabled={actionBusy}
+                label={managementLoading ? 'Opening subscription management…' : 'Manage subscription'}
+                onPress={() => void manage()}
+                variant="secondary"
+              />
+            ) : null}
+            <GlideButton
+              disabled={actionBusy || status === 'signed-out'}
+              label={Platform.OS === 'web' ? 'Refresh access' : 'Restore purchases'}
+              onPress={() => void restore()}
+              variant="secondary"
+            />
+          </>
         )}
         {status === 'error' && mode !== 'unavailable' ? (
           <GlideButton label="Try again" onPress={() => void refresh()} variant="secondary" />
         ) : null}
         <GlideButton label="Back" onPress={() => router.back()} variant="tertiary" />
       </View>
+
+      {managementState.status !== 'idle' && managementState.status !== 'loading' ? (
+        <GlideSurface
+          accessibilityRole={managementState.status === 'error' ? 'alert' : undefined}
+          padding="regular"
+          variant="tinted">
+          <ThemedText type="footnote" themeColor="textSecondary">
+            {managementState.message}
+          </ThemedText>
+        </GlideSurface>
+      ) : null}
     </ScreenFrame>
   );
 }

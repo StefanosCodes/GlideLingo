@@ -10,35 +10,60 @@ import {
 } from 'react';
 
 import {
+  type BillingManagementState,
   type BillingMode,
   type BillingPackage,
+  type BillingPurchaseState,
   type BillingSnapshot,
   type BillingStatus,
 } from '@/features/billing/billing-types';
+import { classifyPurchaseFailure } from '@/features/billing/billing-errors';
 import { selectBillingMode } from '@/features/billing/billing-config';
 import {
   disconnectRevenueCatIdentity,
   hasRevenueCatApiKey,
-  isPurchaseCancellation,
   loadRevenueCatSnapshot,
+  openRevenueCatCustomerManagement,
   purchaseRevenueCatPackage,
   restoreRevenueCatPurchases,
   revenueCatCustomerHasPro,
+  revenueCatCustomerManagementUrl,
   subscribeToRevenueCat,
 } from '@/features/billing/revenuecat-client';
 
-const MOCK_PACKAGE: BillingPackage = {
-  identifier: 'mock_pro',
-  title: 'GlideLingo Pro preview',
-  description: 'Preview Pro locally with the explicit development-only mock setting.',
-  priceLabel: 'Mock purchase',
+const MOCK_PACKAGES: BillingPackage[] = [
+  {
+    identifier: 'mock_pro_monthly',
+    interval: 'monthly',
+    title: 'Monthly Pro preview',
+    description: 'Preview monthly tutor access with the development-only mock setting.',
+    priceLabel: 'Mock monthly',
+  },
+  {
+    identifier: 'mock_pro_annual',
+    interval: 'annual',
+    title: 'Annual Pro preview',
+    description: 'Preview annual tutor access with the development-only mock setting.',
+    priceLabel: 'Mock annual',
+  },
+];
+
+const IDLE_PURCHASE: BillingPurchaseState = {
+  packageIdentifier: null,
+  status: 'idle',
+  message: null,
 };
+
+const IDLE_MANAGEMENT: BillingManagementState = { status: 'idle', message: null };
 
 type BillingState = {
   ownerUserId: string | null;
   mode: BillingMode;
   status: BillingStatus;
   packages: BillingPackage[];
+  managementUrl: string | null;
+  purchaseState: BillingPurchaseState;
+  managementState: BillingManagementState;
   errorMessage: string | null;
 };
 
@@ -47,6 +72,7 @@ type BillingContextValue = Omit<BillingState, 'ownerUserId'> & {
   purchase: (identifier: string) => Promise<void>;
   refresh: () => Promise<void>;
   restore: () => Promise<void>;
+  manage: () => Promise<void>;
   resetMockAccess: () => void;
 };
 
@@ -72,6 +98,9 @@ function emptyState(userId: string | null, mode = modeForEnvironment()): Billing
     mode,
     status: unavailable ? 'error' : userId ? 'loading' : 'signed-out',
     packages: [],
+    managementUrl: null,
+    purchaseState: IDLE_PURCHASE,
+    managementState: IDLE_MANAGEMENT,
     errorMessage: unavailable
       ? 'Subscriptions are unavailable because this build has no RevenueCat key.'
       : null,
@@ -115,7 +144,10 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
         ownerUserId,
         mode,
         status: 'free',
-        packages: [MOCK_PACKAGE],
+        packages: MOCK_PACKAGES,
+        managementUrl: null,
+        purchaseState: IDLE_PURCHASE,
+        managementState: IDLE_MANAGEMENT,
         errorMessage: null,
       });
       return;
@@ -132,6 +164,9 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
           mode: 'revenuecat',
           status: snapshot.isPro ? 'pro' : 'free',
           packages: snapshot.packages,
+          managementUrl: snapshot.managementUrl,
+          purchaseState: IDLE_PURCHASE,
+          managementState: IDLE_MANAGEMENT,
           errorMessage: null,
         });
 
@@ -141,6 +176,7 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
             ...current,
             ownerUserId,
             status: revenueCatCustomerHasPro(customerInfo) ? 'pro' : 'free',
+            managementUrl: revenueCatCustomerManagementUrl(customerInfo),
             errorMessage: null,
           }));
         });
@@ -152,6 +188,9 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
           mode: 'revenuecat',
           status: 'error',
           packages: [],
+          managementUrl: null,
+          purchaseState: IDLE_PURCHASE,
+          managementState: IDLE_MANAGEMENT,
           errorMessage: errorText(error),
         });
       }
@@ -168,13 +207,19 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
 
   const applySnapshot = useCallback((ownerUserId: string, snapshot: BillingSnapshot) => {
     if (userIdRef.current !== ownerUserId) return;
-    setState({
-      ownerUserId,
-      mode: 'revenuecat',
-      status: snapshot.isPro ? 'pro' : 'free',
-      packages: snapshot.packages,
-      errorMessage: null,
-    });
+    setState((current) =>
+      current.ownerUserId === ownerUserId
+        ? {
+            ...current,
+            ownerUserId,
+            mode: 'revenuecat',
+            status: snapshot.isPro ? 'pro' : 'free',
+            packages: snapshot.packages,
+            managementUrl: snapshot.managementUrl,
+            errorMessage: null,
+          }
+        : current,
+    );
   }, []);
 
   const refresh = useCallback(async () => {
@@ -188,7 +233,8 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
         ownerUserId,
         mode,
         status: current.ownerUserId === ownerUserId && current.status === 'pro' ? 'pro' : 'free',
-        packages: [MOCK_PACKAGE],
+        packages: MOCK_PACKAGES,
+        purchaseState: IDLE_PURCHASE,
         errorMessage: null,
       }));
       return;
@@ -198,7 +244,15 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
       return;
     }
 
-    setState((current) => ({ ...current, ownerUserId, mode, status: 'loading', errorMessage: null }));
+    setState((current) => ({
+      ...current,
+      ownerUserId,
+      mode,
+      status: 'loading',
+      purchaseState: IDLE_PURCHASE,
+      managementState: IDLE_MANAGEMENT,
+      errorMessage: null,
+    }));
     try {
       applySnapshot(ownerUserId, await loadRevenueCatSnapshot(ownerUserId));
     } catch (error) {
@@ -212,10 +266,25 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
       const ownerUserId = userIdRef.current;
       if (!ownerUserId) return;
 
-      setState((current) => ({ ...current, ownerUserId, status: 'loading', errorMessage: null }));
+      setState((current) => ({
+        ...current,
+        ownerUserId,
+        purchaseState: { packageIdentifier: identifier, status: 'loading', message: null },
+        errorMessage: null,
+      }));
       const mode = modeForEnvironment();
       if (mode === 'mock') {
-        setState((current) => ({ ...current, ownerUserId, status: 'pro', errorMessage: null }));
+        setState((current) => ({
+          ...current,
+          ownerUserId,
+          status: 'pro',
+          purchaseState: {
+            packageIdentifier: identifier,
+            status: 'success',
+            message: 'Mock Pro tutor assistance is active for this local session.',
+          },
+          errorMessage: null,
+        }));
         return;
       }
       if (mode === 'unavailable') {
@@ -224,17 +293,38 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
       }
 
       try {
-        applySnapshot(ownerUserId, await purchaseRevenueCatPackage(ownerUserId, identifier));
+        const snapshot = await purchaseRevenueCatPackage(ownerUserId, identifier);
+        if (userIdRef.current !== ownerUserId) return;
+        applySnapshot(ownerUserId, snapshot);
+        setState((current) =>
+          current.ownerUserId === ownerUserId && userIdRef.current === ownerUserId
+            ? {
+                ...current,
+                purchaseState: {
+                  packageIdentifier: identifier,
+                  status: snapshot.isPro ? 'success' : 'error',
+                  message: snapshot.isPro
+                    ? 'Pro tutor assistance is active.'
+                    : 'Checkout finished, but Pro is not active yet. Refresh access before trying again.',
+                },
+              }
+            : current,
+        );
       } catch (error) {
         if (userIdRef.current !== ownerUserId) return;
-        if (isPurchaseCancellation(error)) {
-          await refresh();
-          return;
-        }
-        setState((current) => ({ ...current, ownerUserId, status: 'error', errorMessage: errorText(error) }));
+        const failure = classifyPurchaseFailure(error);
+        setState((current) =>
+          current.ownerUserId === ownerUserId && userIdRef.current === ownerUserId
+            ? {
+                ...current,
+                ownerUserId,
+                purchaseState: { ...failure, packageIdentifier: identifier },
+              }
+            : current,
+        );
       }
     },
-    [applySnapshot, refresh],
+    [applySnapshot],
   );
 
   const restore = useCallback(async () => {
@@ -260,6 +350,62 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
     }
   }, [applySnapshot]);
 
+  const manage = useCallback(async () => {
+    const ownerUserId = userIdRef.current;
+    if (!ownerUserId) return;
+
+    const mode = modeForEnvironment();
+    if (mode !== 'revenuecat') {
+      setState((current) => ({
+        ...current,
+        managementState: {
+          status: 'unavailable',
+          message: mode === 'mock'
+            ? 'Subscription management is not available for local mock access.'
+            : 'Subscription management is unavailable because billing is not configured.',
+        },
+      }));
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      managementState: { status: 'loading', message: null },
+    }));
+
+    try {
+      const result = await openRevenueCatCustomerManagement(ownerUserId);
+      if (userIdRef.current !== ownerUserId) return;
+      applySnapshot(ownerUserId, result.snapshot);
+      setState((current) =>
+        current.ownerUserId === ownerUserId && userIdRef.current === ownerUserId
+          ? {
+              ...current,
+              managementState: result.opened
+                ? { status: 'opened', message: 'Subscription management opened securely.' }
+                : {
+                    status: 'unavailable',
+                    message: 'No management portal is available for this subscription. Refresh access or contact support.',
+                  },
+            }
+          : current,
+      );
+    } catch {
+      if (userIdRef.current !== ownerUserId) return;
+      setState((current) =>
+        current.ownerUserId === ownerUserId && userIdRef.current === ownerUserId
+          ? {
+              ...current,
+              managementState: {
+                status: 'error',
+                message: 'Subscription management could not be opened. Refresh access and try again.',
+              },
+            }
+          : current,
+      );
+    }
+  }, [applySnapshot]);
+
   const resetMockAccess = useCallback(() => {
     const ownerUserId = userIdRef.current;
     if (!ownerUserId || modeForEnvironment() !== 'mock') return;
@@ -267,7 +413,10 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
       ownerUserId,
       mode: 'mock',
       status: 'free',
-      packages: [MOCK_PACKAGE],
+      packages: MOCK_PACKAGES,
+      managementUrl: null,
+      purchaseState: IDLE_PURCHASE,
+      managementState: IDLE_MANAGEMENT,
       errorMessage: null,
     });
   }, []);
@@ -281,13 +430,17 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
       status: visibleState.status,
       isPro: visibleState.status === 'pro',
       packages: visibleState.packages,
+      managementUrl: visibleState.managementUrl,
+      purchaseState: visibleState.purchaseState,
+      managementState: visibleState.managementState,
       errorMessage: visibleState.errorMessage,
+      manage,
       purchase,
       refresh,
       restore,
       resetMockAccess,
     }),
-    [purchase, refresh, resetMockAccess, restore, visibleState],
+    [manage, purchase, refresh, resetMockAccess, restore, visibleState],
   );
 
   return <BillingContext.Provider value={value}>{children}</BillingContext.Provider>;

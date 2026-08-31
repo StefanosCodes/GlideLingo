@@ -102,13 +102,13 @@ variable "revenuecat_enabled" {
 }
 
 variable "revenuecat_environment" {
-  description = "RevenueCat purchase environment accepted by the development entitlement boundary."
+  description = "RevenueCat sandbox purchase environment accepted by the development entitlement boundary."
   type        = string
   default     = "SANDBOX"
 
   validation {
-    condition     = contains(["SANDBOX", "PRODUCTION"], var.revenuecat_environment)
-    error_message = "RevenueCat environment must be SANDBOX or PRODUCTION."
+    condition     = var.revenuecat_environment == "SANDBOX"
+    error_message = "The development platform may only use the RevenueCat SANDBOX environment."
   }
 }
 

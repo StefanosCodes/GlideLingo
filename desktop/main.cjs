@@ -7,29 +7,28 @@ const { app, BrowserWindow, net, protocol, session, shell } = require('electron'
 const {
   APP_HOST,
   APP_SCHEME,
+  buildContentSecurityPolicy,
+  findAuthCallbackUrl,
+  isAllowedAuthWindowUrl,
   isAllowedNavigation,
+  isExactAppUrl,
   isSafeExternalUrl,
+  parseAuthCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
 } = require('./runtime.cjs');
 
 const DEVELOPMENT_URL = validateDevelopmentUrl(process.env.ELECTRON_RENDERER_URL);
-const AUDIO_SMOKE_TEST = process.env.ELECTRON_AUDIO_SMOKE_TEST === '1';
 const PRODUCTION_URL = `${APP_SCHEME}://${APP_HOST}/`;
 const RENDERER_URL = DEVELOPMENT_URL ?? PRODUCTION_URL;
-const CONTENT_SECURITY_POLICY = [
-  "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "font-src 'self' data:",
-  "connect-src 'self'",
-  "media-src 'self' data: blob:",
-  "object-src 'none'",
-  "frame-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-].join('; ');
+const CONTENT_SECURITY_POLICY = buildContentSecurityPolicy();
+let mainWindow = null;
+let pendingAuthCallbackUrl = findAuthCallbackUrl(process.argv);
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -45,10 +44,6 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 app.enableSandbox();
-
-if (AUDIO_SMOKE_TEST) {
-  app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
-}
 
 async function registerProductionProtocol() {
   const distDirectory = app.isPackaged
@@ -88,7 +83,7 @@ function installSessionSecurity() {
 
   if (!DEVELOPMENT_URL) {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-      if (!details.url.startsWith(PRODUCTION_URL)) {
+      if (!isExactAppUrl(details.url)) {
         callback({ responseHeaders: details.responseHeaders });
         return;
       }
@@ -109,6 +104,22 @@ function openExternalUrl(targetUrl) {
   }
 }
 
+function handleAuthCallback(targetUrl) {
+  const callbackUrl = parseAuthCallbackUrl(targetUrl);
+  if (!callbackUrl) return false;
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    pendingAuthCallbackUrl = callbackUrl;
+    return true;
+  }
+
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  void mainWindow.loadURL(callbackUrl);
+  return true;
+}
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1280,
@@ -127,8 +138,32 @@ function createWindow() {
   });
 
   window.once('ready-to-show', () => window.show());
+  mainWindow = window;
+  window.once('closed', () => {
+    if (mainWindow === window) mainWindow = null;
+  });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedAuthWindowUrl(url)) {
+      if (!DEVELOPMENT_URL) {
+        openExternalUrl(url);
+        return { action: 'deny' };
+      }
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          autoHideMenuBar: true,
+          parent: window,
+          webPreferences: {
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+            webSecurity: true,
+          },
+        },
+      };
+    }
+
     openExternalUrl(url);
     return { action: 'deny' };
   });
@@ -146,17 +181,22 @@ function createWindow() {
     window.webContents.once('did-finish-load', () => {
       setTimeout(async () => {
         try {
-          const rendered = await window.webContents.executeJavaScript(
-            "Boolean(document.querySelector('[data-testid=\"start-lesson\"]'))",
-          );
+          const rendered = await window.webContents.executeJavaScript(`({
+            authenticated: Boolean(document.querySelector('[data-testid="start-lesson"]')),
+            completingProfile: Boolean(document.querySelector('[data-testid="first-name-completion"]')),
+            signedOut: Boolean(document.querySelector('[data-testid="auth-sign-in"]')),
+          })`);
 
-          if (!rendered) {
-            console.error('[desktop-smoke] renderer loaded without the home screen');
+          if (!rendered.authenticated && !rendered.completingProfile && !rendered.signedOut) {
+            console.error('[desktop-smoke] renderer loaded without a valid signed-in or signed-out screen');
             app.exit(1);
             return;
           }
 
-          console.log(`[desktop-smoke] loaded ${window.webContents.getURL()}`);
+          console.log(
+            `[desktop-smoke] loaded ${rendered.signedOut ? 'signed-out' : 'authenticated'} state at ` +
+              window.webContents.getURL(),
+          );
           app.quit();
         } catch (error) {
           console.error('[desktop-smoke] renderer verification failed:', error);
@@ -169,73 +209,40 @@ function createWindow() {
       console.error(`[desktop-smoke] load failed (${code}): ${description}`);
       app.exit(1);
     });
-  } else if (AUDIO_SMOKE_TEST) {
-    let learningStatePrepared = false;
-
-    window.webContents.on('did-finish-load', () => {
-      if (!learningStatePrepared) {
-        learningStatePrepared = true;
-        void window.webContents
-          .executeJavaScript(
-            `localStorage.setItem('glidelingo-learning', JSON.stringify({
-              languageId: 'el',
-              enrolledByLanguage: { el: 'el-from-zero' },
-              completedLessonIds: []
-            }))`,
-          )
-          .then(() => window.reload());
-        return;
-      }
-
-      setTimeout(async () => {
-        try {
-          const playbackResult = await window.webContents.executeJavaScript(`(async () => {
-            const lessonButton = document.querySelector('[data-testid="start-lesson"]');
-            const initialLabel = lessonButton?.getAttribute('aria-label') ?? lessonButton?.textContent ?? null;
-            lessonButton?.click();
-            let button;
-            for (let attempt = 0; attempt < 30; attempt += 1) {
-              button = Array.from(document.querySelectorAll('[aria-label]')).find(
-                (element) => (element.getAttribute('aria-label') ?? '').startsWith('Play pronunciation:'),
-              );
-              if (button) break;
-              await new Promise((resolve) => setTimeout(resolve, 100));
-            }
-            button?.click();
-            const pronunciationStates = [];
-            for (const delay of [10, 50, 100, 250, 750]) {
-              await new Promise((resolve) => setTimeout(resolve, delay));
-              pronunciationStates.push(button?.textContent ?? null);
-            }
-            return {
-              initialLabel,
-              pronunciationFound: Boolean(button),
-              pronunciationText: button?.textContent ?? null,
-              pronunciationStates,
-              playing: pronunciationStates.some((state) => state?.includes('Playing')),
-            };
-          })()`);
-
-          if (!playbackResult.playing) {
-            console.error('[desktop-audio-smoke] pronunciation did not enter the playing state', playbackResult);
-            app.exit(1);
-            return;
-          }
-
-          console.log(`[desktop-audio-smoke] bundled Greek audio played from ${window.webContents.getURL()}`);
-          app.quit();
-        } catch (error) {
-          console.error('[desktop-audio-smoke] playback verification failed:', error);
-          app.exit(1);
-        }
-      }, 1000);
-    });
   }
 
   void window.loadURL(RENDERER_URL);
+
+  if (pendingAuthCallbackUrl) {
+    const callbackUrl = pendingAuthCallbackUrl;
+    pendingAuthCallbackUrl = null;
+    window.webContents.once('did-finish-load', () => handleAuthCallback(callbackUrl));
+  }
 }
 
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleAuthCallback(url);
+});
+
+app.on('second-instance', (_event, argv) => {
+  const callbackUrl = findAuthCallbackUrl(argv);
+  if (callbackUrl) {
+    handleAuthCallback(callbackUrl);
+    return;
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+});
+
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return;
+  if (app.isPackaged) {
+    app.setAsDefaultProtocolClient(APP_SCHEME);
+  }
   if (!DEVELOPMENT_URL) {
     await registerProductionProtocol();
   }

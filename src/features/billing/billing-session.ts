@@ -1,7 +1,6 @@
 export type RevenueCatIdentityAdapter = {
   configure: (apiKey: string, appUserId: string) => void | Promise<void>;
   logIn: (appUserId: string) => void | Promise<void>;
-  logOut: () => void | Promise<void>;
 };
 
 /**
@@ -12,7 +11,6 @@ export class RevenueCatIdentitySession {
   private readonly adapter: RevenueCatIdentityAdapter;
   private activeUserId: string | null = null;
   private configured = false;
-  private hasIdentifiedSession = false;
   private transitionTail: Promise<void> = Promise.resolve();
 
   constructor(adapter: RevenueCatIdentityAdapter) {
@@ -49,7 +47,6 @@ export class RevenueCatIdentitySession {
     if (!this.configured) {
       await this.adapter.configure(normalizedKey, normalizedUserId);
       this.configured = true;
-      this.hasIdentifiedSession = true;
       this.activeUserId = normalizedUserId;
       return;
     }
@@ -58,28 +55,18 @@ export class RevenueCatIdentitySession {
 
     // Hide the previous owner before the asynchronous identity switch begins.
     this.activeUserId = null;
-    if (this.hasIdentifiedSession) {
-      await this.adapter.logOut();
-      this.hasIdentifiedSession = false;
-    }
+    // Switch custom Clerk identities directly. RevenueCat logOut() creates a new
+    // anonymous App User ID, which is unnecessary for an account-only product.
     await this.adapter.logIn(normalizedUserId);
-    this.hasIdentifiedSession = true;
     this.activeUserId = normalizedUserId;
   }
 
   disconnect() {
-    return this.enqueue(async () => {
+    return this.enqueue(() => {
+      // Clear the logical owner and visible state without creating an anonymous
+      // RevenueCat alias. The next authenticated account is selected via logIn().
       this.activeUserId = null;
-      if (!this.configured || !this.hasIdentifiedSession) return;
-
-      try {
-        await this.adapter.logOut();
-        this.hasIdentifiedSession = false;
-      } catch (error) {
-        // Keep the session marked as identified so a later disconnect retries instead
-        // of assuming it is safe to expose another account's state.
-        throw error;
-      }
+      return Promise.resolve();
     });
   }
 

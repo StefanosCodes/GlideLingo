@@ -40,3 +40,43 @@ variable "bootstrap_image" {
   type        = string
   default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }
+
+variable "clerk_issuer" {
+  description = "Exact public Clerk development issuer used to validate session JWTs."
+  type        = string
+  default     = "https://vast-gator-9531.clerk.accounts.dev"
+
+  validation {
+    condition     = can(regex("^https://[a-z0-9-]+\\.clerk\\.accounts\\.dev$", var.clerk_issuer))
+    error_message = "The development Clerk issuer must be an exact HTTPS clerk.accounts.dev origin."
+  }
+}
+
+variable "clerk_jwks_url" {
+  description = "Public Clerk JWKS endpoint paired with the development issuer."
+  type        = string
+  default     = "https://vast-gator-9531.clerk.accounts.dev/.well-known/jwks.json"
+
+  validation {
+    condition     = var.clerk_jwks_url == "${var.clerk_issuer}/.well-known/jwks.json"
+    error_message = "The Clerk JWKS URL must be the well-known endpoint for clerk_issuer."
+  }
+}
+
+variable "clerk_authorized_parties" {
+  description = "Exact authorized-party origins accepted when a Clerk token contains azp."
+  type        = list(string)
+  default = [
+    "http://localhost:8081",
+    "http://127.0.0.1:8081",
+    "glidelingo://app",
+  ]
+
+  validation {
+    condition = length(var.clerk_authorized_parties) > 0 && alltrue([
+      for party in var.clerk_authorized_parties :
+      party == "glidelingo://app" || can(regex("^https?://[^/?#]+$", party))
+    ])
+    error_message = "Clerk authorized parties must contain exact HTTP(S) origins or glidelingo://app."
+  }
+}

@@ -248,6 +248,21 @@ resource "google_cloud_run_v2_service" "api" {
         value = "0"
       }
 
+      env {
+        name  = "GLIDELINGO_CLERK_ISSUER"
+        value = var.clerk_issuer
+      }
+
+      env {
+        name  = "GLIDELINGO_CLERK_JWKS_URL"
+        value = var.clerk_jwks_url
+      }
+
+      env {
+        name  = "GLIDELINGO_CLERK_AUTHORIZED_PARTIES"
+        value = jsonencode(var.clerk_authorized_parties)
+      }
+
       volume_mounts {
         name       = "cloudsql"
         mount_path = "/cloudsql"

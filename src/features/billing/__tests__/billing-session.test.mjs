@@ -12,9 +12,6 @@ function fakeSession() {
     logIn(appUserId) {
       calls.push(['logIn', appUserId]);
     },
-    logOut() {
-      calls.push(['logOut']);
-    },
   });
   return { calls, session };
 }
@@ -35,13 +32,12 @@ test('switches accounts without reusing or reconfiguring the first identity', as
 
   assert.deepEqual(calls, [
     ['configure', 'public_key', 'user_a'],
-    ['logOut'],
     ['logIn', 'user_b'],
   ]);
   assert.equal(session.currentUserId(), 'user_b');
 });
 
-test('logs out the identified RevenueCat user and supports a later account', async () => {
+test('disconnects visible ownership without creating an anonymous RevenueCat alias', async () => {
   const { calls, session } = fakeSession();
   await session.connect('public_key', 'user_a');
   await session.disconnect();
@@ -49,7 +45,6 @@ test('logs out the identified RevenueCat user and supports a later account', asy
 
   assert.deepEqual(calls, [
     ['configure', 'public_key', 'user_a'],
-    ['logOut'],
     ['logIn', 'user_b'],
   ]);
   assert.equal(session.currentUserId(), 'user_b');
@@ -69,9 +64,6 @@ test('serializes a rapid account switch and sign-out in request order', async ()
       calls.push(['logIn', appUserId]);
       await loginBlocked;
     },
-    logOut() {
-      calls.push(['logOut']);
-    },
   });
 
   await session.connect('public_key', 'user_a');
@@ -82,9 +74,7 @@ test('serializes a rapid account switch and sign-out in request order', async ()
 
   assert.deepEqual(calls, [
     ['configure', 'user_a'],
-    ['logOut'],
     ['logIn', 'user_b'],
-    ['logOut'],
   ]);
   assert.equal(session.currentUserId(), null);
 });
@@ -116,7 +106,6 @@ test('keeps a purchase operation on its owner before processing sign-out', async
     ['configure', 'public_key', 'user_a'],
     ['purchase:start', 'user_a'],
     ['purchase:end', 'user_a'],
-    ['logOut'],
   ]);
   assert.equal(session.currentUserId(), null);
 });

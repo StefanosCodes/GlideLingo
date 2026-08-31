@@ -154,8 +154,10 @@ than create a second copy.
 
 ### Boundaries for later integrations and environments
 
-- Clerk, RevenueCat, and OpenAI are separate application-integration changes. Store their server
-  secrets in Secret Manager and expose them only to the API components that require them.
+- Clerk JWT verification is configured on Cloud Run with the public development issuer, JWKS URL,
+  and exact authorized-party origins. These values are not secrets. RevenueCat and OpenAI server
+  credentials remain separate application-integration changes; store those secrets in Secret
+  Manager and expose them only to the API components that require them.
 - Do not add workers, queues, media storage, or additional services until a product feature needs
   them.
 - The current bootstrap script intentionally refuses any project except
@@ -190,9 +192,11 @@ gcloud run services update-traffic glidelingo-api \
 
 Use the `api_url` Terraform output as `EXPO_PUBLIC_API_BASE_URL` for development builds.
 
-## Future integration contracts
+## Integration contracts
 
-- Clerk: add a Clerk secret and FastAPI token verification; do not make Cloud Run private.
+- Clerk: FastAPI verifies standard Clerk session tokens from the public JWKS endpoint; no Clerk
+  secret key is required for this verifier. Keep Cloud Run publicly invokable so the application
+  can reach it, and enforce authentication inside FastAPI on protected routes.
 - RevenueCat: add an authenticated, idempotent webhook endpoint and its signing secret.
 - OpenAI tutor: add the OpenAI API key in Secret Manager and mount it only into the API.
 - Workers and media: add Cloud Tasks and private Cloud Storage only when durable speech work

@@ -1,11 +1,13 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 
+import { resolvePlaywrightServerConfig } from '../scripts/playwright-server-config.mjs';
+
 const downloadUrl =
   'https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/GlideLingo-0.1.0-universal.dmg';
 const checksumUrl =
   'https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/SHA256SUMS.txt';
-const testOrigin = `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? '4322'}`;
+const { origin: testOrigin } = resolvePlaywrightServerConfig();
 
 test('renders the complete landing page without third-party requests or horizontal overflow', async ({ page }) => {
   /** @type {string[]} */

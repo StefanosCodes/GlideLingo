@@ -28,6 +28,7 @@ URL is not authorization to learner data.
 ## What Terraform creates
 
 - required Google Cloud APIs;
+- Cloud Build API support for the first in-project container build;
 - a private Artifact Registry Docker repository;
 - the Cloud Run runtime service account;
 - a least-privilege GitHub deployment service account and OIDC trust restricted to

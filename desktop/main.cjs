@@ -11,11 +11,11 @@ const {
   PRODUCTION_CLERK_ORIGIN,
   buildContentSecurityPolicy,
   findAuthCallbackUrl,
-  isAllowedAuthPopupNavigation,
   isAllowedAuthWindowUrl,
   isAllowedNavigation,
   isExactAppUrl,
   isSafeExternalUrl,
+  installAuthPopupNavigationSecurity,
   parseAuthCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
@@ -149,13 +149,10 @@ function authPopupWindowOptions(parent) {
 }
 
 function installAuthPopupSecurity(authWindow, parent) {
-  authWindow.webContents.on('will-navigate', (event, url) => {
-    if (isAllowedAuthPopupNavigation(url, RENDERER_URL, PACKAGED_CLERK_ORIGIN)) {
-      return;
-    }
-
-    event.preventDefault();
-    openExternalUrl(url);
+  installAuthPopupNavigationSecurity(authWindow.webContents, {
+    rendererUrl: RENDERER_URL,
+    clerkOrigin: PACKAGED_CLERK_ORIGIN,
+    openExternalUrl,
   });
 
   authWindow.webContents.setWindowOpenHandler(({ url }) => {

@@ -5,6 +5,8 @@ const APP_HOST = 'app';
 const DEVELOPMENT_PORT = '8081';
 const PRODUCTION_API_ORIGIN = 'https://glidelingo-api-50843312405.us-west1.run.app';
 const PRODUCTION_CLERK_ORIGIN = 'https://vast-gator-9531.clerk.accounts.dev';
+const REVENUECAT_WEB_SDK_ORIGIN = 'https://sdk.revenuecat-static.com';
+const REVENUECAT_BRANDING_ORIGIN = 'https://da08ctfrofx1b.cloudfront.net';
 const AUTH_CALLBACK_PATHS = new Set(['/sign-in', '/sso-callback']);
 const STATIC_AUTH_PROVIDER_ORIGINS = new Set([
   'https://accounts.google.com',
@@ -38,11 +40,11 @@ function buildContentSecurityPolicy({
 
   return [
     "default-src 'self'",
-    `script-src 'self' 'unsafe-inline' ${exactClerkOrigin} https://challenges.cloudflare.com https://*.protect.clerk.com https://js.stripe.com https://cdn.paddle.com`,
+    `script-src 'self' 'unsafe-inline' ${exactClerkOrigin} https://challenges.cloudflare.com https://*.protect.clerk.com ${REVENUECAT_WEB_SDK_ORIGIN} https://js.stripe.com https://cdn.paddle.com`,
     "style-src 'self' 'unsafe-inline'",
-    `img-src 'self' data: blob: ${exactClerkOrigin} https://img.clerk.com https://*.clerk.com https://*.stripe.com https://*.paddle.com https://*.revenuecat.com`,
-    "font-src 'self' data:",
-    `connect-src 'self' ${exactApiOrigin} ${exactClerkOrigin} https://api.clerk.com https://*.protect.clerk.com:* https://api.revenuecat.com https://e.revenue.cat https://sdk.revenuecat-static.com https://*.stripe.com https://*.paddle.com wss://${new URL(exactClerkOrigin).hostname}`,
+    `img-src 'self' data: blob: ${exactClerkOrigin} https://img.clerk.com https://*.clerk.com ${REVENUECAT_BRANDING_ORIGIN} https://*.stripe.com https://*.paddle.com https://*.revenuecat.com`,
+    `font-src 'self' data: ${REVENUECAT_BRANDING_ORIGIN}`,
+    `connect-src 'self' ${exactApiOrigin} ${exactClerkOrigin} https://api.clerk.com https://*.protect.clerk.com:* https://api.revenuecat.com https://e.revenue.cat ${REVENUECAT_WEB_SDK_ORIGIN} https://*.stripe.com https://*.paddle.com wss://${new URL(exactClerkOrigin).hostname}`,
     "media-src 'self' data: blob:",
     "object-src 'none'",
     `frame-src ${exactClerkOrigin} https://accounts.google.com https://appleid.apple.com https://challenges.cloudflare.com https://*.protect.clerk.com https://js.stripe.com https://hooks.stripe.com https://*.paddle.com`,
@@ -251,6 +253,21 @@ function isAllowedAuthPopupNavigation(
   }
 }
 
+function installAuthPopupNavigationSecurity(
+  webContents,
+  { rendererUrl, clerkOrigin = PRODUCTION_CLERK_ORIGIN, openExternalUrl },
+) {
+  const enforceAllowlist = (event, targetUrl) => {
+    if (isAllowedAuthPopupNavigation(targetUrl, rendererUrl, clerkOrigin)) return;
+
+    event.preventDefault();
+    openExternalUrl(targetUrl);
+  };
+
+  webContents.on('will-navigate', enforceAllowlist);
+  webContents.on('will-redirect', enforceAllowlist);
+}
+
 function parseAuthCallbackUrl(targetUrl) {
   if (typeof targetUrl !== 'string' || targetUrl.length > 4096) return null;
 
@@ -295,6 +312,8 @@ module.exports = {
   APP_SCHEME,
   PRODUCTION_API_ORIGIN,
   PRODUCTION_CLERK_ORIGIN,
+  REVENUECAT_BRANDING_ORIGIN,
+  REVENUECAT_WEB_SDK_ORIGIN,
   buildContentSecurityPolicy,
   findAuthCallbackUrl,
   isAllowedAuthPopupNavigation,
@@ -302,6 +321,7 @@ module.exports = {
   isAllowedNavigation,
   isExactAppUrl,
   isSafeExternalUrl,
+  installAuthPopupNavigationSecurity,
   parseAuthCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,

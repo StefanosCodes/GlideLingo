@@ -90,9 +90,11 @@ explicitly.
 
 ## Delegate only independent evidence work
 
-The primary agent frames the dependency graph before delegation and normally uses no more than
-three concurrent subagents. Give each agent a bounded objective, exact PRs or files, intended base,
-known constraints, evidence required, output format, and done condition.
+Before delegation, the primary agent identifies the candidate set, known facts, and unresolved
+relationship questions. It normally uses no more than three concurrent subagents, then evaluates
+their evidence and finalizes the dependency graph itself. Give each agent a bounded objective,
+exact PRs or files, intended base, known constraints, evidence required, output format, and done
+condition.
 
 Good parallel workstreams are:
 
@@ -166,7 +168,8 @@ Return:
 1. an as-of timestamp and immutable head SHAs;
 2. a queue board with readiness axes, dependencies, overlaps, blockers, and next action;
 3. a dependency DAG and proposed merge waves;
-4. parallel review assignments and their join point;
+4. parallel review assignments and their join point when delegation materially helps, otherwise
+   `none`;
 5. per-merge gates and verification commands;
 6. decisions or approvals still needed;
 7. after execution, the merge/deployment evidence and remaining enablement gates.

@@ -132,8 +132,17 @@ ignores events from the other store environment.
 `GET /v1/billing/entitlements/pro` requires a valid Clerk session. It returns only the authenticated
 principal's server view and reconciles missing or stale state through RevenueCat's server API with a
 bounded timeout. Active state is fresh for 15 minutes by default. Missing, expired, stale, provider-
-unavailable, or database-unavailable state always fails closed. The paid tutor route returns the
-stable `403 pro_required` error before creating a guard row or calling the private tutor.
+unavailable, or database-unavailable state always fails closed. After checkout, restore, or an explicit
+refresh, the client calls authenticated `POST /v1/billing/entitlements/pro/reconcile` with no body. That
+endpoint bypasses a fresh inactive cache and asks RevenueCat for the verified Clerk principal's current
+state; it never accepts an app-user ID or entitlement assertion from the renderer. RevenueCat
+`CustomerInfo` updates may refresh package and management metadata, but they cannot grant tutor access
+without this server confirmation.
+
+The paid tutor route returns `403 pro_required` only for a fresh, verified inactive entitlement. Stale,
+disabled, provider-unavailable, or database-unavailable billing state returns `503 billing_unavailable`.
+Tutor availability is checked first, so an unavailable tutor remains `503 lesson_tutor_unavailable`
+without performing billing or provider work.
 
 Apply `backend/migrations/002_revenuecat_entitlements.sql` with the migration operator and schedule
 `maintenance_revenuecat_webhooks.sql` with a separate delete-capable maintenance identity before
@@ -143,6 +152,8 @@ enabling this integration.
 
 - Apple App Store and Google Play billing products and prices.
 - Production RevenueCat Billing/Stripe web configuration, live prices, webhooks, and secret provisioning.
+- Per-actor and global protection for the forced reconciliation endpoint before enabling production
+  billing; its provider call is bounded but intentionally uncached so checkout can converge immediately.
 - Remote paywalls, analytics, trials, and launch copy.
 - Account deletion and subscription-management policy/copy required for store release.
 

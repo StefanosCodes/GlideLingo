@@ -116,6 +116,15 @@ export default function DesignKitScreen() {
         </GlideSurface>
       </Section>
 
+      <Section title="System wiring" detail="Verify the real client, API, and PostgreSQL path before debugging features.">
+        <GlideSurface padding="roomy" style={styles.controlStack}>
+          <ThemedText type="body" themeColor="textSecondary">
+            The diagnostics screen shows the resolved API origin, reachability, request ID, and database readiness.
+          </ThemedText>
+          <GlideButton fullWidth label="Open system diagnostics" onPress={() => router.push('/diagnostics')} />
+        </GlideSurface>
+      </Section>
+
       <Section title="Prompt suggestions" detail="Compact entry points, not oversized feature cards.">
         <View style={styles.suggestions}>
           {suggestionExamples.map((suggestion) => (

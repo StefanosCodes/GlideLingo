@@ -44,6 +44,19 @@
     "wait-on": "^9.1.0"
   },
   "scripts": {
+    "setup:backend": "uv sync --directory backend --locked --all-groups",
+    "db:config": "docker compose -f infra/compose.yaml config --quiet",
+    "db:up": "docker compose -f infra/compose.yaml up -d --wait db",
+    "db:down": "docker compose -f infra/compose.yaml down",
+    "db:logs": "docker compose -f infra/compose.yaml logs -f db",
+    "api": "uv run --directory backend --locked fastapi dev --host 0.0.0.0 --port 8123",
+    "api:lint": "uv run --directory backend --locked ruff check . && uv run --directory backend --locked ruff format --check .",
+    "api:typecheck": "uv run --directory backend --locked mypy app tests",
+    "api:test": "uv run --directory backend --locked pytest -m \"not integration\"",
+    "api:test:integration": "uv run --directory backend --locked pytest -m integration",
+    "api:verify": "npm run api:lint && npm run api:typecheck && npm run api:test",
+    "dev": "npm run db:up && concurrently --kill-others --success first \"npm:api\" \"npm:start\"",
+    "dev:desktop": "npm run db:up && concurrently --kill-others --success first \"npm:api\" \"npm:desktop\"",
     "start": "expo start",
     "start:clear": "expo start --clear",
     "reset-project": "node ./scripts/reset-project.js",
@@ -71,7 +84,8 @@
     "test:desktop": "node --test desktop/*.test.cjs",
     "lint": "expo lint",
     "verify": "npm run lint && npm run typecheck && npm test",
-    "verify:full": "npm run verify && npm run doctor && npm run desktop:export"
+    "verify:full": "npm run verify && npm run doctor && npm run desktop:export && npm run api:verify && npm run db:config",
+    "verify:full-stack": "npm run verify:full && npm run db:up && npm run api:test:integration"
   },
   "private": true
 }

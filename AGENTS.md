@@ -10,7 +10,7 @@
 
 - Expo SDK 57, React Native 0.86, Expo Router, and TypeScript power Android and iOS.
 - Electron securely packages the Expo web output for macOS desktop.
-- Routes live in `src/app`; shared UI lives in `src/components`; theme tokens in `src/constants/theme.ts`; Electron code lives in `desktop`.
+- Routes live in `src/app`; frontend features in `src/features`; the shared API boundary in `src/api`; Electron code in `desktop`; FastAPI in `backend`; and local PostgreSQL configuration in `infra`.
 - `docs/infra/README.md` is the source of truth for the future full-stack architecture, folder ownership, feature-development flow, operations, deployment, and implementation order.
 - Read the exact Expo SDK 57 documentation at https://docs.expo.dev/versions/v57.0.0/ before changing Expo APIs or configuration.
 
@@ -39,6 +39,12 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
 ## Canonical commands
 
 - Install exactly: `npm ci`
+- Install backend exactly: `npm run setup:backend`
+- Start PostgreSQL: `npm run db:up`
+- Stop PostgreSQL while preserving data: `npm run db:down`
+- Start FastAPI: `npm run api`
+- Start PostgreSQL, FastAPI, and interactive Expo: `npm run dev`
+- Start PostgreSQL, FastAPI, and Electron: `npm run dev:desktop`
 - Start interactive Expo/Metro: `npm start`
 - Start Android: `npm run android`
 - Start iOS: `npm run ios`
@@ -63,6 +69,8 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
 - Expo dependency or configuration changes: also run `npm run doctor`.
 - Electron runtime or packaging changes: also run `npm run test:desktop`, `npm run desktop:export`, and the relevant development or packaged smoke test.
 - Full release verification: run `npm run verify:full`.
+- Backend changes: run `npm run api:verify`.
+- Database readiness or Compose changes: also run `npm run verify:full-stack`.
 - Do not declare a runtime fix complete from lint or compilation alone; exercise the affected target.
 
 ## Debugging basic startup
@@ -83,5 +91,6 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
 
 ## Current scope
 
-- This repository currently contains the client applications only. There is no backend, database, worker, or deployment service yet.
-- When a backend is added, follow `docs/infra/` and document its actual setup, ports, migrations, health check, logs, and verification commands here. Expose canonical orchestration through npm scripts.
+- The repository contains the client applications plus a minimal FastAPI/PostgreSQL walking skeleton and internal diagnostics path.
+- The API owns only liveness and readiness today. There are no product tables, migrations, authentication, workers, generated clients, or production deployment services yet.
+- Use API port `8123` and loopback-bound PostgreSQL port `55433` unless an explicit local override is documented. Check port ownership before stopping any process.

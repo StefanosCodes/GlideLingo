@@ -12,11 +12,14 @@ The repository currently contains:
 - One Electron shell that packages the Expo web output as a macOS desktop app.
 - Shared TypeScript UI, routes, design tokens, and platform-specific component files.
 - Canonical npm commands, environment diagnostics, and Electron verification.
+- A minimal FastAPI service with process liveness and PostgreSQL readiness.
+- A loopback-only local PostgreSQL service managed by Docker Compose.
+- A centralized client API boundary and internal system-diagnostics feature.
+- Pull-request verification for both the client and backend boundaries.
 
 The repository does **not** currently contain:
 
-- FastAPI or other backend application code.
-- PostgreSQL, migrations, or persisted product data.
+- Product API modules, database tables, migrations, or persisted learner data.
 - Authentication or authorization.
 - A generated API client.
 - Background workers, Redis, or object storage.

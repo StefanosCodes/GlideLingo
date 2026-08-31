@@ -30,6 +30,8 @@ assert.match(home, /glidelingo-bird-black\.svg/);
 assert.match(home, /brand-name/);
 assert.match(home, /data-video-state="awaiting-source"/);
 assert.match(home, /Video coming soon/);
+assert.match(home, /<video[^>]+poster="\/images\/product-home\.png"/);
+assert.doesNotMatch(home, /<source[^>]+glidelingo-product-walkthrough\.mp4/);
 assert.match(home, /Download for Mac/);
 assert.match(home, /button-platform-icon/);
 assert.doesNotMatch(home, /Desktop apps|Choose your desktop|Download for Windows/);

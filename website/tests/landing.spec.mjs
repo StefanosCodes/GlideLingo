@@ -34,7 +34,13 @@ test('renders the complete landing page without third-party requests or horizont
   await expect(page.locator('.site-header nav')).toHaveCount(0);
   await expect(page.locator('main > section')).toHaveCount(2);
   await expect(page.locator('[data-video-state="awaiting-source"]')).toBeVisible();
-  await expect(page.getByLabel('Product demonstration video coming soon')).toBeVisible();
+  await expect(page.getByText('How it works', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('GlideLingo product walkthrough')).toHaveAttribute(
+    'poster',
+    '/images/product-home.png',
+  );
+  await expect(page.getByLabel('Product walkthrough video coming soon')).toBeVisible();
+  await expect(page.locator('.demo-player source')).toHaveCount(0);
   await expect(page.locator('.download-section')).toHaveCount(0);
   await expect(page.locator('body')).not.toContainText('Desktop apps');
   await expect(page.locator('.hero-actions .button-platform-icon')).toHaveCount(1);

@@ -6,7 +6,7 @@ This directory is the independently built, static marketing site for GlideLingo.
 
 The website self-hosts the Satoshi variable display font and composes its typographic lockup with the approved monochrome GlideLingo bird SVG. Satoshi is distributed by Fontshare under the ITF Free Font License preserved at `licenses/Satoshi-ITF-FFL.txt`. Inter remains the body and interface typeface. Production pages make no third-party font requests.
 
-The product-demo frame intentionally uses the current application screenshot and a visible `Video coming soon` state until an approved first-party MP4 or WebM is supplied. It must not be replaced with a third-party embed. The landing page has no desktop-apps section; it retains only the Mac hero CTA.
+The How-it-works section is a native, 16:9 video player that uses the current application screenshot as its poster. To activate playback, add both `public/videos/glidelingo-product-walkthrough.mp4` and an English caption file at `public/videos/glidelingo-product-walkthrough.vtt`. Until both files exist, the page safely displays `Video coming soon` without requesting missing media. It must not be replaced with a third-party embed. The landing page has no desktop-apps section; it retains only the Mac hero CTA.
 
 ## Local development
 

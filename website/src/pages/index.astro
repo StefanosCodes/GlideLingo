@@ -1,8 +1,18 @@
 ---
+import { existsSync } from 'node:fs';
+
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { resolveMacDownload } from '../lib/download-config.mjs';
 
 const download = resolveMacDownload(process.env);
+const productVideo = {
+  captions: '/videos/glidelingo-product-walkthrough.vtt',
+  poster: '/images/product-home.png',
+  src: '/videos/glidelingo-product-walkthrough.mp4',
+};
+const productVideoReady =
+  existsSync(new URL('../../public/videos/glidelingo-product-walkthrough.mp4', import.meta.url)) &&
+  existsSync(new URL('../../public/videos/glidelingo-product-walkthrough.vtt', import.meta.url));
 const description =
   'GlideLingo redesigns language learning around clear lessons, focused review, and a calm weekly rhythm you can keep.';
 ---
@@ -55,27 +65,54 @@ const description =
 
     <section class="product-showcase shell" id="demo" aria-labelledby="demo-heading">
       <div class="demo-intro">
-        <p class="eyebrow">Inside GlideLingo</p>
+        <p class="eyebrow">How it works</p>
         <h2 id="demo-heading">See the learning rhythm in motion.</h2>
-        <p>A calm, focused desktop experience from the first lesson to useful review.</p>
+        <p>Watch a short tour from your first lesson to focused review.</p>
       </div>
-      <figure class="product-frame" data-video-state="awaiting-source">
+      <figure class="product-frame" data-video-state={productVideoReady ? 'ready' : 'awaiting-source'}>
         <div class="window-bar" aria-hidden="true">
           <span></span><span></span><span></span>
         </div>
-        <div class="demo-poster">
-          <img
-            src="/images/product-home.png"
-            width="1440"
-            height="1000"
-            alt="GlideLingo showing the Greek Foundations course and its focused lesson path"
-          />
-          <div class="demo-status" aria-label="Product demonstration video coming soon">
-            <span class="demo-play" aria-hidden="true">▶</span>
-            <span><strong>Product walkthrough</strong>Video coming soon</span>
-          </div>
+        <div class="demo-player">
+          <video
+            controls={productVideoReady}
+            playsinline
+            poster={productVideo.poster}
+            preload="metadata"
+            aria-label="GlideLingo product walkthrough"
+          >
+            {
+              productVideoReady && (
+                <>
+                  <source src={productVideo.src} type="video/mp4" />
+                  <track
+                    default
+                    kind="captions"
+                    label="English"
+                    src={productVideo.captions}
+                    srclang="en"
+                  />
+                </>
+              )
+            }
+            Your browser does not support HTML video.
+          </video>
+          {
+            !productVideoReady && (
+              <div class="demo-status" aria-label="Product walkthrough video coming soon">
+                <span class="demo-play" aria-hidden="true">▶</span>
+                <span>
+                  <strong>Product walkthrough</strong>Video coming soon
+                </span>
+              </div>
+            )
+          }
         </div>
-        <figcaption>The live product walkthrough will play here once the final video is ready.</figcaption>
+        <figcaption>
+          {productVideoReady
+            ? 'A focused tour of lessons, practice, and review inside GlideLingo.'
+            : 'The player is ready for the final first-party product walkthrough.'}
+        </figcaption>
       </figure>
     </section>
 

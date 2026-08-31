@@ -37,7 +37,8 @@ to import or reject it; importing moves the legacy data into that Clerk user's s
 
 ## Release prerequisites
 
-1. Sign in to Expo EAS and create development builds; Expo Go cannot exercise the native Clerk and RevenueCat modules.
+1. The app is linked to `@stefanoscodes/glidelingo` in Expo EAS. Configure signing and create development builds; Expo Go
+   cannot exercise the native Clerk and RevenueCat modules.
 2. Add the Apple Developer Team ID / App ID Prefix to Clerk's iOS native application and enable Sign in with Apple for
    `com.stefanoscodes.glidelingo`.
 3. Add the Android signing SHA-256 fingerprint to Clerk once EAS creates the signing certificate.

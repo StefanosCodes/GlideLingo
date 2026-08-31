@@ -8,7 +8,7 @@
     "scheme": "glidelingo",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/images/icon.png"
     },
     "android": {
       "adaptiveIcon": {
@@ -28,6 +28,9 @@
       [
         "expo-splash-screen",
         {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
           "backgroundColor": "#F7F6F2",
           "dark": {
             "backgroundColor": "#050505"

@@ -11,6 +11,8 @@ GlideLingo's first desktop channel is a direct macOS download, not the Mac App S
 
 Expo exports the shared web renderer. Electron packages that renderer and restricts packaged API requests to the origin derived from `EXPO_PUBLIC_API_BASE_URL`. `npm run desktop:release` fails before packaging when production HTTPS or notarization configuration is missing, and electron-builder fails when it cannot produce a real Developer ID signature.
 
+The post-sign hook applies a final metadata-preserving signature to the combined universal bundle, verifies it, and only then invokes Apple's notarization service and staples the returned ticket. This preserves Electron's per-process entitlements while preventing an invalid universal signature from reaching Apple.
+
 ## One-time Apple setup
 
 Use the personal **Stefanos Sophocleous** Apple Developer team that owns GlideLingo. Do not use Startem LLC or a development, Apple Distribution, Mac App Distribution, or Developer ID Installer certificate for this direct-download application.

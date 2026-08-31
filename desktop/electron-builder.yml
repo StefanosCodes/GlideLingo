@@ -3,6 +3,7 @@ productName: GlideLingo
 electronVersion: 44.0.0
 asar: true
 npmRebuild: false
+afterSign: ./desktop/after-sign.cjs
 
 directories:
   output: ../release
@@ -19,8 +20,8 @@ extraResources:
 mac:
   category: public.app-category.education
   hardenedRuntime: true
-  icon: ../assets/images/icon.png
-  notarize: true
+  icon: ../assets/images/desktop-icon.png
+  notarize: false
   target:
     - target: dmg
       arch: universal

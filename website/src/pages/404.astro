@@ -1,0 +1,21 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Page not found — GlideLingo"
+  description="The page you were looking for could not be found."
+  canonicalPath="/404"
+  noindex
+>
+  <main class="not-found" id="main-content">
+    <a class="brand-link" href="/" aria-label="GlideLingo home">
+      <img src="/brand/glidelingo-wordmark.png" width="238" height="87" alt="GlideLingo" />
+    </a>
+    <img class="not-found-bird" src="/brand/glidelingo-bird.png" width="333" height="315" alt="" />
+    <p class="eyebrow">404</p>
+    <h1>This page flew off course.</h1>
+    <p>There is nothing here, but your next lesson is still waiting.</p>
+    <a class="button button-primary" href="/">Return home</a>
+  </main>
+</BaseLayout>

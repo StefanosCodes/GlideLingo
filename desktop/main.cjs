@@ -11,6 +11,7 @@ const {
   findAuthCallbackUrl,
   isAllowedAuthWindowUrl,
   isAllowedNavigation,
+  isExactAppUrl,
   isSafeExternalUrl,
   parseAuthCallbackUrl,
   resolveRendererPath,
@@ -82,7 +83,7 @@ function installSessionSecurity() {
 
   if (!DEVELOPMENT_URL) {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-      if (!details.url.startsWith(PRODUCTION_URL)) {
+      if (!isExactAppUrl(details.url)) {
         callback({ responseHeaders: details.responseHeaders });
         return;
       }

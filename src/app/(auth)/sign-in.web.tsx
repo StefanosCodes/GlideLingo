@@ -3,12 +3,15 @@ import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
+import { selectWebOauthFlow } from '@/features/auth/oauth-flow';
 import { useTheme } from '@/hooks/use-theme';
 
 export default function SignInRoute() {
   const theme = useTheme();
-  const isElectron =
-    typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('electron');
+  const oauthFlow = selectWebOauthFlow({
+    protocol: typeof window === 'undefined' ? '' : window.location.protocol,
+    userAgent: typeof navigator === 'undefined' ? '' : navigator.userAgent,
+  });
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]} testID="auth-sign-in">
@@ -25,7 +28,7 @@ export default function SignInRoute() {
       </View>
       <SignIn
         fallbackRedirectUrl="/"
-        oauthFlow={isElectron ? 'redirect' : 'popup'}
+        oauthFlow={oauthFlow}
         routing="hash"
         signUpFallbackRedirectUrl="/"
         withSignUp

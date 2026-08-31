@@ -9,6 +9,7 @@ const {
   findAuthCallbackUrl,
   isAllowedAuthWindowUrl,
   isAllowedNavigation,
+  isExactAppUrl,
   isSafeExternalUrl,
   parseAuthCallbackUrl,
   resolveRendererPath,
@@ -41,10 +42,19 @@ test('OS authentication callbacks require the exact app origin, route, and bound
   assert.equal(parseAuthCallbackUrl(valid), valid);
   assert.equal(findAuthCallbackUrl(['/Applications/GlideLingo.app', valid]), valid);
   assert.equal(parseAuthCallbackUrl('glidelingo://other/sign-in?state=opaque'), null);
+  assert.equal(parseAuthCallbackUrl('glidelingo://app:123/sign-in?state=opaque'), null);
+  assert.equal(parseAuthCallbackUrl('glidelingo://user:pass@app/sign-in?state=opaque'), null);
   assert.equal(parseAuthCallbackUrl('glidelingo://app/progress?state=opaque'), null);
   assert.equal(parseAuthCallbackUrl('https://app/sign-in?state=opaque'), null);
   assert.equal(parseAuthCallbackUrl('glidelingo://app/sign-in?state=one&state=two'), null);
   assert.equal(parseAuthCallbackUrl(`glidelingo://app/sign-in?state=${'x'.repeat(3000)}`), null);
+});
+
+test('packaged renderer URLs require the exact custom-protocol authority', () => {
+  assert.equal(isExactAppUrl('glidelingo://app/sign-in'), true);
+  assert.equal(isExactAppUrl('glidelingo://app:123/sign-in'), false);
+  assert.equal(isExactAppUrl('glidelingo://user:pass@app/sign-in'), false);
+  assert.equal(isExactAppUrl('glidelingo://other/sign-in'), false);
 });
 
 test('development renderer URL is restricted to the local Expo server', () => {
@@ -73,6 +83,8 @@ test('custom protocol rejects other hosts and traversal attempts', () => {
   const root = path.resolve('/tmp/glidelingo-dist');
 
   assert.equal(resolveRendererPath(root, 'glidelingo://other/index.html'), null);
+  assert.equal(resolveRendererPath(root, 'glidelingo://app:123/index.html'), null);
+  assert.equal(resolveRendererPath(root, 'glidelingo://user:pass@app/index.html'), null);
   assert.equal(resolveRendererPath(root, 'https://app/index.html'), null);
   assert.equal(resolveRendererPath(root, 'glidelingo://app/%2e%2e/secret.txt'), null);
   assert.equal(resolveRendererPath(root, 'glidelingo://app/%E0%A4%A'), null);
@@ -85,6 +97,14 @@ test('navigation stays in the renderer and only HTTPS links may open externally'
   );
   assert.equal(
     isAllowedNavigation('glidelingo://other/explore', 'glidelingo://app/'),
+    false,
+  );
+  assert.equal(
+    isAllowedNavigation('glidelingo://app:123/explore', 'glidelingo://app/'),
+    false,
+  );
+  assert.equal(
+    isAllowedNavigation('glidelingo://user:pass@app/explore', 'glidelingo://app/'),
     false,
   );
   assert.equal(

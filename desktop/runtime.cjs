@@ -12,6 +12,24 @@ const AUTH_PROVIDER_ORIGINS = new Set([
   'https://appleid.apple.com',
 ]);
 
+function isExactAppUrl(value) {
+  let url;
+
+  try {
+    url = value instanceof URL ? value : new URL(value);
+  } catch {
+    return false;
+  }
+
+  return (
+    url.protocol === `${APP_SCHEME}:` &&
+    url.hostname === APP_HOST &&
+    !url.port &&
+    !url.username &&
+    !url.password
+  );
+}
+
 function buildContentSecurityPolicy() {
   return [
     "default-src 'self'",
@@ -80,7 +98,7 @@ function resolveRendererPath(distDirectory, requestUrl) {
     return null;
   }
 
-  if (url.protocol !== `${APP_SCHEME}:` || url.hostname !== APP_HOST) {
+  if (!isExactAppUrl(url)) {
     return null;
   }
 
@@ -120,7 +138,7 @@ function isAllowedNavigation(targetUrl, rendererUrl) {
     const renderer = new URL(rendererUrl);
 
     if (renderer.protocol === `${APP_SCHEME}:`) {
-      return target.protocol === `${APP_SCHEME}:` && target.hostname === APP_HOST;
+      return isExactAppUrl(renderer) && isExactAppUrl(target);
     }
 
     return target.origin === renderer.origin;
@@ -159,10 +177,7 @@ function parseAuthCallbackUrl(targetUrl) {
   }
 
   if (
-    url.protocol !== `${APP_SCHEME}:` ||
-    url.hostname !== APP_HOST ||
-    url.username ||
-    url.password ||
+    !isExactAppUrl(url) ||
     !AUTH_CALLBACK_PATHS.has(url.pathname)
   ) {
     return null;
@@ -199,6 +214,7 @@ module.exports = {
   findAuthCallbackUrl,
   isAllowedAuthWindowUrl,
   isAllowedNavigation,
+  isExactAppUrl,
   isSafeExternalUrl,
   parseAuthCallbackUrl,
   resolveRendererPath,

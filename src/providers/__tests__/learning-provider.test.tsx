@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, jest, test } from '@jest/globals';
-import { fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { Pressable, Text } from 'react-native';
 
 import { LearningProvider, useLearning } from '@/providers/learning-provider';
@@ -8,6 +8,7 @@ import { learningStorageKey } from '@/providers/learning-storage';
 const storage = new Map<string, string>();
 let getItem: jest.MockedFunction<(key: string) => string | null>;
 let setItem: jest.MockedFunction<(key: string, value: string) => void>;
+const storageListeners = new Set<(event: StorageEvent) => void>();
 
 beforeEach(() => {
   storage.clear();
@@ -18,6 +19,21 @@ beforeEach(() => {
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
     value: { getItem, removeItem: jest.fn((key: string) => storage.delete(key)), setItem },
+  });
+  storageListeners.clear();
+  Object.defineProperties(window, {
+    addEventListener: {
+      configurable: true,
+      value: (type: string, listener: (event: StorageEvent) => void) => {
+        if (type === 'storage') storageListeners.add(listener);
+      },
+    },
+    removeEventListener: {
+      configurable: true,
+      value: (type: string, listener: (event: StorageEvent) => void) => {
+        if (type === 'storage') storageListeners.delete(listener);
+      },
+    },
   });
   jest.useFakeTimers();
   jest.setSystemTime(new Date(2026, 7, 31, 12));
@@ -74,7 +90,7 @@ test('provider records at most one meaningful day per local date in the scoped V
   await fireEvent.press(screen.getByLabelText('Complete lesson'));
 
   expect(screen.getByTestId('days').props.children).toBe(1);
-  expect(storage.get(learningStorageKey('user-a'))).toContain('2026-08-31');
+  await waitFor(() => expect(storage.get(learningStorageKey('user-a'))).toContain('2026-08-31'));
 });
 
 test('account switching never hydrates one account from another account scope', async () => {
@@ -106,7 +122,7 @@ test('account switching never hydrates one account from another account scope', 
   );
   expect(accountB.getByTestId('days').props.children).toBe(0);
   expect(storage.get(learningStorageKey('user-a'))).toContain('2026-08-31');
-  expect(storage.get(learningStorageKey('user-b'))).not.toContain('2026-08-31');
+  expect(storage.get(learningStorageKey('user-b')) ?? '').not.toContain('2026-08-31');
 });
 
 test('corrupt account storage is not replaced by an empty autosave', async () => {
@@ -172,4 +188,52 @@ test('completion returns the actual merged evidence after a weaker replay', asyn
   await fireEvent.press(screen.getByLabelText('Replay with recovery'));
 
   expect(replayState).toBe('demonstrated');
+});
+
+function TabProbe({ tab }: { tab: string }) {
+  const { completeLesson, languageId, setLanguage } = useLearning();
+  return (
+    <>
+      <Text testID={`${tab}-language`}>{languageId}</Text>
+      <Pressable accessibilityLabel={`${tab} complete lesson`} onPress={() => completeLesson(completion())} />
+      <Pressable accessibilityLabel={`${tab} choose Spanish`} onPress={() => setLanguage('es')} />
+    </>
+  );
+}
+
+test('a stale second provider cannot erase another tab lesson evidence or practice with a later scalar update', async () => {
+  const screen = await render(
+    <>
+      <LearningProvider storageScope="shared-user">
+        <TabProbe tab="tab-a" />
+      </LearningProvider>
+      <LearningProvider storageScope="shared-user">
+        <TabProbe tab="tab-b" />
+      </LearningProvider>
+    </>,
+  );
+  const key = learningStorageKey('shared-user');
+
+  await fireEvent.press(screen.getByLabelText('tab-a complete lesson'));
+  await waitFor(() => {
+    const durable = JSON.parse(storage.get(key) ?? '{}');
+    expect(durable.completedLessonIds).toEqual(['el-letters-1']);
+    expect(durable.lessonEvidence).toHaveLength(1);
+    expect(durable.practiceDayKeys).toEqual(['2026-08-31']);
+  });
+
+  await fireEvent.press(screen.getByLabelText('tab-b choose Spanish'));
+  await waitFor(() => {
+    const durable = JSON.parse(storage.get(key) ?? '{}');
+    expect(durable.languageId).toBe('es');
+    expect(durable.completedLessonIds).toEqual(['el-letters-1']);
+    expect(durable.lessonEvidence).toHaveLength(1);
+    expect(durable.practiceDayKeys).toEqual(['2026-08-31']);
+  });
+
+  const event = { key, newValue: storage.get(key) } as StorageEvent;
+  await act(async () => {
+    for (const listener of storageListeners) listener(event);
+  });
+  await waitFor(() => expect(screen.getByTestId('tab-a-language').props.children).toBe('es'));
 });

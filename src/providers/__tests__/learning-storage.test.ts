@@ -6,6 +6,7 @@ import {
   learningStorageKey,
   parseStoredLearning,
   readStoredLearning,
+  withLearningStorageLock,
   writeStoredLearning,
 } from '@/providers/learning-storage';
 
@@ -117,5 +118,45 @@ describe('learning storage', () => {
         },
       }),
     ).toBe(false);
+  });
+
+  it('fails closed when browser-safe cross-tab locking is required but unavailable', async () => {
+    const work = jest.fn(() => 'unsafe-write');
+
+    await expect(
+      withLearningStorageLock('scoped', work, {
+        lockManager: null,
+        requireBrowserLock: true,
+      }),
+    ).rejects.toThrow('Cross-tab learning storage locking is unavailable');
+    expect(work).not.toHaveBeenCalled();
+  });
+
+  it('serializes read-merge-write work for the same account key', async () => {
+    const order: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    let markFirstStarted: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+
+    const first = withLearningStorageLock('same-account', async () => {
+      order.push('first-start');
+      markFirstStarted?.();
+      await firstGate;
+      order.push('first-end');
+    });
+    const second = withLearningStorageLock('same-account', () => {
+      order.push('second');
+    });
+
+    await firstStarted;
+    expect(order).toEqual(['first-start']);
+    releaseFirst?.();
+    await Promise.all([first, second]);
+    expect(order).toEqual(['first-start', 'first-end', 'second']);
   });
 });

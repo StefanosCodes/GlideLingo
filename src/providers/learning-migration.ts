@@ -2,7 +2,9 @@ import type { LessonEvidenceRecord } from '../features/learning-progress/evidenc
 import { normalizeGoalChanges, normalizePracticeDayKeys } from '../features/learning-progress/rhythm-policy.ts';
 import {
   LEARNING_STORAGE_VERSION,
+  type LearningFieldWrites,
   type LearningStorage,
+  type LearningWriteStamp,
   type StoredLearningV2,
 } from './learning-storage.ts';
 
@@ -33,13 +35,97 @@ function mergeEvidenceRecord(current: LessonEvidenceRecord, legacy: LessonEviden
   } satisfies LessonEvidenceRecord;
 }
 
-function mergeEvidence(current: LessonEvidenceRecord[], legacy: LessonEvidenceRecord[]) {
+export function mergeEvidence(current: LessonEvidenceRecord[], legacy: LessonEvidenceRecord[]) {
   const byLesson = new Map(legacy.map((record) => [record.lessonId, record]));
   for (const record of current) {
     const earlier = byLesson.get(record.lessonId);
     byLesson.set(record.lessonId, earlier ? mergeEvidenceRecord(record, earlier) : record);
   }
   return [...byLesson.values()];
+}
+
+export function compareLearningWriteStamps(
+  left: LearningWriteStamp | undefined,
+  right: LearningWriteStamp | undefined,
+) {
+  if (!left) return right ? -1 : 0;
+  if (!right) return 1;
+  if (left.at !== right.at) return left.at - right.at;
+  if (left.sequence !== right.sequence) return left.sequence - right.sequence;
+  return left.writerId.localeCompare(right.writerId);
+}
+
+function selectScalar<T>(
+  current: T,
+  currentStamp: LearningWriteStamp | undefined,
+  incoming: T,
+  incomingStamp: LearningWriteStamp | undefined,
+) {
+  return compareLearningWriteStamps(currentStamp, incomingStamp) < 0
+    ? { value: incoming, stamp: incomingStamp }
+    : { value: current, stamp: currentStamp };
+}
+
+/**
+ * Reconciles two account-scoped snapshots. Progress evidence is monotonic;
+ * independently editable scalar fields use a deterministic last-write tuple
+ * of wall time, writer-local sequence, and writer id.
+ */
+export function mergeConcurrentLearning(current: StoredLearningV2, incoming: StoredLearningV2): StoredLearningV2 {
+  const language = selectScalar(
+    current.languageId,
+    current.fieldWrites.languageId,
+    incoming.languageId,
+    incoming.fieldWrites.languageId,
+  );
+
+  const enrolledByLanguage = { ...current.enrolledByLanguage };
+  const enrolledWrites: NonNullable<LearningFieldWrites['enrolledByLanguage']> = {
+    ...current.fieldWrites.enrolledByLanguage,
+  };
+  for (const languageId of ['el', 'es', 'fr'] as const) {
+    const selected = selectScalar(
+      current.enrolledByLanguage[languageId],
+      current.fieldWrites.enrolledByLanguage?.[languageId],
+      incoming.enrolledByLanguage[languageId],
+      incoming.fieldWrites.enrolledByLanguage?.[languageId],
+    );
+    if (selected.value === undefined) delete enrolledByLanguage[languageId];
+    else enrolledByLanguage[languageId] = selected.value;
+    if (selected.stamp) enrolledWrites[languageId] = selected.stamp;
+    else delete enrolledWrites[languageId];
+  }
+
+  const goalByWeek = new Map(current.weeklyGoalChanges.map((change) => [change.effectiveWeekKey, change]));
+  const goalWrites: Record<string, LearningWriteStamp> = { ...current.fieldWrites.weeklyGoalChanges };
+  const incomingGoals = new Map(incoming.weeklyGoalChanges.map((change) => [change.effectiveWeekKey, change]));
+  for (const weekKey of new Set([...goalByWeek.keys(), ...incomingGoals.keys()])) {
+    const selected = selectScalar(
+      goalByWeek.get(weekKey),
+      current.fieldWrites.weeklyGoalChanges?.[weekKey],
+      incomingGoals.get(weekKey),
+      incoming.fieldWrites.weeklyGoalChanges?.[weekKey],
+    );
+    if (selected.value) goalByWeek.set(weekKey, selected.value);
+    else goalByWeek.delete(weekKey);
+    if (selected.stamp) goalWrites[weekKey] = selected.stamp;
+    else delete goalWrites[weekKey];
+  }
+
+  return {
+    version: LEARNING_STORAGE_VERSION,
+    languageId: language.value,
+    enrolledByLanguage,
+    completedLessonIds: [...new Set([...current.completedLessonIds, ...incoming.completedLessonIds])],
+    lessonEvidence: mergeEvidence(current.lessonEvidence, incoming.lessonEvidence),
+    practiceDayKeys: normalizePracticeDayKeys([...current.practiceDayKeys, ...incoming.practiceDayKeys]),
+    weeklyGoalChanges: normalizeGoalChanges([...goalByWeek.values()]),
+    fieldWrites: {
+      ...(language.stamp ? { languageId: language.stamp } : {}),
+      ...(Object.keys(enrolledWrites).length ? { enrolledByLanguage: enrolledWrites } : {}),
+      ...(Object.keys(goalWrites).length ? { weeklyGoalChanges: goalWrites } : {}),
+    },
+  };
 }
 
 function hasProgress(value: StoredLearningV2) {
@@ -53,14 +139,30 @@ function hasProgress(value: StoredLearningV2) {
 }
 
 export function mergeLegacyLearning(current: StoredLearningV2, legacy: StoredLearningV2): StoredLearningV2 {
+  const currentHasProgress = hasProgress(current);
   return {
     version: LEARNING_STORAGE_VERSION,
-    languageId: hasProgress(current) ? current.languageId : legacy.languageId,
+    languageId: currentHasProgress ? current.languageId : legacy.languageId,
     enrolledByLanguage: { ...legacy.enrolledByLanguage, ...current.enrolledByLanguage },
     completedLessonIds: [...new Set([...legacy.completedLessonIds, ...current.completedLessonIds])],
     lessonEvidence: mergeEvidence(current.lessonEvidence, legacy.lessonEvidence),
     practiceDayKeys: normalizePracticeDayKeys([...legacy.practiceDayKeys, ...current.practiceDayKeys]),
     weeklyGoalChanges: normalizeGoalChanges([...legacy.weeklyGoalChanges, ...current.weeklyGoalChanges]),
+    fieldWrites: {
+      ...legacy.fieldWrites,
+      ...current.fieldWrites,
+      ...(currentHasProgress
+        ? { languageId: current.fieldWrites.languageId }
+        : { languageId: legacy.fieldWrites.languageId }),
+      enrolledByLanguage: {
+        ...legacy.fieldWrites.enrolledByLanguage,
+        ...current.fieldWrites.enrolledByLanguage,
+      },
+      weeklyGoalChanges: {
+        ...legacy.fieldWrites.weeklyGoalChanges,
+        ...current.fieldWrites.weeklyGoalChanges,
+      },
+    },
   };
 }
 

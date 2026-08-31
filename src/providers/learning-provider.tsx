@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { Platform } from 'react-native';
 
 import {
   type Course,
@@ -40,17 +41,22 @@ import {
   type WeeklyGoalChange,
   type WeeklyPracticeGoal,
 } from '@/features/learning-progress/rhythm-policy';
-import { mergeLegacyLearning, persistLegacyLearningImport } from '@/providers/learning-migration';
+import {
+  mergeConcurrentLearning,
+  mergeLegacyLearning,
+  persistLegacyLearningImport,
+} from '@/providers/learning-migration';
 import {
   getLearningStorage,
   LEARNING_STORAGE_KEY,
-  LEARNING_STORAGE_VERSION,
   learningStorageKey,
   legacyDecisionStorageKey,
   legacyScopedLearningStorageKey,
   readStoredLearning,
   type LearningPersistenceStatus,
+  type LearningWriteStamp,
   type StoredLearningV2,
+  withLearningStorageLock,
   writeStoredLearning,
 } from '@/providers/learning-storage';
 
@@ -92,6 +98,27 @@ type LearningContextValue = {
 };
 
 const LearningContext = createContext<LearningContextValue | null>(null);
+let nextWriterNumber = 0;
+
+function createWriterId() {
+  try {
+    const id = globalThis.crypto?.randomUUID?.();
+    if (id) return id;
+  } catch {
+    // Older native runtimes do not expose Web Crypto. The fallback still
+    // includes process-local and random components to avoid tab collisions.
+  }
+  return `learning-writer-${Date.now()}-${++nextWriterNumber}-${Math.random().toString(36).slice(2)}`;
+}
+
+function latestWriteTime(value: StoredLearningV2) {
+  return Math.max(
+    0,
+    value.fieldWrites.languageId?.at ?? 0,
+    ...Object.values(value.fieldWrites.enrolledByLanguage ?? {}).map((stamp) => stamp?.at ?? 0),
+    ...Object.values(value.fieldWrites.weeklyGoalChanges ?? {}).map((stamp) => stamp.at),
+  );
+}
 
 function persistenceStatus(kind: 'found' | 'missing' | 'corrupt' | 'read-error'): LearningPersistenceStatus {
   if (kind === 'corrupt') return 'corrupt';
@@ -158,56 +185,102 @@ export function LearningProvider({
   const legacyDecisionKey = legacyDecisionStorageKey(storageScope);
   const [initial] = useState(() => initializeLearning(storageScope));
   const canPersistRef = useRef(initial.canPersist);
+  const [learning, setLearning] = useState<StoredLearningV2>(initial.value);
+  const learningRef = useRef(initial.value);
+  const [writerId] = useState(createWriterId);
+  const writerIdRef = useRef(writerId);
+  const writerSequenceRef = useRef(0);
+  const latestWriteTimeRef = useRef(latestWriteTime(initial.value));
   const [legacyProgressAvailable, setLegacyProgressAvailable] = useState(() =>
     legacyProgressNeedsDecision(storageScope),
   );
   const [legacyProgressError, setLegacyProgressError] = useState<string | null>(null);
-  const [languageId, setLanguageId] = useState<LanguageId>(initial.value.languageId);
-  const [enrolledByLanguage, setEnrolledByLanguage] = useState<Partial<Record<LanguageId, string>>>(
-    initial.value.enrolledByLanguage,
-  );
-  const [completedLessonIds, setCompletedLessonIds] = useState<string[]>(initial.value.completedLessonIds);
-  const [lessonEvidence, setLessonEvidence] = useState<LessonEvidenceRecord[]>(initial.value.lessonEvidence);
-  const lessonEvidenceRef = useRef(lessonEvidence);
-  const [practiceDayKeys, setPracticeDayKeys] = useState<string[]>(initial.value.practiceDayKeys);
-  const practiceDayKeysRef = useRef(practiceDayKeys);
-  const [weeklyGoalChanges, setWeeklyGoalChanges] = useState<WeeklyGoalChange[]>(initial.value.weeklyGoalChanges);
-  const weeklyGoalChangesRef = useRef(weeklyGoalChanges);
   const [persistenceState, setPersistenceState] = useState<LearningPersistenceStatus>(initial.status);
   const [focusedModuleId, setFocusedModuleId] = useState<string | null>(null);
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
   const [activeLessonMode, setActiveLessonMode] = useState<LessonMode>('learn');
-  const now = useLearningClock(lessonEvidence);
+  const now = useLearningClock(learning.lessonEvidence);
+
+  const reconcileLearning = useCallback((incoming: StoredLearningV2) => {
+    const reconciled = mergeConcurrentLearning(learningRef.current, incoming);
+    learningRef.current = reconciled;
+    latestWriteTimeRef.current = Math.max(latestWriteTimeRef.current, latestWriteTime(reconciled));
+    setLearning(reconciled);
+    return reconciled;
+  }, []);
+
+  const nextWriteStamp = useCallback((): LearningWriteStamp => {
+    const at = Math.max(Date.now(), latestWriteTimeRef.current + 1);
+    latestWriteTimeRef.current = at;
+    return { at, sequence: ++writerSequenceRef.current, writerId: writerIdRef.current };
+  }, []);
+
+  const persistSnapshot = useCallback(
+    (snapshot: StoredLearningV2) => {
+      if (!canPersistRef.current) return;
+      void withLearningStorageLock(
+        storageKey,
+        () => {
+          const storage = getLearningStorage();
+          if (!storage) throw new Error('Learning storage is unavailable.');
+          const durable = readStoredLearning(storageKey, storage);
+          if (durable.kind === 'corrupt' || durable.kind === 'read-error') {
+            throw new Error('Learning storage could not be read safely.');
+          }
+          const merged = durable.kind === 'found'
+            ? mergeConcurrentLearning(durable.value, snapshot)
+            : snapshot;
+          if (!writeStoredLearning(storageKey, merged, storage)) {
+            throw new Error('Learning storage could not be written.');
+          }
+          return merged;
+        },
+        { requireBrowserLock: Platform.OS === 'web' },
+      )
+        .then((merged) => {
+          reconcileLearning(merged);
+          setPersistenceState('available');
+        })
+        .catch(() => {
+          canPersistRef.current = false;
+          setPersistenceState('unavailable');
+        });
+    },
+    [reconcileLearning, storageKey],
+  );
+
+  const updateLearning = useCallback(
+    (update: (current: StoredLearningV2) => StoredLearningV2) => {
+      const next = update(learningRef.current);
+      learningRef.current = next;
+      setLearning(next);
+      persistSnapshot(next);
+      return next;
+    },
+    [persistSnapshot],
+  );
 
   useEffect(() => {
-    lessonEvidenceRef.current = lessonEvidence;
-  }, [lessonEvidence]);
+    if (
+      typeof window === 'undefined' ||
+      typeof window.addEventListener !== 'function' ||
+      typeof window.removeEventListener !== 'function'
+    ) return;
+    const reconcileStorageEvent = (event: StorageEvent) => {
+      if (event.key !== storageKey || event.newValue === null) return;
+      const incoming = readStoredLearning(storageKey, {
+        getItem: () => event.newValue,
+        removeItem: () => undefined,
+        setItem: () => undefined,
+      });
+      if (incoming.kind === 'found') reconcileLearning(incoming.value);
+    };
+    window.addEventListener('storage', reconcileStorageEvent);
+    return () => window.removeEventListener('storage', reconcileStorageEvent);
+  }, [reconcileLearning, storageKey]);
 
-  useEffect(() => {
-    practiceDayKeysRef.current = practiceDayKeys;
-  }, [practiceDayKeys]);
-
-  useEffect(() => {
-    weeklyGoalChangesRef.current = weeklyGoalChanges;
-  }, [weeklyGoalChanges]);
-
-  useEffect(() => {
-    if (!canPersistRef.current) return;
-    const saved = writeStoredLearning(storageKey, {
-      version: LEARNING_STORAGE_VERSION,
-      languageId,
-      enrolledByLanguage,
-      completedLessonIds,
-      lessonEvidence,
-      practiceDayKeys,
-      weeklyGoalChanges,
-    });
-    if (!saved) {
-      canPersistRef.current = false;
-      queueMicrotask(() => setPersistenceState('unavailable'));
-    }
-  }, [completedLessonIds, enrolledByLanguage, languageId, lessonEvidence, practiceDayKeys, storageKey, weeklyGoalChanges]);
-
+  const { completedLessonIds, enrolledByLanguage, languageId, lessonEvidence, practiceDayKeys, weeklyGoalChanges } =
+    learning;
   const language = getLanguage(languageId);
   const courses = getCoursesForLanguage(languageId);
   const enrolledCourse = getCourse(enrolledByLanguage[languageId] ?? '') ?? null;
@@ -228,8 +301,13 @@ export function LearningProvider({
     setActiveLessonId(null);
     setActiveLessonMode('learn');
     setFocusedModuleId(null);
-    setLanguageId(id);
-  }, []);
+    const stamp = nextWriteStamp();
+    updateLearning((current) => ({
+      ...current,
+      languageId: id,
+      fieldWrites: { ...current.fieldWrites, languageId: stamp },
+    }));
+  }, [nextWriteStamp, updateLearning]);
 
   const switchCourse = useCallback(
     (courseId: string) => {
@@ -238,10 +316,15 @@ export function LearningProvider({
       setActiveLessonId(null);
       setActiveLessonMode('learn');
       setFocusedModuleId(null);
-      setLanguageId(course.languageId);
-      return enrolledByLanguage[course.languageId] === course.id;
+      const stamp = nextWriteStamp();
+      const next = updateLearning((current) => ({
+        ...current,
+        languageId: course.languageId,
+        fieldWrites: { ...current.fieldWrites, languageId: stamp },
+      }));
+      return next.enrolledByLanguage[course.languageId] === course.id;
     },
-    [enrolledByLanguage],
+    [nextWriteStamp, updateLearning],
   );
 
   const focusModule = useCallback((moduleId: string | null) => {
@@ -266,41 +349,62 @@ export function LearningProvider({
     (courseId: string) => {
       const course = getCourse(courseId);
       if (!course || course.languageId !== languageId || !language.available) return false;
-      setEnrolledByLanguage((current) => ({ ...current, [languageId]: course.id }));
+      const stamp = nextWriteStamp();
+      updateLearning((current) => ({
+        ...current,
+        enrolledByLanguage: { ...current.enrolledByLanguage, [languageId]: course.id },
+        fieldWrites: {
+          ...current.fieldWrites,
+          enrolledByLanguage: { ...current.fieldWrites.enrolledByLanguage, [languageId]: stamp },
+        },
+      }));
       setFocusedModuleId(null);
       setActiveLessonId(null);
       setActiveLessonMode('learn');
       return true;
     },
-    [language.available, languageId],
+    [language.available, languageId, nextWriteStamp, updateLearning],
   );
 
   const completeLesson = useCallback((completion: LessonCompletionInput) => {
     const completedAt = Date.now();
-    const currentPracticeDays = practiceDayKeysRef.current;
-    const currentGoalChanges = weeklyGoalChangesRef.current;
+    const currentLearning = learningRef.current;
+    const currentPracticeDays = currentLearning.practiceDayKeys;
+    const currentGoalChanges = currentLearning.weeklyGoalChanges;
     const practice = recordMeaningfulPractice(currentPracticeDays, currentGoalChanges, completedAt);
-    const previous = lessonEvidenceRef.current.find((record) => record.lessonId === completion.lessonId);
+    const previous = currentLearning.lessonEvidence.find((record) => record.lessonId === completion.lessonId);
     const incoming = summarizeLessonCompletion(completion, completedAt, previous);
-    const nextEvidence = upsertLessonEvidence(lessonEvidenceRef.current, incoming);
+    const nextEvidence = upsertLessonEvidence(currentLearning.lessonEvidence, incoming);
     const mergedEvidence = nextEvidence.find((record) => record.lessonId === completion.lessonId) ?? incoming;
 
-    lessonEvidenceRef.current = nextEvidence;
-    practiceDayKeysRef.current = practice.practiceDayKeys;
-    setCompletedLessonIds((current) =>
-      current.includes(completion.lessonId) ? current : [...current, completion.lessonId],
-    );
-    setLessonEvidence(nextEvidence);
-    setPracticeDayKeys(practice.practiceDayKeys);
+    updateLearning((current) => ({
+      ...current,
+      completedLessonIds: current.completedLessonIds.includes(completion.lessonId)
+        ? current.completedLessonIds
+        : [...current.completedLessonIds, completion.lessonId],
+      lessonEvidence: mergeConcurrentLearning(current, {
+        ...currentLearning,
+        lessonEvidence: nextEvidence,
+      }).lessonEvidence,
+      practiceDayKeys: [...new Set([...current.practiceDayKeys, ...practice.practiceDayKeys])],
+    }));
 
     return { ...practice.result, evidence: mergedEvidence };
-  }, []);
+  }, [updateLearning]);
 
   const setWeeklyPracticeGoal = useCallback((goal: WeeklyPracticeGoal | null) => {
-    const next = setGoalForCurrentWeek(weeklyGoalChangesRef.current, goal, Date.now());
-    weeklyGoalChangesRef.current = next;
-    setWeeklyGoalChanges(next);
-  }, []);
+    const changedAt = Date.now();
+    const weekKey = setGoalForCurrentWeek([], goal, changedAt)[0].effectiveWeekKey;
+    const stamp = nextWriteStamp();
+    updateLearning((current) => ({
+      ...current,
+      weeklyGoalChanges: setGoalForCurrentWeek(current.weeklyGoalChanges, goal, changedAt),
+      fieldWrites: {
+        ...current.fieldWrites,
+        weeklyGoalChanges: { ...current.fieldWrites.weeklyGoalChanges, [weekKey]: stamp },
+      },
+    }));
+  }, [nextWriteStamp, updateLearning]);
 
   const dismissLegacyProgress = useCallback(() => {
     const storage = getLearningStorage();
@@ -325,65 +429,58 @@ export function LearningProvider({
       return;
     }
 
-    const legacy = readStoredLearning(LEARNING_STORAGE_KEY, storage);
-    if (legacy.kind !== 'found') {
-      setLegacyProgressError(
-        legacy.kind === 'missing'
-          ? 'The earlier progress is no longer available.'
-          : 'The earlier progress could not be read safely. Nothing was removed.',
-      );
-      return;
-    }
-
-    const destination = readStoredLearning(storageKey, storage);
-    if (destination.kind === 'corrupt' || destination.kind === 'read-error') {
-      setLegacyProgressError('Your account progress could not be read safely. Nothing was overwritten or removed.');
-      return;
-    }
-
-    const currentSnapshot: StoredLearningV2 = {
-      version: LEARNING_STORAGE_VERSION,
-      languageId,
-      enrolledByLanguage,
-      completedLessonIds,
-      lessonEvidence: lessonEvidenceRef.current,
-      practiceDayKeys: practiceDayKeysRef.current,
-      weeklyGoalChanges: weeklyGoalChangesRef.current,
-    };
-    const durableCurrent = destination.kind === 'found'
-      ? mergeLegacyLearning(currentSnapshot, destination.value)
-      : currentSnapshot;
-    const merged = mergeLegacyLearning(durableCurrent, legacy.value);
-
-    try {
-      persistLegacyLearningImport(storage, {
-        decisionKey: legacyDecisionKey,
-        destinationKey: storageKey,
-        legacyKey: LEARNING_STORAGE_KEY,
-        merged,
+    void withLearningStorageLock(
+      storageKey,
+      () => {
+        const legacy = readStoredLearning(LEARNING_STORAGE_KEY, storage);
+        if (legacy.kind !== 'found') {
+          throw new Error(legacy.kind === 'missing' ? 'legacy-missing' : 'legacy-unsafe');
+        }
+        const destination = readStoredLearning(storageKey, storage);
+        if (destination.kind === 'corrupt' || destination.kind === 'read-error') {
+          throw new Error('destination-unsafe');
+        }
+        const durableCurrent = destination.kind === 'found'
+          ? mergeConcurrentLearning(destination.value, learningRef.current)
+          : learningRef.current;
+        const merged = mergeLegacyLearning(durableCurrent, legacy.value);
+        try {
+          persistLegacyLearningImport(storage, {
+            decisionKey: legacyDecisionKey,
+            destinationKey: storageKey,
+            legacyKey: LEARNING_STORAGE_KEY,
+            merged,
+          });
+          return { cleanupFailed: false, merged };
+        } catch {
+          return { cleanupFailed: true, merged };
+        }
+      },
+      { requireBrowserLock: Platform.OS === 'web' },
+    )
+      .then(({ cleanupFailed, merged }) => {
+        canPersistRef.current = true;
+        reconcileLearning(merged);
+        setFocusedModuleId(null);
+        setActiveLessonId(null);
+        setActiveLessonMode('learn');
+        setPersistenceState('available');
+        setLegacyProgressError(
+          cleanupFailed ? 'Progress was copied, but cleanup did not finish. Retry to complete the import safely.' : null,
+        );
+        setLegacyProgressAvailable(cleanupFailed);
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : '';
+        setLegacyProgressError(
+          message === 'legacy-missing'
+            ? 'The earlier progress is no longer available.'
+            : message === 'destination-unsafe'
+              ? 'Your account progress could not be read safely. Nothing was overwritten or removed.'
+              : 'The earlier progress could not be read safely. Nothing was removed.',
+        );
       });
-    } catch {
-      setLegacyProgressError('Progress was copied, but cleanup did not finish. Retry to complete the import safely.');
-      return;
-    }
-
-    canPersistRef.current = true;
-    lessonEvidenceRef.current = merged.lessonEvidence;
-    practiceDayKeysRef.current = merged.practiceDayKeys;
-    weeklyGoalChangesRef.current = merged.weeklyGoalChanges;
-    setLanguageId(merged.languageId);
-    setEnrolledByLanguage(merged.enrolledByLanguage);
-    setCompletedLessonIds(merged.completedLessonIds);
-    setLessonEvidence(merged.lessonEvidence);
-    setPracticeDayKeys(merged.practiceDayKeys);
-    setWeeklyGoalChanges(merged.weeklyGoalChanges);
-    setFocusedModuleId(null);
-    setActiveLessonId(null);
-    setActiveLessonMode('learn');
-    setPersistenceState('available');
-    setLegacyProgressError(null);
-    setLegacyProgressAvailable(false);
-  }, [completedLessonIds, enrolledByLanguage, languageId, legacyDecisionKey, storageKey]);
+  }, [legacyDecisionKey, reconcileLearning, storageKey]);
 
   const value = useMemo<LearningContextValue>(
     () => ({

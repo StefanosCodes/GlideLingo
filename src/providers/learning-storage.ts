@@ -12,6 +12,18 @@ import {
 export const LEARNING_STORAGE_KEY = 'glidelingo-learning';
 export const LEARNING_STORAGE_VERSION = 2;
 
+export type LearningWriteStamp = {
+  at: number;
+  sequence: number;
+  writerId: string;
+};
+
+export type LearningFieldWrites = {
+  languageId?: LearningWriteStamp;
+  enrolledByLanguage?: Partial<Record<LanguageId, LearningWriteStamp>>;
+  weeklyGoalChanges?: Record<string, LearningWriteStamp>;
+};
+
 export type StoredLearningV2 = {
   version: typeof LEARNING_STORAGE_VERSION;
   languageId: LanguageId;
@@ -20,6 +32,7 @@ export type StoredLearningV2 = {
   lessonEvidence: LessonEvidenceRecord[];
   practiceDayKeys: string[];
   weeklyGoalChanges: WeeklyGoalChange[];
+  fieldWrites: LearningFieldWrites;
 };
 
 export type LearningPersistenceStatus = 'available' | 'corrupt' | 'unavailable';
@@ -30,6 +43,15 @@ export type LearningStorageReadResult = {
 };
 
 export type LearningStorage = Pick<Storage, 'getItem' | 'removeItem' | 'setItem'>;
+export type LearningLockManager = {
+  request<T>(
+    name: string,
+    options: { mode: 'exclusive' },
+    callback: () => Promise<T> | T,
+  ): Promise<T>;
+};
+
+const storageQueues = new Map<string, Promise<void>>();
 
 function isLanguageId(value: unknown): value is LanguageId {
   return value === 'el' || value === 'es' || value === 'fr';
@@ -53,6 +75,46 @@ function enrolledCourses(value: unknown): Partial<Record<LanguageId, string>> {
   };
 }
 
+function isWriteStamp(value: unknown): value is LearningWriteStamp {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<LearningWriteStamp>;
+  return (
+    Number.isFinite(candidate.at) &&
+    Number.isInteger(candidate.sequence) &&
+    (candidate.sequence ?? -1) >= 0 &&
+    typeof candidate.writerId === 'string' &&
+    candidate.writerId.length > 0
+  );
+}
+
+function writeStampRecord(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, LearningWriteStamp] => isWriteStamp(entry[1])),
+  );
+}
+
+function fieldWrites(value: unknown): LearningFieldWrites {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const candidate = value as Record<string, unknown>;
+  const enrolled = writeStampRecord(candidate.enrolledByLanguage);
+  return {
+    ...(isWriteStamp(candidate.languageId) ? { languageId: candidate.languageId } : {}),
+    ...(Object.keys(enrolled).length
+      ? {
+          enrolledByLanguage: {
+            ...(isWriteStamp(enrolled.el) ? { el: enrolled.el } : {}),
+            ...(isWriteStamp(enrolled.es) ? { es: enrolled.es } : {}),
+            ...(isWriteStamp(enrolled.fr) ? { fr: enrolled.fr } : {}),
+          },
+        }
+      : {}),
+    ...(Object.keys(writeStampRecord(candidate.weeklyGoalChanges)).length
+      ? { weeklyGoalChanges: writeStampRecord(candidate.weeklyGoalChanges) }
+      : {}),
+  };
+}
+
 export function emptyStoredLearning(): StoredLearningV2 {
   return {
     version: LEARNING_STORAGE_VERSION,
@@ -62,6 +124,7 @@ export function emptyStoredLearning(): StoredLearningV2 {
     lessonEvidence: [],
     practiceDayKeys: [],
     weeklyGoalChanges: [],
+    fieldWrites: {},
   };
 }
 
@@ -83,6 +146,44 @@ export function getLearningStorage(): LearningStorage | undefined {
   } catch {
     return undefined;
   }
+}
+
+export function getLearningLockManager(): LearningLockManager | undefined {
+  try {
+    const candidate = (globalThis.navigator as Navigator & { locks?: LearningLockManager } | undefined)?.locks;
+    return candidate && typeof candidate.request === 'function' ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function withLearningStorageLock<T>(
+  storageKey: string,
+  work: () => Promise<T> | T,
+  {
+    lockManager = getLearningLockManager(),
+    requireBrowserLock = false,
+  }: { lockManager?: LearningLockManager | null; requireBrowserLock?: boolean } = {},
+) {
+  if (requireBrowserLock && !lockManager) {
+    throw new Error('Cross-tab learning storage locking is unavailable.');
+  }
+
+  const previous = storageQueues.get(storageKey) ?? Promise.resolve();
+  const run = previous.catch(() => undefined).then(() =>
+    lockManager
+      ? lockManager.request(`glidelingo:${storageKey}`, { mode: 'exclusive' }, work)
+      : work(),
+  );
+  const settled = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  storageQueues.set(storageKey, settled);
+  void settled.finally(() => {
+    if (storageQueues.get(storageKey) === settled) storageQueues.delete(storageKey);
+  });
+  return run;
 }
 
 export function parseStoredLearningResult(
@@ -122,6 +223,7 @@ export function parseStoredLearningResult(
           : [],
         practiceDayKeys: normalizePracticeDayKeys(stringArray(candidate.practiceDayKeys)),
         weeklyGoalChanges,
+        fieldWrites: fieldWrites(candidate.fieldWrites),
       },
     };
   } catch {

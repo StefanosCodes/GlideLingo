@@ -51,10 +51,11 @@ function completion(correctOnFirstTry = true) {
 }
 
 function Probe() {
-  const { completeLesson, rhythmSummary, setWeeklyPracticeGoal } = useLearning();
+  const { completeLesson, legacyProgressAvailable, rhythmSummary, setWeeklyPracticeGoal } = useLearning();
   return (
     <>
       <Text testID="days">{rhythmSummary.practiceDaysThisWeek}</Text>
+      <Text testID="legacy">{legacyProgressAvailable ? 'available' : 'hidden'}</Text>
       <Pressable accessibilityLabel="Set two-day rhythm" onPress={() => setWeeklyPracticeGoal(2)} />
       <Pressable accessibilityLabel="Complete lesson" onPress={() => completeLesson(completion())} />
     </>
@@ -120,6 +121,30 @@ test('corrupt account storage is not replaced by an empty autosave', async () =>
 
   expect(storage.get(key)).toBe('{');
   expect(setItem).not.toHaveBeenCalledWith(key, expect.any(String));
+});
+
+test('an incomplete imported-source cleanup remains retryable after restart', async () => {
+  storage.set('glidelingo-learning:legacy-decision:user-a', 'imported');
+  storage.set(
+    'glidelingo-learning',
+    JSON.stringify({
+      version: 2,
+      languageId: 'el',
+      enrolledByLanguage: {},
+      completedLessonIds: ['lesson-1'],
+      lessonEvidence: [],
+      practiceDayKeys: [],
+      weeklyGoalChanges: [],
+    }),
+  );
+
+  const screen = await render(
+    <LearningProvider storageScope="user-a">
+      <Probe />
+    </LearningProvider>,
+  );
+
+  expect(screen.getByTestId('legacy').props.children).toBe('available');
 });
 
 test('completion returns the actual merged evidence after a weaker replay', async () => {

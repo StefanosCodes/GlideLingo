@@ -140,11 +140,13 @@ function initializeLearning(storageScope: string) {
 function legacyProgressNeedsDecision(storageScope: string) {
   const storage = getLearningStorage();
   if (!storage) return false;
+  let decision: string | null;
   try {
-    if (storage.getItem(legacyDecisionStorageKey(storageScope))) return false;
+    decision = storage.getItem(legacyDecisionStorageKey(storageScope));
   } catch {
     return false;
   }
+  if (decision === 'dismissed') return false;
   return readStoredLearning(LEARNING_STORAGE_KEY, storage).kind === 'found';
 }
 

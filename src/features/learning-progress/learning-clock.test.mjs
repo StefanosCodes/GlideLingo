@@ -45,3 +45,17 @@ test('an earlier review due time wins over midnight', () => {
 
   assert.equal(nextLearningRefreshAt([record], now), dueAt);
 });
+
+test('the next boundary follows the current timezone after a timezone change', () => {
+  const previousTimezone = process.env.TZ;
+  const now = Date.UTC(2026, 7, 31, 20);
+  try {
+    process.env.TZ = 'UTC';
+    const utcMidnight = nextLocalMidnight(now);
+    process.env.TZ = 'America/Los_Angeles';
+    const losAngelesMidnight = nextLocalMidnight(now);
+    assert.notEqual(losAngelesMidnight, utcMidnight);
+  } finally {
+    process.env.TZ = previousTimezone;
+  }
+});

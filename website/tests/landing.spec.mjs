@@ -30,14 +30,30 @@ test('renders the complete landing page without third-party requests or horizont
 
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Language learning, redesigned.');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Learn the language. Enter the world.');
+  await expect(page.locator('.hero-lede')).toHaveText(
+    'Build the skills and confidence to stop practicing from the sidelines and start joining real conversations.',
+  );
   await expect(page.getByRole('heading', { name: 'See the learning rhythm in motion.' })).toBeVisible();
   await expect(page.locator('.site-header .brand-symbol')).toHaveAttribute('src', '/brand/glidelingo-bird-black.svg');
   await expect(page.locator('.site-header .brand-name')).toHaveText('GlideLingo');
-  await expect(page.locator('.site-header nav')).toHaveCount(0);
-  await expect(page.locator('main > section')).toHaveCount(2);
+  await expect(page.getByRole('link', { name: 'Pricing' })).toHaveAttribute('href', '#pricing');
+  await expect(page.getByRole('link', { name: 'How it works' })).toHaveAttribute('href', '#demo');
+  const headerAlignment = await page.evaluate(() => {
+    const header = document.querySelector('.header-inner');
+    const navigation = document.querySelector('.site-nav');
+    if (!header || !navigation) return null;
+    const headerBox = header.getBoundingClientRect();
+    const navigationBox = navigation.getBoundingClientRect();
+    return Math.abs(
+      navigationBox.left + navigationBox.width / 2 - (headerBox.left + headerBox.width / 2),
+    );
+  });
+  expect(headerAlignment).not.toBeNull();
+  expect(headerAlignment).toBeLessThanOrEqual(1);
+  await expect(page.locator('main > section')).toHaveCount(3);
   await expect(page.locator('[data-video-state="ready"]')).toBeVisible();
-  await expect(page.getByText('How it works', { exact: true })).toBeVisible();
+  await expect(page.locator('.demo-intro').getByText('How it works', { exact: true })).toBeVisible();
   const productVideo = page.getByLabel('GlideLingo product walkthrough');
   await expect(productVideo).toHaveAttribute('controls', '');
   await expect(productVideo).toHaveAttribute('data-autoplay-when-visible', 'true');
@@ -73,11 +89,22 @@ test('renders the complete landing page without third-party requests or horizont
   await expect(page.locator('.download-section')).toHaveCount(0);
   await expect(page.locator('body')).not.toContainText('Desktop apps');
   await expect(page.locator('.hero-actions .button-platform-icon')).toHaveCount(1);
+  await expect(page.locator('.hero-actions .button-apple-icon')).toHaveCount(1);
+  await expect(page.locator('.hero-actions')).toContainText('Download');
+  await expect(page.locator('.hero-actions')).not.toContainText('Download for Mac');
   await expect(page.locator('.hero-actions[data-download-state="available"]')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Download GlideLingo 0.1.0 for Mac' })).toHaveAttribute(
     'href',
     downloadUrl,
   );
+  await expect(page.getByRole('heading', { name: 'Free', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Pro', exact: true })).toBeVisible();
+  await expect(page.locator('.pricing-intro > p:last-child')).toHaveText(
+    'Choose the plan that fits where you are. Upgrade whenever.',
+  );
+  await expect(page.locator('#pricing')).toContainText('$0');
+  await expect(page.locator('#pricing')).toContainText('$19.99');
+  await expect(page.locator('#pricing')).toContainText('Billed monthly. Cancel anytime.');
 
   const sizes = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
@@ -94,6 +121,17 @@ test('renders the complete landing page without third-party requests or horizont
   expect(sizes.scrollWidth).toBeLessThanOrEqual(sizes.clientWidth);
   expect(typography.displayFontLoaded).toBe(true);
   expect(typography.headingFamily).toContain('Satoshi');
+  if ((page.viewportSize()?.width ?? 0) > 860) {
+    const ledeMetrics = await page.locator('.hero-lede').evaluate((element) => ({
+      height: element.getBoundingClientRect().height,
+      lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+    }));
+    expect(ledeMetrics.height).toBeLessThanOrEqual(ledeMetrics.lineHeight + 1);
+  }
+  await page.getByRole('link', { name: 'How it works' }).click();
+  expect(new URL(page.url()).hash).toBe('#demo');
+  await page.getByRole('link', { name: 'Pricing' }).click();
+  expect(new URL(page.url()).hash).toBe('#pricing');
   expect(unexpectedRequests).toEqual([]);
   expect(consoleErrors).toEqual([]);
   expect(await page.context().cookies()).toEqual([]);

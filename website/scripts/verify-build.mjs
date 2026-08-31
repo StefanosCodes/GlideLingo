@@ -25,7 +25,8 @@ const [home, notFound, headers, robots] = await Promise.all([
 assert.match(home, /<title>GlideLingo — Language learning, redesigned<\/title>/);
 assert.match(home, /rel="canonical" href="https:\/\/glidelingo\.com\/"/);
 assert.match(home, /id="main-content"/);
-assert.match(home, /Language learning,/);
+assert.match(home, /Learn the language\./);
+assert.match(home, /Enter the world\./);
 assert.match(home, /glidelingo-bird-black\.svg/);
 assert.match(home, /brand-name/);
 assert.match(home, /data-video-state="ready"/);
@@ -35,8 +36,13 @@ assert.match(home, /<video[^>]+controls[^>]+data-autoplay-when-visible="true"[^>
 assert.match(home, /<source[^>]+glidelingo-product-walkthrough\.webm[^>]+video\/webm/);
 assert.match(home, /<source[^>]+glidelingo-product-walkthrough\.mp4/);
 assert.match(home, /<track[^>]+kind="captions"[^>]+glidelingo-product-walkthrough\.vtt/);
-assert.match(home, /Download for Mac/);
+assert.match(home, />Download<svg[^>]+button-apple-icon/);
+assert.doesNotMatch(home, /Download for Mac/);
 assert.match(home, /button-platform-icon/);
+assert.match(home, /button-apple-icon/);
+assert.match(home, /id="pricing"/);
+assert.match(home, /\$19\.99/);
+assert.match(home, /Billed monthly\. Cancel anytime\./);
 assert.doesNotMatch(home, /Desktop apps|Choose your desktop|Download for Windows/);
 assert.match(home, /<script[^>]+src="\/scripts\/video-player\.js"[^>]*><\/script>/i);
 assert.doesNotMatch(home, /<script(?![^>]+src=)(?:\s|>)/i);

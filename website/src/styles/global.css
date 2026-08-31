@@ -106,8 +106,10 @@ a {
 }
 
 .header-inner {
+  position: relative;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   min-height: 82px;
 }
 
@@ -140,6 +142,26 @@ a {
   line-height: 1;
 }
 
+.site-nav {
+  position: absolute;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  transform: translateX(-50%);
+}
+
+.site-nav a {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.site-nav a:hover {
+  color: var(--brand-blue);
+}
+
 .site-footer a {
   text-decoration-thickness: 1px;
   text-underline-offset: 4px;
@@ -167,7 +189,7 @@ a {
   width: 19px;
   height: 19px;
   flex: none;
-  margin-right: 9px;
+  margin-left: 9px;
   fill: currentColor;
 }
 
@@ -264,11 +286,12 @@ h3 {
 }
 
 .hero-lede {
-  max-width: 700px;
+  max-width: none;
   margin: 34px auto 0;
   color: var(--ink-muted);
   font-size: 20px;
   line-height: 1.5;
+  white-space: nowrap;
 }
 
 .hero-actions {
@@ -281,6 +304,7 @@ h3 {
 .product-showcase {
   position: relative;
   isolation: isolate;
+  margin-block-start: clamp(48px, 6vw, 96px);
   padding-block: 132px 152px;
   scroll-margin-top: 104px;
 }
@@ -288,14 +312,15 @@ h3 {
 .product-showcase::before {
   position: absolute;
   z-index: -1;
-  inset: 4% 2% 17%;
-  border-radius: 42px;
+  inset: 36px -48px 24px;
+  border-radius: 36px;
   background:
     radial-gradient(circle at 18% 24%, rgb(77 124 255 / 18%), transparent 44%),
     radial-gradient(circle at 82% 28%, rgb(34 211 238 / 16%), transparent 42%),
-    radial-gradient(circle at 52% 76%, rgb(184 247 230 / 22%), transparent 48%);
+    radial-gradient(circle at 52% 76%, rgb(184 247 230 / 22%), transparent 48%),
+    var(--white);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 72%);
   content: '';
-  filter: blur(12px);
 }
 
 .demo-intro {
@@ -409,6 +434,133 @@ h3 {
   font-size: 12px;
 }
 
+.pricing {
+  position: relative;
+  isolation: isolate;
+  padding-block: 132px 152px;
+  scroll-margin-top: 104px;
+}
+
+.pricing::before {
+  position: absolute;
+  z-index: -1;
+  inset: 24px -48px 36px;
+  border-radius: 36px;
+  background:
+    radial-gradient(circle at 16% 18%, rgb(184 247 230 / 28%), transparent 42%),
+    radial-gradient(circle at 84% 20%, rgb(77 124 255 / 18%), transparent 42%),
+    var(--white);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 72%);
+  content: '';
+}
+
+.pricing-intro {
+  max-width: 760px;
+  margin: 0 auto 54px;
+  text-align: center;
+}
+
+.pricing-intro > p:last-child {
+  max-width: 600px;
+  margin: 20px auto 0;
+  color: var(--ink-muted);
+  font-size: 18px;
+}
+
+.pricing-grid {
+  display: grid;
+  max-width: 920px;
+  margin-inline: auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+}
+
+.pricing-card {
+  display: flex;
+  min-height: 430px;
+  flex-direction: column;
+  padding: 36px;
+  border: 1px solid var(--line-strong);
+  border-radius: 22px;
+  background: rgb(255 255 255 / 82%);
+  box-shadow: var(--shadow);
+}
+
+.pricing-card-featured {
+  border-color: rgb(77 124 255 / 40%);
+  background:
+    linear-gradient(145deg, rgb(77 124 255 / 10%), rgb(184 247 230 / 16%)),
+    var(--white);
+  box-shadow: var(--shadow-large);
+}
+
+.pricing-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.pricing-card h3 {
+  font-size: 26px;
+  font-weight: 480;
+}
+
+.plan-price {
+  margin: 0;
+  text-align: right;
+}
+
+.plan-price span {
+  display: block;
+}
+
+.plan-price span:first-child {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 560;
+  letter-spacing: -0.045em;
+  line-height: 1;
+}
+
+.plan-price span:last-child,
+.plan-billing {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.plan-billing {
+  margin: 12px 0 0;
+  text-align: right;
+}
+
+.plan-summary {
+  margin: 38px 0 0;
+  color: var(--ink-muted);
+}
+
+.plan-features {
+  display: grid;
+  margin: 30px 0 0;
+  padding: 0;
+  gap: 14px;
+  list-style: none;
+}
+
+.plan-features li {
+  position: relative;
+  padding-left: 26px;
+}
+
+.plan-features li::before {
+  position: absolute;
+  top: 0.1em;
+  left: 0;
+  color: var(--brand-blue);
+  content: '✓';
+  font-weight: 700;
+}
+
 .site-footer {
   padding-block: 40px;
   background: var(--white);
@@ -478,12 +630,32 @@ h3 {
     padding-block: 126px 112px;
   }
 
-  .hero::before {
+  .hero::before,
+  .product-showcase::before {
     inset: 28px 0 -18px;
   }
 
+  .product-showcase::before {
+    inset-block: 28px 20px;
+  }
+
+  .pricing::before {
+    inset: 28px 0 20px;
+  }
+
   .hero-copy {
-    max-width: 780px;
+    max-width: 880px;
+  }
+
+  .hero-lede {
+    font-size: 17px;
+  }
+}
+
+@media (max-width: 860px) {
+  .hero-lede {
+    max-width: 700px;
+    white-space: normal;
   }
 }
 
@@ -520,7 +692,8 @@ h3 {
   }
 
   .hero-lede,
-  .demo-intro > p:last-child {
+  .demo-intro > p:last-child,
+  .pricing-intro > p:last-child {
     font-size: 17px;
   }
 
@@ -529,7 +702,27 @@ h3 {
   }
 
   .product-showcase::before {
-    inset: 2% 0 19%;
+    inset: 24px -12px 16px;
+    border-radius: 28px;
+  }
+
+  .pricing {
+    padding-block: 96px 112px;
+  }
+
+  .pricing::before {
+    inset: 24px -12px 16px;
+    border-radius: 28px;
+  }
+
+  .pricing-grid {
+    max-width: 520px;
+    grid-template-columns: 1fr;
+  }
+
+  .pricing-card {
+    min-height: 0;
+    padding: 30px;
   }
 
   .product-frame figcaption {
@@ -547,6 +740,18 @@ h3 {
 }
 
 @media (max-width: 440px) {
+  .brand-name {
+    display: none;
+  }
+
+  .site-nav {
+    gap: 16px;
+  }
+
+  .site-nav a {
+    font-size: 14px;
+  }
+
   .hero-actions {
     align-items: stretch;
     flex-direction: column;

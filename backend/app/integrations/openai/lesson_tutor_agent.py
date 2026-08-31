@@ -18,6 +18,7 @@ from app.modules.lesson_tutor.context import LessonTutorContext
 from app.modules.lesson_tutor.prompt import PROMPT_VERSION, build_instructions
 from app.modules.lesson_tutor.schemas import TutorHistoryMessage
 from openai import AsyncOpenAI
+from openai.types.shared import Reasoning
 
 
 def _dynamic_instructions(
@@ -40,6 +41,7 @@ class OpenAILessonTutorAgent:
             model=model,
             model_settings=ModelSettings(
                 max_tokens=400,
+                reasoning=Reasoning(effort="none"),
                 verbosity="low",
                 timeout=20,
                 store=False,

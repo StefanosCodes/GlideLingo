@@ -1,0 +1,12 @@
+*
+!backend/
+!backend/Dockerfile
+!backend/pyproject.toml
+!backend/uv.lock
+!backend/app/
+!backend/app/**
+!content/
+!content/**
+**/__pycache__/
+**/*.pyc
+**/*.pyo

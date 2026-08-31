@@ -4,45 +4,33 @@ import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { PromptComposer, PromptMessage, ThinkingBar } from '@/components/prompt-kit-native';
 import { ThemedText } from '@/components/themed-text';
 import { Radii, Spacing } from '@/constants/theme';
+import { type LessonTutorState } from '@/features/learning-session/lesson-tutor/reducer';
 import { useTheme } from '@/hooks/use-theme';
-
-type ChatLine =
-  | { id: string; role: 'user'; text: string }
-  | { id: string; role: 'assistant'; text: string }
-  | { id: string; role: 'thinking' };
-
-const HONEST_REPLY =
-  'The tutor is not wired yet. The lesson on the left is the material. Ask again when answers can follow that page.';
 
 export function LessonAskDrawer({
   lessonTitle,
   onClose,
+  onRetry,
+  onSend,
+  state,
 }: {
   lessonTitle: string;
   onClose: () => void;
+  onRetry: () => void;
+  onSend: (message: string) => boolean;
+  state: LessonTutorState;
 }) {
   const theme = useTheme();
   const [draft, setDraft] = useState('');
-  const [lines, setLines] = useState<ChatLine[]>([]);
   const web = Platform.OS === 'web';
 
   function send() {
-    const text = draft.trim();
-    if (!text) return;
-    const userId = `u-${Date.now()}`;
-    const thinkId = `t-${Date.now()}`;
-    setDraft('');
-    setLines((current) => [...current, { id: userId, role: 'user', text }, { id: thinkId, role: 'thinking' }]);
-    setTimeout(() => {
-      setLines((current) => [
-        ...current.filter((line) => line.id !== thinkId),
-        { id: `a-${Date.now()}`, role: 'assistant', text: HONEST_REPLY },
-      ]);
-    }, 500);
+    if (onSend(draft)) setDraft('');
   }
 
   return (
     <View
+      accessibilityLabel="Lesson tutor"
       style={[
         web ? styles.column : styles.sheet,
         {
@@ -59,7 +47,11 @@ export function LessonAskDrawer({
             {lessonTitle}
           </ThemedText>
         </View>
-        <Pressable accessibilityLabel="Close ask panel" accessibilityRole="button" onPress={onClose} hitSlop={8}>
+        <Pressable
+          accessibilityLabel="Close lesson tutor"
+          accessibilityRole="button"
+          hitSlop={8}
+          onPress={onClose}>
           <ThemedText type="footnote" themeColor="textSecondary">
             Close
           </ThemedText>
@@ -67,25 +59,37 @@ export function LessonAskDrawer({
       </View>
 
       <ScrollView contentContainerStyle={styles.thread} showsVerticalScrollIndicator={false}>
-        {lines.length === 0 ? (
+        {state.messages.length === 0 ? (
           <ThemedText type="callout" themeColor="textSecondary">
-            Questions stay beside the page. They do not replace it.
+            Ask about what you’re seeing. I’ll keep the lesson in view.
           </ThemedText>
         ) : (
-          lines.map((line) =>
-            line.role === 'thinking' ? (
-              <ThinkingBar key={line.id} text="Looking at this lesson" />
-            ) : (
-              <PromptMessage key={line.id} role={line.role}>
-                {line.text}
-              </PromptMessage>
-            ),
-          )
+          state.messages.map((line) => (
+            <PromptMessage key={line.id} role={line.role}>
+              {line.content}
+            </PromptMessage>
+          ))
         )}
+        {state.status === 'working' ? (
+          <View accessibilityLiveRegion="polite" accessibilityLabel="Looking at this step">
+            <ThinkingBar text="Looking at this step." />
+          </View>
+        ) : null}
+        {state.error ? (
+          <View accessibilityLiveRegion="polite" style={styles.error}>
+            <ThemedText type="footnote" themeColor="textSecondary">
+              The tutor isn’t available right now. Your lesson is still here.
+            </ThemedText>
+            <Pressable accessibilityLabel="Retry tutor message" accessibilityRole="button" onPress={onRetry}>
+              <ThemedText type="footnote">Retry</ThemedText>
+            </Pressable>
+          </View>
+        ) : null}
       </ScrollView>
 
       <View style={[styles.composerWrap, { borderTopColor: theme.separator }]}>
         <PromptComposer
+          disabled={state.status === 'working'}
           onChangeText={setDraft}
           onSubmit={send}
           placeholder="Ask about this lesson"
@@ -107,8 +111,12 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: Radii.large,
     borderTopRightRadius: Radii.large,
     borderTopWidth: StyleSheet.hairlineWidth,
+    bottom: 0,
     height: '52%',
-    width: '100%',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    zIndex: 10,
   },
   header: {
     alignItems: 'center',
@@ -121,5 +129,6 @@ const styles = StyleSheet.create({
   },
   headerCopy: { flex: 1, gap: 2 },
   thread: { flexGrow: 1, gap: Spacing.three, padding: Spacing.three },
+  error: { gap: Spacing.two },
   composerWrap: { borderTopWidth: StyleSheet.hairlineWidth, padding: Spacing.two },
 });

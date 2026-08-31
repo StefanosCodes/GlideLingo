@@ -75,7 +75,7 @@ function validatePublicBuildConfiguration(environment) {
   const clerkPublishableKey = requirePublicBuildKey(
     environment,
     'EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY',
-    /^pk_(?:test|live)_[A-Za-z0-9_-]+$/,
+    /^pk_live_[A-Za-z0-9_-]+$/,
   );
   const revenueCatWebApiKey = requirePublicBuildKey(
     environment,

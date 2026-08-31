@@ -1,9 +1,9 @@
+import { getApiAuthorizationHeader } from '@/api/auth-token';
 import {
   ApiConfigurationError,
   resolveApiRuntimeConfiguration,
   type ApiRuntimeConfiguration,
 } from '@/config/api';
-import { getApiAuthorizationHeader } from '@/api/auth-token';
 
 const DEFAULT_TIMEOUT_MS = 9_000;
 
@@ -60,6 +60,10 @@ type GetJsonOptions<T> = {
   timeoutMs?: number;
 };
 
+type PostJsonOptions<T> = GetJsonOptions<T> & {
+  body: unknown;
+};
+
 export function getApiClientRuntimeDetails(): ApiClientRuntimeDetails {
   try {
     const configuration = resolveApiRuntimeConfiguration();
@@ -78,6 +82,32 @@ export async function getJson<T>({
   signal,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }: GetJsonOptions<T>): Promise<ApiJsonResponse<T>> {
+  return requestJson({ method: 'GET', parse, path, signal, timeoutMs });
+}
+
+export async function postJson<T>({
+  body,
+  parse,
+  path,
+  signal,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+}: PostJsonOptions<T>): Promise<ApiJsonResponse<T>> {
+  return requestJson({ body, method: 'POST', parse, path, signal, timeoutMs });
+}
+
+type RequestJsonOptions<T> = GetJsonOptions<T> & {
+  body?: unknown;
+  method: 'GET' | 'POST';
+};
+
+async function requestJson<T>({
+  body,
+  method,
+  parse,
+  path,
+  signal,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+}: RequestJsonOptions<T>): Promise<ApiJsonResponse<T>> {
   const configuration = resolveConfigurationForRequest();
   const runtime: ApiClientRuntimeDetails = configuration;
   const requestUrl = composeRequestUrl(configuration.origin, path, runtime);
@@ -104,11 +134,13 @@ export async function getJson<T>({
   try {
     const authorizationHeader = await getApiAuthorizationHeader();
     const response = await fetch(requestUrl, {
+      body: body === undefined ? undefined : JSON.stringify(body),
       headers: {
         Accept: 'application/json',
         ...authorizationHeader,
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
-      method: 'GET',
+      method,
       signal: controller.signal,
     });
     const requestId = response.headers.get('x-request-id');

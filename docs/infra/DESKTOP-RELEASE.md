@@ -62,6 +62,11 @@ approval boundary as signing:
 | `GLIDELINGO_CLERK_PUBLISHABLE_KEY` | Clerk public production publishable key for that exact frontend origin |
 | `GLIDELINGO_REVENUECAT_WEB_API_KEY` | RevenueCat public Web SDK key used by Electron |
 
+The Clerk publishable key must begin with `pk_live_`; the release command rejects development
+`pk_test_` keys. In Clerk's production Native application, allowlist exactly
+`glidelingo://app/sign-in` and `glidelingo://app/sso-callback`. Do not use wildcard custom-protocol
+redirects or alternate authorities.
+
 On macOS, `base64 < file | pbcopy` copies a file's encoded value without writing another secret file. Keep the originals in an approved secure location until credential rotation, then remove unsecured copies.
 
 ## Build and publish
@@ -107,7 +112,7 @@ The automated workflow proves:
 - the executable contains both x64 and arm64 slices;
 - DMG and ZIP checksums are generated before upload.
 
-Before linking a release from the public landing page, download the DMG onto a second clean Mac, drag GlideLingo to Applications, launch it normally, and exercise the critical lesson, audio, persistence, and production API flows.
+Before linking a release from the public landing page, download the DMG onto a second clean Mac, drag GlideLingo to Applications, launch it normally, and exercise the critical lesson, audio, persistence, and production API flows. With the installed signed app, prove the system-browser OAuth callback both while GlideLingo is already running (warm callback) and while it is fully closed (cold callback). These installed OAuth smokes remain activation gates even after unit and packaging checks pass.
 
 The clean-Mac smoke test is currently external, so the workflow intentionally leaves every
 release in draft state and contains no publish step. Do not publish the draft or set

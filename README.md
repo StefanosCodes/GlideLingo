@@ -113,6 +113,18 @@ The committed local defaults work without an environment file. Copy `.env.exampl
 
 Open `/diagnostics` from the internal Prompt Kit screen to see the exact API origin, target platform, API reachability, and PostgreSQL readiness. Android emulators default to `10.0.2.2:8123`; iOS Simulator, web, and Electron development default to `localhost:8123`. A physical phone must receive an explicit reachable value such as `EXPO_PUBLIC_API_BASE_URL=http://192.168.1.20:8123` before Metro starts.
 
+### Page-aware lesson tutor
+
+The lesson tutor is implemented as one FastAPI-hosted OpenAI Agents SDK agent. The backend resolves authored lesson context from a whitelist, exposes only the current and preceding lesson steps, and keeps SDK types behind the OpenAI integration adapter. Conversation history remains in the client for the current lesson sitting only.
+
+Both feature flags are disabled by default. To use the tutor locally, set `EXPO_PUBLIC_LESSON_TUTOR_ENABLED=true`, `GLIDELINGO_LESSON_TUTOR_ENABLED=true`, and `OPENAI_API_KEY` before starting Expo and FastAPI. `GLIDELINGO_OPENAI_MODEL` defaults to `gpt-5.6-terra`. Never place the API key in an `EXPO_PUBLIC_` variable.
+
+Normal verification uses fake adapters and does not require a key. Run `npm run api:test:agent-live` only with the server feature flag and API key explicitly enabled; it executes the stable cases in `backend/evals/lesson_tutor/cases.json` against the configured model.
+
+The production image includes the whitelisted authored content under `/app/content`. Request deadlines are nested so the provider stops at 10 seconds, the service at 12 seconds, Cloud Run at 15 seconds, and the client at 25 seconds. Authored answer aliases provide a deterministic final guard against disclosing an unattempted check answer.
+
+The tutor route requires a verified Clerk principal before it can reach the service, and the request schema does not accept a user or tenant identifier from the client. Keep both tutor flags disabled in shared environments until the server passes a stable pseudonymous subject as the provider safety identifier and applies per-principal rate and spend limits before invoking the provider. `backend/app/main.py` remains responsible for wiring authentication and the provider; this disabled slice does not provision an OpenAI key.
+
 Stop the project database without deleting its named volume:
 
 ```bash

@@ -11,8 +11,17 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 logger = logging.getLogger("glidelingo.request")
 
 
+type ErrorCode = Literal[
+    "dependency_unavailable",
+    "internal_error",
+    "lesson_context_not_found",
+    "lesson_tutor_unavailable",
+    "lesson_tutor_timeout",
+]
+
+
 class ErrorDetail(BaseModel):
-    code: Literal["dependency_unavailable", "internal_error"]
+    code: ErrorCode
     message: str
     request_id: str
 
@@ -25,10 +34,22 @@ class DependencyUnavailableError(Exception):
     """A required dependency cannot currently serve requests."""
 
 
+class LessonContextNotFoundError(Exception):
+    """The requested authored lesson context is unavailable."""
+
+
+class LessonTutorUnavailableError(Exception):
+    """The tutor is disabled or its provider cannot serve the request."""
+
+
+class LessonTutorTimeoutError(Exception):
+    """The tutor exceeded its bounded request deadline."""
+
+
 def error_response(
     *,
     status_code: int,
-    code: Literal["dependency_unavailable", "internal_error"],
+    code: ErrorCode,
     message: str,
     request_id: str,
 ) -> JSONResponse:
@@ -41,6 +62,33 @@ async def dependency_unavailable_handler(request: Request, _error: Exception) ->
         status_code=503,
         code="dependency_unavailable",
         message="A required dependency is unavailable.",
+        request_id=request.state.request_id,
+    )
+
+
+async def lesson_context_not_found_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=404,
+        code="lesson_context_not_found",
+        message="The lesson context could not be found.",
+        request_id=request.state.request_id,
+    )
+
+
+async def lesson_tutor_unavailable_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=503,
+        code="lesson_tutor_unavailable",
+        message="The lesson tutor is unavailable.",
+        request_id=request.state.request_id,
+    )
+
+
+async def lesson_tutor_timeout_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=504,
+        code="lesson_tutor_timeout",
+        message="The lesson tutor took too long to respond.",
         request_id=request.state.request_id,
     )
 

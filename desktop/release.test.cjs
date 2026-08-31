@@ -50,6 +50,10 @@ test('release validation requires public Clerk and RevenueCat web keys and rejec
     /CLERK_PUBLISHABLE_KEY/,
   );
   assert.throws(
+    () => validatePublicBuildConfiguration({ ...apiKeyEnvironment, EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_developmentkey' }),
+    /CLERK_PUBLISHABLE_KEY/,
+  );
+  assert.throws(
     () => validatePublicBuildConfiguration({ ...apiKeyEnvironment, EXPO_PUBLIC_REVENUECAT_WEB_API_KEY: 'sk_secret' }),
     /REVENUECAT_WEB_API_KEY/,
   );

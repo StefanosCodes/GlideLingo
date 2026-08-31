@@ -20,6 +20,13 @@ if [[ "${active_project}" != "${expected_project}" ]]; then
   exit 1
 fi
 
+if [[ "${CLOUD_SHELL:-}" != "true" ]] \
+  && ! gcloud auth application-default print-access-token >/dev/null 2>&1; then
+  echo "Terraform requires Application Default Credentials on a local workstation." >&2
+  echo "Run: gcloud auth application-default login" >&2
+  exit 1
+fi
+
 billing_account_name="$(
   gcloud billing projects describe "${expected_project}" \
     --format="value(billingAccountName)"

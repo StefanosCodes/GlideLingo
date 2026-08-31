@@ -19,8 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
           cache: npm
@@ -50,7 +50,7 @@ jobs:
     env:
       GLIDELINGO_DATABASE_URL: postgresql+psycopg://glidelingo:ci_only@localhost:5432/glidelingo
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install uv and Python
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -61,6 +61,19 @@ jobs:
       - run: npm run api:verify
       - run: npm run api:test:integration
       - run: npm run db:config
+      - name: Build and smoke the production API container
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="glidelingo-api:verify"
+          docker build --tag "${image}" backend
+          container_id="$(docker run --detach --network host \
+            --env GLIDELINGO_DATABASE_URL="${GLIDELINGO_DATABASE_URL}" \
+            "${image}")"
+          trap 'docker rm --force "${container_id}" >/dev/null 2>&1 || true' EXIT
+          test "$(docker inspect --format='{{.Config.User}}' "${container_id}")" = "glidelingo"
+          curl --fail --retry 6 --retry-all-errors --retry-delay 2 http://127.0.0.1:8080/health/live
+          curl --fail --retry 6 --retry-all-errors --retry-delay 2 http://127.0.0.1:8080/health/ready
 
   infrastructure:
     name: Terraform
@@ -70,11 +83,11 @@ jobs:
       run:
         working-directory: infra/gcp/environments/development
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install Terraform
-        uses: hashicorp/setup-terraform@v4
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
         with:
           terraform_version: 1.15.9
       - run: terraform fmt -check
-      - run: terraform init -backend=false
+      - run: terraform init -backend=false -lockfile=readonly
       - run: terraform validate

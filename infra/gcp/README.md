@@ -31,22 +31,29 @@ URL is not authorization to learner data.
 - Cloud Build API support for the first in-project container build;
 - a private Artifact Registry Docker repository;
 - the Cloud Run runtime service account;
-- a least-privilege GitHub deployment service account and OIDC trust restricted to
-  `StefanosCodes/GlideLingo`;
+- a least-privilege GitHub deployment service account and OIDC trust restricted to the immutable
+  `StefanosCodes/GlideLingo` repository/owner IDs and the `main` branch;
 - a PostgreSQL 17 Enterprise development instance, database, and application user;
 - a Secret Manager secret containing the SQLAlchemy Cloud SQL connection URL;
 - a public, scale-to-zero Cloud Run service capped at three instances;
 - a project-scoped monthly budget with default IAM-recipient alerts.
 
-The database password is generated as a Terraform ephemeral value. It is sent only to the
-Cloud SQL user's write-only password field and Secret Manager's write-only secret field, so it
-is not stored in configuration, plans, or state.
+The database password is generated once as a sensitive Terraform value in the protected,
+versioned GCS state backend. It is sent to the Cloud SQL user and Secret Manager through
+write-only fields, which prevents extra plaintext copies in their resource state. The durable
+generated value makes a partially failed apply retry-safe. Access to Terraform state therefore
+grants access to this development credential and must remain limited to infrastructure operators.
+Credential rotation is a reviewed infrastructure change: increment `database_password_epoch` in
+`main.tf`, apply once, and verify readiness. The apply updates both consumers from the same durable
+value and creates a Cloud Run revision pinned to the new concrete secret version.
 
 ## One-time bootstrap
 
 Prerequisites:
 
 - Google Cloud CLI authenticated as a project owner;
+- Application Default Credentials (`gcloud auth application-default login`) when running outside
+  Cloud Shell;
 - Terraform 1.11 or newer;
 - billing enabled on `glidelingo-development`.
 
@@ -89,7 +96,8 @@ GCP_REGION
 Set `GCP_REGION` to the region used during bootstrap, normally `us-west1`.
 
 No Google service-account key is created or stored in GitHub. The deployment workflow obtains
-short-lived credentials through GitHub's OIDC token.
+short-lived credentials through GitHub's OIDC token. The provider rejects tokens from feature
+branches even if a branch copy of the workflow requests `id-token: write`.
 
 ## Repeat the complete setup
 
@@ -167,8 +175,18 @@ The workflow:
 1. runs the canonical backend verification;
 2. builds the production container;
 3. pushes a commit-addressed image to Artifact Registry;
-4. deploys that immutable image to the existing Cloud Run service;
-5. verifies `/health/live` and `/health/ready`.
+4. deploys that immutable image as a zero-traffic tagged candidate;
+5. verifies the candidate's `/health/live` and `/health/ready` endpoints;
+6. promotes the verified revision to 100% traffic and rolls back if the canonical smoke fails.
+
+Manual rollback remains available:
+
+```bash
+gcloud run services update-traffic glidelingo-api \
+  --project=glidelingo-development \
+  --region=us-west1 \
+  --to-revisions=PREVIOUS_REVISION=100
+```
 
 Use the `api_url` Terraform output as `EXPO_PUBLIC_API_BASE_URL` for development builds.
 

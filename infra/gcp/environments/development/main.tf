@@ -1,5 +1,8 @@
 locals {
-  github_repository = "StefanosCodes/GlideLingo"
+  github_repository       = "StefanosCodes/GlideLingo"
+  github_repository_id    = "1352030189"
+  github_owner_id         = "309610265"
+  database_password_epoch = 2
   labels = {
     application = "glidelingo"
     environment = "development"
@@ -50,6 +53,23 @@ resource "google_artifact_registry_repository" "containers" {
     }
   }
 
+  cleanup_policies {
+    id     = "delete-old-tagged"
+    action = "DELETE"
+    condition {
+      tag_state  = "TAGGED"
+      older_than = "7776000s"
+    }
+  }
+
+  cleanup_policies {
+    id     = "keep-recent"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = 20
+    }
+  }
+
   depends_on = [google_project_service.required]
 }
 
@@ -77,13 +97,15 @@ resource "google_sql_database_instance" "postgres" {
   deletion_protection = true
 
   settings {
-    edition           = "ENTERPRISE"
-    tier              = "db-f1-micro"
-    availability_type = "ZONAL"
-    disk_type         = "PD_SSD"
-    disk_size         = 10
-    disk_autoresize   = true
-    activation_policy = "ALWAYS"
+    edition                     = "ENTERPRISE"
+    tier                        = "db-f1-micro"
+    availability_type           = "ZONAL"
+    disk_type                   = "PD_SSD"
+    disk_size                   = 10
+    disk_autoresize             = true
+    disk_autoresize_limit       = 50
+    activation_policy           = "ALWAYS"
+    deletion_protection_enabled = true
 
     backup_configuration {
       enabled                        = true
@@ -111,6 +133,10 @@ resource "google_sql_database_instance" "postgres" {
     user_labels = local.labels
   }
 
+  lifecycle {
+    ignore_changes = [settings[0].disk_size]
+  }
+
   depends_on = [google_project_service.required]
 }
 
@@ -121,17 +147,21 @@ resource "google_sql_database" "application" {
   charset  = "UTF8"
 }
 
-ephemeral "random_password" "database" {
+resource "random_password" "database" {
   length  = 32
   special = false
+
+  keepers = {
+    epoch = tostring(local.database_password_epoch)
+  }
 }
 
 resource "google_sql_user" "application" {
   project             = var.project_id
   name                = "glidelingo_app"
   instance            = google_sql_database_instance.postgres.name
-  password_wo         = ephemeral.random_password.database.result
-  password_wo_version = 1
+  password_wo         = random_password.database.result
+  password_wo_version = local.database_password_epoch
 }
 
 resource "google_secret_manager_secret" "database_url" {
@@ -152,8 +182,8 @@ resource "google_secret_manager_secret" "database_url" {
 
 resource "google_secret_manager_secret_version" "database_url" {
   secret                 = google_secret_manager_secret.database_url.id
-  secret_data_wo         = "postgresql+psycopg://glidelingo_app:${ephemeral.random_password.database.result}@/glidelingo?host=/cloudsql/${google_sql_database_instance.postgres.connection_name}"
-  secret_data_wo_version = 1
+  secret_data_wo         = "postgresql+psycopg://glidelingo_app:${random_password.database.result}@/glidelingo?host=/cloudsql/${google_sql_database_instance.postgres.connection_name}"
+  secret_data_wo_version = local.database_password_epoch
   deletion_policy        = "DISABLE"
 }
 
@@ -203,7 +233,7 @@ resource "google_cloud_run_v2_service" "api" {
         value_source {
           secret_key_ref {
             secret  = google_secret_manager_secret.database_url.secret_id
-            version = "latest"
+            version = google_secret_manager_secret_version.database_url.version
           }
         }
       }
@@ -221,6 +251,30 @@ resource "google_cloud_run_v2_service" "api" {
       volume_mounts {
         name       = "cloudsql"
         mount_path = "/cloudsql"
+      }
+
+      startup_probe {
+        initial_delay_seconds = 0
+        timeout_seconds       = 3
+        period_seconds        = 5
+        failure_threshold     = 12
+
+        http_get {
+          path = "/health/live"
+          port = 8080
+        }
+      }
+
+      liveness_probe {
+        initial_delay_seconds = 10
+        timeout_seconds       = 3
+        period_seconds        = 30
+        failure_threshold     = 3
+
+        http_get {
+          path = "/health/live"
+          port = 8080
+        }
       }
     }
 
@@ -267,12 +321,14 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   display_name                       = "GlideLingo GitHub Actions"
 
   attribute_mapping = {
-    "google.subject"       = "assertion.sub"
-    "attribute.actor"      = "assertion.actor"
-    "attribute.repository" = "assertion.repository"
-    "attribute.ref"        = "assertion.ref"
+    "google.subject"                = "assertion.sub"
+    "attribute.actor"               = "assertion.actor"
+    "attribute.repository"          = "assertion.repository"
+    "attribute.repository_id"       = "assertion.repository_id"
+    "attribute.repository_owner_id" = "assertion.repository_owner_id"
+    "attribute.ref"                 = "assertion.ref"
   }
-  attribute_condition = "assertion.repository == '${local.github_repository}'"
+  attribute_condition = "assertion.repository == '${local.github_repository}' && assertion.repository_id == '${local.github_repository_id}' && assertion.repository_owner_id == '${local.github_owner_id}' && assertion.ref == 'refs/heads/main'"
 
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com/"

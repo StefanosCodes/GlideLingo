@@ -228,6 +228,29 @@ function isAllowedAuthWindowUrl(targetUrl, clerkOrigin = PRODUCTION_CLERK_ORIGIN
   }
 }
 
+function isAllowedAuthPopupNavigation(
+  targetUrl,
+  rendererUrl,
+  clerkOrigin = PRODUCTION_CLERK_ORIGIN,
+) {
+  if (isAllowedAuthWindowUrl(targetUrl, clerkOrigin)) return true;
+
+  try {
+    const target = new URL(targetUrl);
+    const renderer = new URL(rendererUrl);
+
+    return (
+      renderer.protocol === 'http:' &&
+      target.protocol === 'http:' &&
+      target.origin === renderer.origin &&
+      !target.username &&
+      !target.password
+    );
+  } catch {
+    return false;
+  }
+}
+
 function parseAuthCallbackUrl(targetUrl) {
   if (typeof targetUrl !== 'string' || targetUrl.length > 4096) return null;
 
@@ -274,6 +297,7 @@ module.exports = {
   PRODUCTION_CLERK_ORIGIN,
   buildContentSecurityPolicy,
   findAuthCallbackUrl,
+  isAllowedAuthPopupNavigation,
   isAllowedAuthWindowUrl,
   isAllowedNavigation,
   isExactAppUrl,

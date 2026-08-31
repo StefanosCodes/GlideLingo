@@ -7,6 +7,7 @@ const {
   PRODUCTION_CLERK_ORIGIN,
   buildContentSecurityPolicy,
   findAuthCallbackUrl,
+  isAllowedAuthPopupNavigation,
   isAllowedAuthWindowUrl,
   isAllowedNavigation,
   isExactAppUrl,
@@ -26,6 +27,42 @@ test('authentication popups are restricted to Clerk, Google, and Apple HTTPS ori
   assert.equal(isAllowedAuthWindowUrl('https://another-instance.clerk.accounts.dev/'), false);
   assert.equal(isAllowedAuthWindowUrl('http://accounts.google.com/'), false);
   assert.equal(isAllowedAuthWindowUrl('javascript:alert(1)'), false);
+});
+
+test('development auth popup navigation stays on reviewed OAuth or renderer origins', () => {
+  const rendererUrl = 'http://127.0.0.1:8081/';
+
+  assert.equal(
+    isAllowedAuthPopupNavigation(
+      'https://vast-gator-9531.clerk.accounts.dev/v1/oauth_callback',
+      rendererUrl,
+    ),
+    true,
+  );
+  assert.equal(
+    isAllowedAuthPopupNavigation('https://accounts.google.com/o/oauth2/v2/auth', rendererUrl),
+    true,
+  );
+  assert.equal(
+    isAllowedAuthPopupNavigation('https://appleid.apple.com/auth/authorize', rendererUrl),
+    true,
+  );
+  assert.equal(
+    isAllowedAuthPopupNavigation('http://127.0.0.1:8081/sso-callback?state=opaque', rendererUrl),
+    true,
+  );
+  assert.equal(
+    isAllowedAuthPopupNavigation('http://localhost:8081/sso-callback', rendererUrl),
+    false,
+  );
+  assert.equal(
+    isAllowedAuthPopupNavigation('https://example.com/oauth', rendererUrl),
+    false,
+  );
+  assert.equal(
+    isAllowedAuthPopupNavigation('javascript:alert(1)', rendererUrl),
+    false,
+  );
 });
 
 test('packaged CSP includes exact API and Clerk origins plus web checkout providers', () => {

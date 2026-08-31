@@ -1,3 +1,4 @@
+import { useAuth } from '@clerk/expo';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -8,6 +9,8 @@ import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { Spacing, type ThemeColor } from '@/constants/theme';
 import {
+  AuthSessionProofError,
+  getAuthSessionProof,
   getSystemStatus,
   getSystemStatusRuntimeDetails,
   SystemStatusError,
@@ -27,13 +30,22 @@ type StatusPresentation = {
   title: string;
 };
 
+type AuthProofViewState =
+  | { kind: 'checking' }
+  | { kind: 'verified'; requestId: string | null; status: number }
+  | { kind: 'mismatch'; requestId: string | null; status: number }
+  | { kind: 'unauthorized'; requestId: string | null; status: number | null }
+  | { kind: 'unavailable'; requestId: string | null; status: number | null };
+
 export function SystemStatusScreen() {
+  const { isLoaded, isSignedIn, userId } = useAuth();
   const theme = useTheme();
   const router = useRouter();
   const runtime = useMemo(() => getSystemStatusRuntimeDetails(), []);
   const requestSequence = useRef(0);
   const [retryCount, setRetryCount] = useState(0);
   const [viewState, setViewState] = useState<ViewState>({ kind: 'checking' });
+  const [authProofState, setAuthProofState] = useState<AuthProofViewState>({ kind: 'checking' });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -69,10 +81,52 @@ export function SystemStatusScreen() {
     };
   }, [retryCount]);
 
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn || !userId) return;
+
+    const controller = new AbortController();
+
+    void getAuthSessionProof(userId, controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        setAuthProofState({
+          kind: result.matchesCurrentUser ? 'verified' : 'mismatch',
+          requestId: result.requestId,
+          status: result.status,
+        });
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof AuthSessionProofError && error.kind === 'cancelled') return;
+        if (error instanceof AuthSessionProofError && error.kind === 'unauthorized') {
+          setAuthProofState({
+            kind: 'unauthorized',
+            requestId: error.requestId,
+            status: error.status,
+          });
+          return;
+        }
+        setAuthProofState({
+          kind: 'unavailable',
+          requestId: error instanceof AuthSessionProofError ? error.requestId : null,
+          status: error instanceof AuthSessionProofError ? error.status : null,
+        });
+      });
+
+    return () => controller.abort();
+  }, [isLoaded, isSignedIn, retryCount, userId]);
+
   const presentation = getStatusPresentation(viewState);
   const requestId = 'requestId' in viewState ? viewState.requestId : null;
   const responseStatus = 'status' in viewState ? viewState.status : null;
   const isChecking = viewState.kind === 'checking';
+  const displayedAuthProofState: AuthProofViewState =
+    isLoaded && (!isSignedIn || !userId)
+      ? { kind: 'unauthorized', requestId: null, status: null }
+      : authProofState;
+  const authPresentation = getAuthProofPresentation(displayedAuthProofState);
+  const isAuthChecking = displayedAuthProofState.kind === 'checking';
 
   return (
     <ScreenFrame chrome={false} includeTabInset={false} contentStyle={styles.content} testID="system-status-screen">
@@ -114,6 +168,31 @@ export function SystemStatusScreen() {
         </ThemedText>
       </GlideSurface>
 
+      <GlideSurface
+        accessible
+        accessibilityLiveRegion="polite"
+        accessibilityLabel={`${authPresentation.title}. ${authPresentation.body}`}
+        padding="roomy"
+        variant={displayedAuthProofState.kind === 'verified' ? 'success' : 'card'}
+        style={styles.statusSurface}>
+        <View style={styles.statusTitleRow}>
+          {isAuthChecking ? (
+            <ActivityIndicator accessibilityLabel="Checking authenticated API session" color={theme.tint} />
+          ) : null}
+          <ThemedText type="title2" themeColor={authPresentation.color} style={styles.statusTitle}>
+            {authPresentation.title}
+          </ThemedText>
+        </View>
+        <ThemedText type="body" themeColor="textSecondary">
+          {authPresentation.body}
+        </ThemedText>
+        {'requestId' in displayedAuthProofState && displayedAuthProofState.requestId ? (
+          <ThemedText type="footnote" themeColor="textTertiary" selectable>
+            Auth request ID: {displayedAuthProofState.requestId}
+          </ThemedText>
+        ) : null}
+      </GlideSurface>
+
       <View style={styles.detailsSection}>
         <View style={styles.sectionCopy}>
           <ThemedText type="eyebrow" themeColor="textSecondary">
@@ -133,21 +212,58 @@ export function SystemStatusScreen() {
 
       <View style={styles.actions}>
         <GlideButton
-          disabled={isChecking}
+          disabled={isChecking || isAuthChecking}
           fullWidth
-          label={isChecking ? 'Checking…' : 'Retry readiness check'}
+          label={isChecking || isAuthChecking ? 'Checking…' : 'Retry diagnostics'}
           onPress={() => {
             setViewState({ kind: 'checking' });
+            setAuthProofState({ kind: 'checking' });
             setRetryCount((current) => current + 1);
           }}
           testID="system-status-retry"
         />
         <ThemedText type="footnote" themeColor="textTertiary">
-          This screen displays only connection metadata. It never displays credentials or raw backend exceptions.
+          This screen displays only connection and identity-match metadata. It never displays credentials, session
+          tokens, user IDs, or raw backend exceptions.
         </ThemedText>
       </View>
     </ScreenFrame>
   );
+}
+
+function getAuthProofPresentation(state: AuthProofViewState): StatusPresentation {
+  switch (state.kind) {
+    case 'checking':
+      return {
+        body: 'Asking FastAPI to verify the current Clerk session and comparing its subject locally.',
+        color: 'text',
+        title: 'Checking authenticated session…',
+      };
+    case 'verified':
+      return {
+        body: 'FastAPI verified the bearer session and returned the same Clerk user as this client.',
+        color: 'success',
+        title: 'Authenticated session verified',
+      };
+    case 'mismatch':
+      return {
+        body: 'FastAPI verified a different Clerk subject. Sign out, sign back in, and retry before continuing.',
+        color: 'danger',
+        title: 'Identity mismatch',
+      };
+    case 'unauthorized':
+      return {
+        body: 'FastAPI did not accept the current Clerk session. Sign out, sign back in, and retry.',
+        color: 'danger',
+        title: 'Session not authorized',
+      };
+    case 'unavailable':
+      return {
+        body: 'The authenticated session proof did not return the expected response. Check API and Clerk configuration.',
+        color: 'warning',
+        title: 'Session proof unavailable',
+      };
+  }
 }
 
 function DetailRow({ label, value, last = false }: { label: string; value: string; last?: boolean }) {

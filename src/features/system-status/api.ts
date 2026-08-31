@@ -25,6 +25,39 @@ export type SystemStatusSuccess = {
   status: number;
 };
 
+export type AuthSessionResponse = {
+  user_id: string;
+};
+
+export type AuthSessionProof = {
+  matchesCurrentUser: boolean;
+  requestId: string | null;
+  status: number;
+};
+
+export type AuthSessionProofErrorKind =
+  | 'unauthorized'
+  | 'unavailable'
+  | 'configuration'
+  | 'cancelled';
+
+export class AuthSessionProofError extends Error {
+  readonly kind: AuthSessionProofErrorKind;
+  readonly requestId: string | null;
+  readonly status: number | null;
+
+  constructor(
+    kind: AuthSessionProofErrorKind,
+    options: { requestId?: string | null; status?: number | null } = {},
+  ) {
+    super('The authenticated API session proof did not complete successfully.');
+    this.name = 'AuthSessionProofError';
+    this.kind = kind;
+    this.requestId = options.requestId ?? null;
+    this.status = options.status ?? null;
+  }
+}
+
 export type SystemStatusErrorKind = 'not-ready' | 'unreachable' | 'configuration' | 'cancelled';
 
 type SystemStatusErrorOptions = {
@@ -95,6 +128,49 @@ export async function getSystemStatus(signal?: AbortSignal): Promise<SystemStatu
   }
 }
 
+export async function getAuthSessionProof(
+  currentUserId: string,
+  signal?: AbortSignal,
+): Promise<AuthSessionProof> {
+  if (!isBoundedIdentifier(currentUserId)) {
+    throw new AuthSessionProofError('unavailable');
+  }
+
+  try {
+    const result = await getJson({
+      parse: parseAuthSessionResponse,
+      path: '/v1/auth/session',
+      signal,
+    });
+
+    return {
+      matchesCurrentUser: result.data.user_id === currentUserId,
+      requestId: result.requestId,
+      status: result.status,
+    };
+  } catch (error) {
+    if (!(error instanceof ApiClientError)) {
+      throw new AuthSessionProofError('unavailable');
+    }
+    if (error.kind === 'configuration') {
+      throw new AuthSessionProofError('configuration');
+    }
+    if (error.kind === 'cancelled') {
+      throw new AuthSessionProofError('cancelled');
+    }
+    if (error.kind === 'http' && error.status === 401) {
+      throw new AuthSessionProofError('unauthorized', {
+        requestId: error.requestId,
+        status: error.status,
+      });
+    }
+    throw new AuthSessionProofError('unavailable', {
+      requestId: error.requestId,
+      status: error.status,
+    });
+  }
+}
+
 function parseSystemReadyResponse(value: unknown): SystemReadyResponse | null {
   if (!isRecord(value) || value.status !== 'ready' || value.service !== 'glidelingo-api') return null;
   if (!isRecord(value.checks) || value.checks.database !== 'ok') return null;
@@ -104,6 +180,15 @@ function parseSystemReadyResponse(value: unknown): SystemReadyResponse | null {
     service: 'glidelingo-api',
     status: 'ready',
   };
+}
+
+function parseAuthSessionResponse(value: unknown): AuthSessionResponse | null {
+  if (!isRecord(value) || !isBoundedIdentifier(value.user_id)) return null;
+  return { user_id: value.user_id };
+}
+
+function isBoundedIdentifier(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 512 && value === value.trim();
 }
 
 function parseDependencyUnavailableResponse(value: unknown): SystemDependencyUnavailableResponse | null {

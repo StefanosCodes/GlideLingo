@@ -4,6 +4,7 @@ import { StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { selectWebOauthFlow } from '@/features/auth/oauth-flow';
+import { SIGN_IN_METHODS_COPY } from '@/features/auth/sign-in-copy';
 import { useTheme } from '@/hooks/use-theme';
 
 export default function SignInRoute() {
@@ -23,7 +24,7 @@ export default function SignInRoute() {
           Keep your language moving.
         </ThemedText>
         <ThemedText type="body" themeColor="textSecondary" style={styles.centeredCopy}>
-          Continue with Apple, email, or phone. We only ask for the details needed to keep your learning path.
+          {SIGN_IN_METHODS_COPY}
         </ThemedText>
       </View>
       <SignIn

@@ -22,11 +22,16 @@ const [home, notFound, headers, robots] = await Promise.all([
   read('robots.txt'),
 ]);
 
-assert.match(home, /<title>GlideLingo — Language practice that keeps moving<\/title>/);
+assert.match(home, /<title>GlideLingo — Language learning, redesigned<\/title>/);
 assert.match(home, /rel="canonical" href="https:\/\/glidelingo\.com\/"/);
 assert.match(home, /id="main-content"/);
-assert.match(home, /How it works/);
+assert.match(home, /Language learning,/);
+assert.match(home, /glidelingo-bird-black\.svg/);
+assert.match(home, /brand-name/);
+assert.match(home, /data-video-state="awaiting-source"/);
+assert.match(home, /Video coming soon/);
 assert.match(home, /Platform availability/);
+assert.match(home, /Windows coming soon/);
 assert.doesNotMatch(home, /<script(?:\s|>)/i);
 assert.doesNotMatch(home, /<form(?:\s|>)/i);
 assert.doesNotMatch(home, /document\.cookie|localStorage|sessionStorage/i);

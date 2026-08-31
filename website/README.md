@@ -2,6 +2,12 @@
 
 This directory is the independently built, static marketing and macOS download site for GlideLingo. It does not share dependencies, runtime state, authentication, or deployment with the Expo, Electron, or FastAPI applications in the repository.
 
+## Brand assets
+
+The website self-hosts the Satoshi variable display font and composes its typographic lockup with the approved monochrome GlideLingo bird SVG. Satoshi is distributed by Fontshare under the ITF Free Font License preserved at `licenses/Satoshi-ITF-FFL.txt`. Inter remains the body and interface typeface. Production pages make no third-party font requests.
+
+The product-demo frame intentionally uses the current application screenshot and a visible `Video coming soon` state until an approved first-party MP4 or WebM is supplied. It must not be replaced with a third-party embed. The Windows download card is likewise non-interactive until a signed Windows release has its own validated release contract.
+
 ## Local development
 
 Use Node 24 and npm from this directory:

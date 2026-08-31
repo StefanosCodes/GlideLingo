@@ -7,7 +7,9 @@ import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWK, PyJWKClient
-from jwt.exceptions import PyJWKClientError, PyJWTError
+from jwt.exceptions import PyJWKClientConnectionError, PyJWKClientError, PyJWTError
+
+from app.core.errors import AuthenticationUnavailableError
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,6 +17,7 @@ class ClerkPrincipal:
     """Authenticated identity derived only from a verified Clerk session token."""
 
     user_id: str
+    issuer: str
 
 
 class ClerkSigningKeyClient(Protocol):
@@ -45,7 +48,7 @@ class ClerkTokenVerifier:
         self._signing_key_client = signing_key_client or PyJWKClient(
             jwks_url,
             cache_keys=True,
-            timeout=5,
+            timeout=2,
         )
 
     def verify(self, token: str) -> ClerkPrincipal:
@@ -68,6 +71,8 @@ class ClerkTokenVerifier:
                     "verify_aud": self._audience is not None,
                 },
             )
+        except PyJWKClientConnectionError as error:
+            raise AuthenticationUnavailableError from error
         except (PyJWKClientError, PyJWTError, UnicodeError, ValueError, TypeError) as error:
             raise InvalidClerkTokenError from error
 
@@ -81,7 +86,7 @@ class ClerkTokenVerifier:
             or authorized_party not in self._authorized_parties
         ):
             raise InvalidClerkTokenError
-        return ClerkPrincipal(user_id=subject)
+        return ClerkPrincipal(user_id=subject, issuer=self._issuer)
 
 
 bearer_scheme = HTTPBearer(
@@ -116,10 +121,7 @@ def get_current_clerk_principal(
     if credentials is None:
         raise _unauthorized()
     if verifier is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication is unavailable.",
-        )
+        raise AuthenticationUnavailableError
     try:
         return verifier.verify(credentials.credentials)
     except InvalidClerkTokenError:

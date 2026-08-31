@@ -12,7 +12,11 @@ The repository now contains a deliberately small full-stack walking skeleton:
 - Docker Compose runs a project-owned PostgreSQL instance on `55433`.
 - The internal `/diagnostics` route proves the client-to-database wiring.
 
-The long-term direction, folder ownership, feature-development pattern, local operations, deployment lanes, and implementation roadmap live in [`docs/infra/README.md`](docs/infra/README.md). Product tables, authentication, migrations, workers, and production deployment remain intentionally unimplemented.
+The long-term direction, folder ownership, feature-development pattern, local operations, deployment
+lanes, and implementation roadmap live in [`docs/infra/README.md`](docs/infra/README.md). Clerk
+authentication and the dormant tutor guard migration now exist. Broader product persistence,
+server-owned entitlement authorization, workers, and a separate production environment remain
+intentionally unimplemented.
 
 This slice proves development connectivity. A packaged Electron release still needs an exact production HTTPS API origin and matching restrictive Content Security Policy before it can call the deployed API; that belongs to the release-foundation slice.
 
@@ -30,6 +34,7 @@ Run commands from this directory—the one containing `package.json`:
 | --- | --- |
 | Install the locked dependencies | `npm ci` |
 | Install the locked backend environment | `npm run setup:backend` |
+| Install the locked private tutor environment | `npm run setup:tutor` |
 | Start PostgreSQL | `npm run db:up` |
 | Start FastAPI | `npm run api` |
 | Start database, API, and interactive Expo | `npm run dev` |
@@ -115,15 +120,37 @@ Open `/diagnostics` from the internal Prompt Kit screen to see the exact API ori
 
 ### Page-aware lesson tutor
 
-The lesson tutor is implemented as one FastAPI-hosted OpenAI Agents SDK agent. The backend resolves authored lesson context from a whitelist, exposes only the current and preceding lesson steps, and keeps SDK types behind the OpenAI integration adapter. Conversation history remains in the client for the current lesson sitting only.
+The tutor is split across two FastAPI processes. The public API verifies Clerk, derives a
+tutor-scoped HMAC pseudonym, applies PostgreSQL-backed idempotency and turn limits, and calls the
+private service with a Google-signed ID token. The IAM-private tutor resolves whitelisted authored
+lesson context and is the only runtime that imports the OpenAI Agents SDK or receives the OpenAI
+secret.
 
-Both feature flags are disabled by default. To use the tutor locally, set `EXPO_PUBLIC_LESSON_TUTOR_ENABLED=true`, `GLIDELINGO_LESSON_TUTOR_ENABLED=true`, and `OPENAI_API_KEY` before starting Expo and FastAPI. `GLIDELINGO_OPENAI_MODEL` defaults to `gpt-5.6-terra`. Never place the API key in an `EXPO_PUBLIC_` variable.
+The private payload is allowlisted: pseudonymous actor reference, server-generated turn reference,
+lesson and visible-step fields, selected choice, current message, and at most eight history messages.
+It excludes the Clerk token and subject, email/profile data, RevenueCat data, entitlement state, and
+the client conversation UUID. The OpenAI request uses the pseudonym only as `safety_identifier`,
+sets `store=false`, disables sensitive trace/model/tool logging, performs one model turn, and has no
+provider retries.
 
-Normal verification uses fake adapters and does not require a key. Run `npm run api:test:agent-live` only with the server feature flag and API key explicitly enabled; it executes the stable cases in `backend/evals/lesson_tutor/cases.json` against the configured model.
+All three feature flags remain disabled by default:
 
-The production image includes the whitelisted authored content under `/app/content`. Request deadlines are nested so the provider stops at 10 seconds, the service at 12 seconds, Cloud Run at 15 seconds, and the client at 25 seconds. Authored answer aliases provide a deterministic final guard against disclosing an unattempted check answer.
+- `EXPO_PUBLIC_LESSON_TUTOR_ENABLED` controls client visibility.
+- `GLIDELINGO_LESSON_TUTOR_ENABLED` controls the public gateway.
+- `GLIDELINGO_TUTOR_ENABLED` controls the private OpenAI runtime.
 
-The tutor route requires a verified Clerk principal before it can reach the service, and the request schema does not accept a user or tenant identifier from the client. Keep both tutor flags disabled in shared environments until the server passes a stable pseudonymous subject as the provider safety identifier and applies per-principal rate and spend limits before invoking the provider. `backend/app/main.py` remains responsible for wiring authentication and the provider; this disabled slice does not provision an OpenAI key.
+Normal verification uses fake/no-network adapters and requires no provider key. Run
+`npm run tutor:test:agent-live` only with `GLIDELINGO_TUTOR_ENABLED=true` and `OPENAI_API_KEY` set;
+it executes the stable cases in `services/lesson-tutor/evals/lesson_tutor/cases.json`. Never put the
+provider key or pseudonym key in an `EXPO_PUBLIC_` variable.
+
+Shared-environment activation is intentionally gated. Before enabling either server flag, apply
+`backend/migrations/001_lesson_tutor_guard.sql`, establish the documented retention job with its
+separate maintenance role, mount immutable development Secret Manager versions, verify Clerk and
+private Cloud Run IAM end to end, add server-owned RevenueCat entitlement authorization, and define
+a real provider spend-control policy. Enable the private flag first, the public gateway second, and
+the client flag last. See [`infra/gcp/README.md`](infra/gcp/README.md) for the rollout and environment
+boundaries.
 
 Stop the project database without deleting its named volume:
 
@@ -185,6 +212,7 @@ Dry-run artifacts are placed in `release-dry-run/`; configured distribution and 
 npm run diagnose
 npm run verify
 npm run api:verify
+npm run tutor:verify
 npm run verify:full-stack
 npm run doctor
 npm run test:desktop

@@ -30,10 +30,14 @@ test('failure keeps the sent message and retry does not duplicate it', () => {
     type: 'send',
     message: userMessage,
   });
-  const failed = lessonTutorReducer(working, { type: 'fail', messageId: userMessage.id });
+  const failed = lessonTutorReducer(working, {
+    type: 'fail',
+    messageId: userMessage.id,
+    retryable: true,
+  });
   const retried = lessonTutorReducer(failed, { type: 'retry', messageId: userMessage.id });
 
-  expect(failed.error).toBe(true);
+  expect(failed.error).toBe('retryable');
   expect(retried.messages).toEqual([userMessage]);
   expect(retried.pendingUserMessageId).toBe(userMessage.id);
   expect(retried.status).toBe('working');

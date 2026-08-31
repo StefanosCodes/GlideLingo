@@ -1,8 +1,9 @@
 # Google Cloud development platform
 
-This directory owns the smallest GCP platform needed to deploy GlideLingo's existing
-FastAPI/PostgreSQL walking skeleton. It intentionally does not provision authentication,
-billing integrations, workers, media storage, web hosting, or production resources.
+This directory owns the smallest GCP platform needed to deploy GlideLingo's public
+FastAPI/PostgreSQL API and dormant IAM-private tutor. It configures Clerk verification inputs and
+tutor secret containers, but intentionally does not provision RevenueCat server authorization,
+workers, media storage, web hosting, or production resources.
 
 ## Architecture
 
@@ -12,6 +13,7 @@ Expo / Electron clients
         | HTTPS
         v
 public Cloud Run service
+        |-- Google-signed ID token --> IAM-private tutor Cloud Run --> OpenAI
         |
         | Cloud SQL connector + bounded SQLAlchemy pool
         v
@@ -20,10 +22,10 @@ Cloud SQL for PostgreSQL 17
 GitHub Actions --OIDC--> Workload Identity Federation --> API image deployment
 ```
 
-The Cloud Run service is public at the network edge because installed clients cannot use
-Google Cloud IAM. Feature authentication remains an application concern: Clerk tokens will
-be verified by FastAPI when the authentication PR is integrated. Possession of the Cloud Run
-URL is not authorization to learner data.
+The public Cloud Run service remains public at the network edge because installed clients cannot use
+Google Cloud IAM. FastAPI verifies Clerk session tokens for application routes. The tutor Cloud Run
+service separately requires Google IAM and names only the API runtime as invoker. Possession of
+either URL is not authorization to learner data.
 
 ## What Terraform creates
 
@@ -36,6 +38,9 @@ URL is not authorization to learner data.
 - a PostgreSQL 17 Enterprise development instance, database, and application user;
 - a Secret Manager secret containing the SQLAlchemy Cloud SQL connection URL;
 - a public, scale-to-zero Cloud Run service capped at three instances;
+- an IAM-private, scale-to-zero tutor service whose only invoker is the API runtime identity;
+- distinct API and tutor runtime identities plus development-only pseudonym and OpenAI secret
+  containers (Terraform creates no secret values or versions);
 - a project-scoped monthly budget with default IAM-recipient alerts.
 
 The database password is generated once as a sensitive Terraform value in the protected,
@@ -134,6 +139,42 @@ Interactive Google and GitHub sign-ins authorize the operator only. They are not
 dependencies and should never be copied into the repository or treated as reusable deployment
 credentials.
 
+The Clerk values are non-secret configuration pinned to the development instance through validated
+Terraform defaults. Rotate the Terraform values and deployment-workflow values together, and inspect
+the Cloud Run environment diff before approval. Do not put local `.env` contents in committed tfvars.
+
+## Private tutor activation gates
+
+Both `lesson_tutor_enabled` and `private_lesson_tutor_enabled` default to `false`. Leave them false
+until all of the following are independently verified:
+
+1. Apply `backend/migrations/001_lesson_tutor_guard.sql` transactionally and schedule the bounded
+   seven-day retention command from `backend/migrations/README.md` with a maintenance-only role.
+2. Add a random development pseudonym-key version and a development OpenAI-key version to the two
+   Terraform-created Secret Manager containers. Pass exact immutable version numbers to Terraform;
+   never use `latest` and never place secret bytes in Terraform variables, state, GitHub, or logs.
+3. Configure and verify Clerk issuer, JWKS URL, authorized parties, and optional audience on the
+   public API. The current live API fails closed with `503` until this is applied.
+4. Deploy and smoke the private image while disabled. Confirm unauthenticated direct invocation is
+   rejected by Cloud Run IAM and the API runtime identity is the only `roles/run.invoker` member.
+5. Implement and verify server-owned RevenueCat entitlement authorization before paid access is
+   enabled. Client `isPro` state is never authorization.
+6. Run negative auth, idempotency, concurrency, timeout, container, Terraform, and live-agent smoke
+   checks. Establish deterministic graders and stable pass thresholds for the authored behavior cases;
+   then enable the private flag before the public flag in one reviewed development rollout.
+
+The public API sends only a tutor-scoped HMAC pseudonym, a server-generated turn reference, bounded
+lesson/page fields, current message, and at most eight history messages. It never sends the Clerk
+token or raw subject, profile fields, RevenueCat data, entitlement state, or public conversation ID.
+The private service disables sensitive model/tool logging and tracing, uses `store=false`, and uses
+only the pseudonym as OpenAI's safety identifier.
+
+This directory is development-only. Production must be a separate future GCP project and Terraform
+state with separate service accounts, deploy identity, secret containers and versions, Clerk and
+RevenueCat configuration, budget, review, and approvals. A separate production provider key is
+recommended; temporarily seeding the distinct production secret version with the same provider value
+is allowed, but production must never copy or reference the development secret resource or version.
+
 ### Normal backend release sequence
 
 After the first-time setup, no console walkthrough or Terraform apply is required for an ordinary
@@ -155,9 +196,11 @@ than create a second copy.
 ### Boundaries for later integrations and environments
 
 - Clerk JWT verification is configured on Cloud Run with the public development issuer, JWKS URL,
-  and exact authorized-party origins. These values are not secrets. RevenueCat and OpenAI server
-  credentials remain separate application-integration changes; store those secrets in Secret
-  Manager and expose them only to the API components that require them.
+  and exact authorized-party origins. These values are not secrets.
+- RevenueCat server authorization remains a separate application-integration change and a tutor
+  activation gate. Never trust the client entitlement snapshot.
+- RevenueCat and OpenAI server credentials belong in Secret Manager and must be exposed only to
+  the API components that require them.
 - Do not add workers, queues, media storage, or additional services until a product feature needs
   them.
 - The current bootstrap script intentionally refuses any project except
@@ -198,6 +241,7 @@ Use the `api_url` Terraform output as `EXPO_PUBLIC_API_BASE_URL` for development
   secret key is required for this verifier. Keep Cloud Run publicly invokable so the application
   can reach it, and enforce authentication inside FastAPI on protected routes.
 - RevenueCat: add an authenticated, idempotent webhook endpoint and its signing secret.
-- OpenAI tutor: add the OpenAI API key in Secret Manager and mount it only into the API.
+- OpenAI tutor activation: add an immutable version to the tutor-only development secret container,
+  deploy an enabled private revision, and satisfy every activation gate above.
 - Workers and media: add Cloud Tasks and private Cloud Storage only when durable speech work
   exists.

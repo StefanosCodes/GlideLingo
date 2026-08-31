@@ -56,6 +56,7 @@
   },
   "scripts": {
     "setup:backend": "uv sync --directory backend --locked --all-groups",
+    "setup:tutor": "uv sync --directory services/lesson-tutor --locked --all-groups",
     "db:config": "docker compose -f infra/compose.yaml config --quiet",
     "db:up": "docker compose -f infra/compose.yaml up -d --wait db",
     "db:down": "docker compose -f infra/compose.yaml down",
@@ -64,9 +65,13 @@
     "api:lint": "uv run --directory backend --locked ruff check . && uv run --directory backend --locked ruff format --check .",
     "api:typecheck": "uv run --directory backend --locked mypy app tests",
     "api:test": "uv run --directory backend --locked pytest -m \"not integration and not live_agent\"",
-    "api:test:agent-live": "uv run --directory backend --locked pytest -m live_agent tests/live/test_lesson_tutor_live.py",
+    "tutor:test:agent-live": "uv run --directory services/lesson-tutor --locked pytest -m live_agent tests/live/test_lesson_tutor_live.py",
     "api:test:integration": "uv run --directory backend --locked pytest -m integration",
     "api:verify": "npm run api:lint && npm run api:typecheck && npm run api:test",
+    "tutor:lint": "uv run --directory services/lesson-tutor --locked ruff check . && uv run --directory services/lesson-tutor --locked ruff format --check .",
+    "tutor:typecheck": "uv run --directory services/lesson-tutor --locked mypy app tests",
+    "tutor:test": "uv run --directory services/lesson-tutor --locked pytest -m \"not live_agent\"",
+    "tutor:verify": "npm run tutor:lint && npm run tutor:typecheck && npm run tutor:test",
     "dev": "npm run db:up && concurrently --kill-others --success first \"npm:api\" \"npm:start\"",
     "dev:desktop": "npm run db:up && concurrently --kill-others --success first \"npm:api\" \"npm:desktop\"",
     "start": "expo start",
@@ -102,7 +107,7 @@
     "test:desktop": "node --test desktop/*.test.cjs",
     "lint": "expo lint",
     "verify": "npm run lint && npm run typecheck && npm test",
-    "verify:full": "npm run verify && npm run doctor && npm run desktop:export && npm run api:verify && npm run db:config",
+    "verify:full": "npm run verify && npm run doctor && npm run desktop:export && npm run api:verify && npm run tutor:verify && npm run db:config",
     "verify:full-stack": "npm run verify:full && npm run db:up && npm run api:test:integration"
   },
   "private": true

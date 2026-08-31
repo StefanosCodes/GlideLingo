@@ -46,17 +46,31 @@ test('working state announces status and disables composing', async () => {
 test('error state keeps the message and exposes retry', async () => {
   const state = {
     ...initialLessonTutorState('conversation-1'),
-    error: true,
+    error: 'retryable' as const,
     messages: [{ id: 'user-1', role: 'user' as const, content: 'Why ee?' }],
   };
   const screen = await render(<LessonAskDrawer {...baseProps} state={state} />);
 
   expect(screen.getByText('Why ee?')).toBeTruthy();
   expect(
-    screen.getByText('The tutor isn’t available right now. Your lesson is still here.'),
+    screen.getByText(
+      'The tutor didn’t return an answer. Retry safely checks the same request and won’t send it twice.',
+    ),
   ).toBeTruthy();
   fireEvent.press(screen.getByLabelText('Retry tutor message'));
   expect(baseProps.onRetry).toHaveBeenCalledTimes(1);
+});
+
+test('terminal ambiguity asks for a new question without offering retry', async () => {
+  const state = {
+    ...initialLessonTutorState('conversation-1'),
+    error: 'terminal' as const,
+    messages: [{ id: 'user-1', role: 'user' as const, content: 'Why ee?' }],
+  };
+  const screen = await render(<LessonAskDrawer {...baseProps} state={state} />);
+
+  expect(screen.getByText('We couldn’t safely retry that turn. Ask again as a new question.')).toBeTruthy();
+  expect(screen.queryByLabelText('Retry tutor message')).toBeNull();
 });
 
 test('reopening with the same lesson state preserves conversation', async () => {

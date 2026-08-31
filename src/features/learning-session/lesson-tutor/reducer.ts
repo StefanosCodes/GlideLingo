@@ -6,7 +6,7 @@ export type TutorMessage = {
 
 export type LessonTutorState = {
   conversationId: string;
-  error: boolean;
+  error: 'retryable' | 'terminal' | null;
   messages: TutorMessage[];
   pendingUserMessageId: string | null;
   status: 'idle' | 'working';
@@ -16,13 +16,13 @@ export type LessonTutorAction =
   | { type: 'send'; message: TutorMessage }
   | { type: 'retry'; messageId: string }
   | { type: 'succeed'; messageId: string; reply: TutorMessage }
-  | { type: 'fail'; messageId: string }
+  | { type: 'fail'; messageId: string; retryable: boolean }
   | { type: 'reset'; conversationId: string };
 
 export function initialLessonTutorState(conversationId: string): LessonTutorState {
   return {
     conversationId,
-    error: false,
+    error: null,
     messages: [],
     pendingUserMessageId: null,
     status: 'idle',
@@ -38,7 +38,7 @@ export function lessonTutorReducer(
       if (state.status === 'working') return state;
       return {
         ...state,
-        error: false,
+        error: null,
         messages: [...state.messages, action.message],
         pendingUserMessageId: action.message.id,
         status: 'working',
@@ -49,7 +49,7 @@ export function lessonTutorReducer(
       }
       return {
         ...state,
-        error: false,
+        error: null,
         pendingUserMessageId: action.messageId,
         status: 'working',
       };
@@ -57,14 +57,19 @@ export function lessonTutorReducer(
       if (state.pendingUserMessageId !== action.messageId) return state;
       return {
         ...state,
-        error: false,
+        error: null,
         messages: [...state.messages, action.reply],
         pendingUserMessageId: null,
         status: 'idle',
       };
     case 'fail':
       if (state.pendingUserMessageId !== action.messageId) return state;
-      return { ...state, error: true, pendingUserMessageId: null, status: 'idle' };
+      return {
+        ...state,
+        error: action.retryable ? 'retryable' : 'terminal',
+        pendingUserMessageId: null,
+        status: 'idle',
+      };
     case 'reset':
       return initialLessonTutorState(action.conversationId);
   }

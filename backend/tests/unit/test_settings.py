@@ -55,25 +55,32 @@ def test_lesson_tutor_is_disabled_by_default() -> None:
     settings = Settings(_env_file=None)
 
     assert settings.lesson_tutor_enabled is False
-    assert settings.lesson_tutor_deadline_seconds == 12
-    assert settings.openai_model == "gpt-5.6-terra"
-    assert settings.openai_api_key is None
+    assert settings.lesson_tutor_service_timeout_seconds == 6
+    assert settings.lesson_tutor_pseudonym_key is None
+    assert not hasattr(settings, "openai_api_key")
 
 
-def test_enabled_lesson_tutor_requires_api_key() -> None:
-    with pytest.raises(ValidationError, match="OPENAI_API_KEY is required"):
+def test_enabled_lesson_tutor_requires_bounded_database_timeouts() -> None:
+    with pytest.raises(ValidationError, match="database pool timeout"):
         Settings(_env_file=None, lesson_tutor_enabled=True)
 
 
-def test_enabled_lesson_tutor_accepts_process_secret(monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setenv("GLIDELINGO_LESSON_TUTOR_ENABLED", "true")
-    monkeypatch.setenv("OPENAI_API_KEY", "test-secret")
-
-    settings = Settings(_env_file=None)
+def test_enabled_lesson_tutor_accepts_complete_private_boundary() -> None:
+    service_url = "https://tutor.example.run.app"
+    settings = Settings(
+        _env_file=None,
+        lesson_tutor_enabled=True,
+        database_pool_timeout_seconds=1,
+        database_statement_timeout_seconds=2,
+        lesson_tutor_service_url=service_url,
+        lesson_tutor_service_audience=service_url,
+        lesson_tutor_pseudonym_key="p" * 32,
+        clerk_issuer="https://clerk.glidelingo.test",
+        clerk_jwks_url="https://clerk.glidelingo.test/.well-known/jwks.json",
+    )
 
     assert settings.lesson_tutor_enabled is True
-    assert settings.openai_api_key is not None
-    assert settings.openai_api_key.get_secret_value() == "test-secret"
+    assert settings.lesson_tutor_service_timeout_seconds == 6
 
 
 def test_packaged_desktop_origin_is_allowed_but_other_custom_origins_are_rejected() -> None:

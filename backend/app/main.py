@@ -11,20 +11,27 @@ from app.auth.clerk import ClerkTokenVerifier
 from app.auth.router import router as auth_router
 from app.core.config import Settings
 from app.core.errors import (
+    AuthenticationUnavailableError,
     DependencyUnavailableError,
     InternalErrorMiddleware,
     LessonContextNotFoundError,
+    LessonTutorConflictError,
+    LessonTutorLimitedError,
     LessonTutorTimeoutError,
     LessonTutorUnavailableError,
+    authentication_unavailable_handler,
     dependency_unavailable_handler,
     lesson_context_not_found_handler,
+    lesson_tutor_conflict_handler,
+    lesson_tutor_limited_handler,
     lesson_tutor_timeout_handler,
     lesson_tutor_unavailable_handler,
 )
 from app.core.logging import configure_logging
 from app.core.request_id import REQUEST_ID_HEADER, RequestIdMiddleware
 from app.db.engine import create_database_engine, create_database_probe
-from app.integrations.openai.lesson_tutor_agent import OpenAILessonTutorAgent
+from app.integrations.lesson_tutor.client import GoogleIdentityTokenProvider, LessonTutorHttpClient
+from app.modules.lesson_tutor.guard import GuardLimits, PostgresLessonTutorGuard
 from app.modules.lesson_tutor.router import router as lesson_tutor_router
 from app.modules.lesson_tutor.service import LessonTutorService
 
@@ -37,14 +44,18 @@ def create_app(
     settings = settings or Settings()
     configure_logging(settings.log_level)
     database_engine = create_database_engine(settings)
-    lesson_tutor_agent = (
-        OpenAILessonTutorAgent(
-            api_key=settings.openai_api_key.get_secret_value(),
-            model=settings.openai_model,
+    lesson_tutor_gateway = (
+        LessonTutorHttpClient(
+            base_url=settings.lesson_tutor_service_url,
+            token_provider=GoogleIdentityTokenProvider(
+                audience=settings.lesson_tutor_service_audience
+            ),
+            timeout_seconds=settings.lesson_tutor_service_timeout_seconds,
         )
         if lesson_tutor_service is None
         and settings.lesson_tutor_enabled
-        and settings.openai_api_key is not None
+        and settings.lesson_tutor_service_url is not None
+        and settings.lesson_tutor_service_audience is not None
         else None
     )
     clerk_configuration = settings.clerk_configuration
@@ -55,8 +66,8 @@ def create_app(
             yield
         finally:
             try:
-                if lesson_tutor_agent is not None:
-                    await lesson_tutor_agent.close()
+                if lesson_tutor_gateway is not None:
+                    await lesson_tutor_gateway.close()
             finally:
                 database_engine.dispose()
 
@@ -68,9 +79,23 @@ def create_app(
     application.state.database_probe = create_database_probe(database_engine)
     application.state.lesson_tutor_service = lesson_tutor_service or LessonTutorService(
         enabled=settings.lesson_tutor_enabled,
-        agent=lesson_tutor_agent,
-        content_root=settings.lesson_content_root,
-        deadline_seconds=settings.lesson_tutor_deadline_seconds,
+        gateway=lesson_tutor_gateway,
+        guard=PostgresLessonTutorGuard(
+            engine=database_engine,
+            limits=GuardLimits(
+                burst=settings.lesson_tutor_burst_limit,
+                burst_window_seconds=settings.lesson_tutor_burst_window_seconds,
+                concurrency=settings.lesson_tutor_concurrency_limit,
+                daily=settings.lesson_tutor_daily_limit,
+                global_daily=settings.lesson_tutor_global_daily_turn_limit,
+            ),
+        ),
+        pseudonym_key=(
+            settings.lesson_tutor_pseudonym_key.get_secret_value().encode()
+            if settings.lesson_tutor_pseudonym_key is not None
+            else None
+        ),
+        operation_deadline_seconds=settings.lesson_tutor_operation_deadline_seconds,
     )
     application.state.clerk_token_verifier = (
         ClerkTokenVerifier(
@@ -87,6 +112,10 @@ def create_app(
         dependency_unavailable_handler,
     )
     application.add_exception_handler(
+        AuthenticationUnavailableError,
+        authentication_unavailable_handler,
+    )
+    application.add_exception_handler(
         LessonContextNotFoundError,
         lesson_context_not_found_handler,
     )
@@ -98,13 +127,15 @@ def create_app(
         LessonTutorTimeoutError,
         lesson_tutor_timeout_handler,
     )
+    application.add_exception_handler(LessonTutorConflictError, lesson_tutor_conflict_handler)
+    application.add_exception_handler(LessonTutorLimitedError, lesson_tutor_limited_handler)
     application.add_middleware(InternalErrorMiddleware)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.normalized_cors_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST"],
-        allow_headers=["Accept", "Authorization", "Content-Type"],
+        allow_headers=["Accept", "Authorization", "Content-Type", "Idempotency-Key"],
         expose_headers=[REQUEST_ID_HEADER],
     )
     application.add_middleware(RequestIdMiddleware)

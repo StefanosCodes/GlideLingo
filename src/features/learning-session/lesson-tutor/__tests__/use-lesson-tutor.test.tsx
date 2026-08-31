@@ -1,7 +1,11 @@
 import { expect, jest, test } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 
-import { type LessonTutorResponse } from '@/features/learning-session/lesson-tutor/api';
+import {
+  LessonTutorRequestError,
+  type LessonTutorResponse,
+  type LessonTutorTurn,
+} from '@/features/learning-session/lesson-tutor/api';
 import {
   isLessonTutorEnabled,
   useLessonTutor,
@@ -38,6 +42,7 @@ test('selected check choice reaches the tutor request', async () => {
       selected_choice: 'ε',
       visible_step_index: 5,
     }),
+    expect.any(String),
     expect.any(AbortSignal),
   );
 });
@@ -63,7 +68,7 @@ test('active request prevents duplicate sends', async () => {
 test('step changes cancel and discard a stale tutor reply', async () => {
   let resolveTurn: ((value: LessonTutorResponse) => void) | undefined;
   const client = jest.fn(
-    (_turn: unknown, _signal?: AbortSignal) =>
+    (_turn: unknown, _idempotencyKey: string, _signal?: AbortSignal) =>
       new Promise<LessonTutorResponse>((resolve) => {
         resolveTurn = resolve;
       }),
@@ -84,7 +89,7 @@ test('step changes cancel and discard a stale tutor reply', async () => {
   await act(() => {
     expect(result.current.send('Explain this step')).toBe(true);
   });
-  const signal = client.mock.calls[0][1];
+  const signal = client.mock.calls[0][2];
 
   await rerender({ step: 1 });
   expect(signal?.aborted).toBe(true);
@@ -95,6 +100,61 @@ test('step changes cancel and discard a stale tutor reply', async () => {
     resolveTurn?.(response);
   });
   expect(result.current.state.messages).toEqual([]);
+});
+
+test('retry keeps the same operation key for replay or fail-closed ambiguity', async () => {
+  const client = jest.fn(
+    async (
+      _turn: LessonTutorTurn,
+      _idempotencyKey: string,
+      _signal?: AbortSignal,
+    ): Promise<LessonTutorResponse> => response,
+  );
+  client.mockRejectedValueOnce(new Error('ambiguous failure')).mockResolvedValueOnce(response);
+  const { result } = await renderHook(() =>
+    useLessonTutor(
+      'el-letters-1',
+      { lesson_id: 'el-letters-1', selected_choice: null, visible_step_index: 0 },
+      client,
+    ),
+  );
+
+  await act(() => {
+    expect(result.current.send('Explain this')).toBe(true);
+  });
+  await waitFor(() => expect(result.current.state.error).toBe('retryable'));
+  const firstAttemptKey = client.mock.calls[0][1];
+
+  await act(() => {
+    result.current.retry();
+  });
+  await waitFor(() => expect(result.current.state.messages).toHaveLength(2));
+
+  expect(client.mock.calls[1][0]).toEqual(client.mock.calls[0][0]);
+  expect(client.mock.calls[1][1]).toBe(firstAttemptKey);
+});
+
+test('a permanent ambiguity cannot enter an infinite retry loop', async () => {
+  const client = jest.fn(async (): Promise<LessonTutorResponse> => {
+    throw new LessonTutorRequestError(false, false);
+  });
+  const { result } = await renderHook(() =>
+    useLessonTutor(
+      'el-letters-1',
+      { lesson_id: 'el-letters-1', selected_choice: null, visible_step_index: 0 },
+      client,
+    ),
+  );
+
+  await act(() => {
+    expect(result.current.send('Explain this')).toBe(true);
+  });
+  await waitFor(() => expect(result.current.state.error).toBe('terminal'));
+
+  await act(() => {
+    result.current.retry();
+  });
+  expect(client).toHaveBeenCalledTimes(1);
 });
 
 test('feature flag is disabled unless explicitly true', () => {

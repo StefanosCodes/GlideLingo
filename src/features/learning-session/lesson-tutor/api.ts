@@ -21,29 +21,39 @@ export type LessonTutorResponse = {
 
 export class LessonTutorRequestError extends Error {
   readonly cancelled: boolean;
+  readonly retryable: boolean;
 
-  constructor(cancelled = false) {
+  constructor(cancelled = false, retryable = true) {
     super('The lesson tutor request did not complete.');
     this.name = 'LessonTutorRequestError';
     this.cancelled = cancelled;
+    this.retryable = retryable;
   }
 }
 
 export async function createLessonTutorTurn(
   turn: LessonTutorTurn,
+  idempotencyKey: string,
   signal?: AbortSignal,
 ): Promise<LessonTutorResponse> {
   try {
     const response = await postJson({
       body: turn,
+      idempotencyKey,
       parse: parseLessonTutorResponse,
       path: '/v1/lesson-tutor/turns',
       signal,
-      timeoutMs: 25_000,
+      timeoutMs: 12_000,
     });
     return response.data;
   } catch (error) {
-    throw new LessonTutorRequestError(error instanceof ApiClientError && error.kind === 'cancelled');
+    const cancelled = error instanceof ApiClientError && error.kind === 'cancelled';
+    const retryable = !(
+      error instanceof ApiClientError &&
+      error.kind === 'http' &&
+      (error.status === 404 || error.status === 409)
+    );
+    throw new LessonTutorRequestError(cancelled, retryable);
   }
 }
 

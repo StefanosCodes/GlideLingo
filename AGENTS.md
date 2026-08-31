@@ -10,7 +10,7 @@
 
 - Expo SDK 57, React Native 0.86, Expo Router, and TypeScript power Android and iOS.
 - Electron securely packages the Expo web output for macOS desktop.
-- Routes live in `src/app`; frontend features in `src/features`; the shared API boundary in `src/api`; Electron code in `desktop`; FastAPI in `backend`; and local PostgreSQL configuration in `infra`.
+- Routes live in `src/app`; frontend features in `src/features`; the shared API boundary in `src/api`; Electron code in `desktop`; the public FastAPI gateway in `backend`; the IAM-private OpenAI runtime in `services/lesson-tutor`; and database/cloud configuration in `infra`.
 - `docs/infra/README.md` is the source of truth for the future full-stack architecture, folder ownership, feature-development flow, operations, deployment, and implementation order.
 - Read the exact Expo SDK 57 documentation at https://docs.expo.dev/versions/v57.0.0/ before changing Expo APIs or configuration.
 
@@ -44,6 +44,7 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
 
 - Install exactly: `npm ci`
 - Install backend exactly: `npm run setup:backend`
+- Install private tutor exactly: `npm run setup:tutor`
 - Start PostgreSQL: `npm run db:up`
 - Stop PostgreSQL while preserving data: `npm run db:down`
 - Start FastAPI: `npm run api`
@@ -59,6 +60,8 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
 - Clear Metro and start Electron: `npm run desktop:clear`
 - Fast local verification: `npm run verify`
 - Full Expo and desktop verification: `npm run verify:full`
+- Verify the public API: `npm run api:verify`
+- Verify the private tutor: `npm run tutor:verify`
 - Environment report: `npm run diagnose`
 - Expo dependency/configuration checks: `npm run doctor`
 - Execute desktop tests: `npm run test:desktop`
@@ -76,6 +79,7 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
 - Desktop release changes: also produce a universal artifact and verify its signature, notarization ticket, Gatekeeper acceptance, and x64/arm64 slices. Never weaken `desktop:release` credential or HTTPS checks to make a build pass.
 - Full release verification: run `npm run verify:full`.
 - Backend changes: run `npm run api:verify`.
+- Private tutor changes: run `npm run tutor:verify`.
 - Database readiness or Compose changes: also run `npm run verify:full-stack`.
 - Do not declare a runtime fix complete from lint or compilation alone; exercise the affected target.
 
@@ -97,6 +101,8 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
 
 ## Current scope
 
-- The repository contains the client applications plus a minimal FastAPI/PostgreSQL walking skeleton and internal diagnostics path.
-- The API owns only liveness and readiness today. There are no product tables, migrations, authentication, workers, generated clients, or production deployment services yet.
+- The repository contains the clients, a public FastAPI/Cloud SQL API, verified Clerk session authentication, internal diagnostics, and a dormant authenticated lesson-tutor gateway.
+- `services/lesson-tutor` owns the IAM-private OpenAI runtime. Both server flags and the client flag default off; do not enable them until the activation gates in `infra/gcp/README.md` pass.
+- `backend/migrations/001_lesson_tutor_guard.sql` is a reviewed operator-run guard migration. It is not executed at application startup, and the public runtime must never receive DDL or retention `DELETE` privileges.
+- Server-owned RevenueCat entitlement authorization, recurring tutor retention, graded agent-evaluation thresholds, workers, and a separate production GCP environment are not implemented yet.
 - Use API port `8123` and loopback-bound PostgreSQL port `55433` unless an explicit local override is documented. Check port ownership before stopping any process.

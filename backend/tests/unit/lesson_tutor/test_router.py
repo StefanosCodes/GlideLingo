@@ -1,7 +1,5 @@
 from collections.abc import Iterator
-from pathlib import Path
 from typing import cast
-from uuid import UUID
 
 import pytest
 from fastapi import FastAPI
@@ -9,10 +7,12 @@ from fastapi.testclient import TestClient
 
 from app.auth.clerk import ClerkPrincipal
 from app.core.config import Settings
+from app.core.errors import LessonContextNotFoundError
 from app.core.request_id import REQUEST_ID_HEADER
+from app.integrations.lesson_tutor.client import PrivateLessonTutorTurn
 from app.main import create_app
-from app.modules.lesson_tutor.context import LessonTutorContext
-from app.modules.lesson_tutor.schemas import TutorHistoryMessage
+from app.modules.lesson_tutor.guard import GuardAdmission
+from app.modules.lesson_tutor.schemas import LessonTutorTurnResponse
 from app.modules.lesson_tutor.service import LessonTutorService
 
 VALID_TURN = {
@@ -23,41 +23,64 @@ VALID_TURN = {
     "message": "Why does this sound like ee?",
     "history": [],
 }
-AUTH_HEADERS = {"Authorization": "Bearer valid-test-token"}
+AUTH_HEADERS = {
+    "Authorization": "Bearer valid-test-token",
+    "Idempotency-Key": "test-turn-idempotency-0001",
+}
 
 
-class FakeAgent:
+class FakeGateway:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def reply(
-        self,
-        *,
-        context: LessonTutorContext,
-        history: list[TutorHistoryMessage],
-        message: str,
-        conversation_id: UUID,
-    ) -> str:
+    async def turn(
+        self, request: PrivateLessonTutorTurn, *, request_id: str
+    ) -> LessonTutorTurnResponse:
         self.calls += 1
-        return "The ι sound is close to the ee in see."
+        lesson_id = request.lesson_id
+        step = request.visible_step_index
+        if lesson_id != "el-letters-1" or step not in range(10):
+            raise LessonContextNotFoundError
+        return LessonTutorTurnResponse(
+            reply="The ι sound is close to the ee in see.", prompt_version="lesson-tutor-v1"
+        )
+
+    async def close(self) -> None:
+        return None
+
+
+class FakeGuard:
+    def admit(self, *, turn_ref: str, **_kwargs: object) -> GuardAdmission:
+        return GuardAdmission(turn_ref=turn_ref)
+
+    def complete(self, **_kwargs: object) -> None:
+        return None
+
+    def fail(self, **_kwargs: object) -> None:
+        return None
 
 
 class AcceptingVerifier:
     def verify(self, token: str) -> ClerkPrincipal:
         assert token == "valid-test-token"
-        return ClerkPrincipal(user_id="user_test_123")
+        return ClerkPrincipal(user_id="user_test_123", issuer="https://clerk.test")
+
+
+def tutor_service(*, enabled: bool, gateway: FakeGateway) -> LessonTutorService:
+    return LessonTutorService(
+        enabled=enabled,
+        gateway=gateway,
+        guard=FakeGuard(),
+        pseudonym_key=b"router-test-pseudonym-key-at-least-32-bytes",
+    )
 
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    agent = FakeAgent()
+    agent = FakeGateway()
     application = create_app(
         Settings(_env_file=None),
-        lesson_tutor_service=LessonTutorService(
-            enabled=True,
-            agent=agent,
-            content_root=Path(__file__).resolve().parents[4] / "content",
-        ),
+        lesson_tutor_service=tutor_service(enabled=True, gateway=agent),
     )
     application.state.clerk_token_verifier = AcceptingVerifier()
     application.state.test_tutor_agent = agent
@@ -128,14 +151,10 @@ def test_malformed_turn_is_rejected(client: TestClient, change: dict[str, object
 
 
 def test_missing_bearer_is_unauthorized_without_agent_call() -> None:
-    agent = FakeAgent()
+    agent = FakeGateway()
     application = create_app(
         Settings(_env_file=None),
-        lesson_tutor_service=LessonTutorService(
-            enabled=True,
-            agent=agent,
-            content_root=Path(__file__).resolve().parents[4] / "content",
-        ),
+        lesson_tutor_service=tutor_service(enabled=True, gateway=agent),
     )
     application.state.clerk_token_verifier = AcceptingVerifier()
 
@@ -147,15 +166,22 @@ def test_missing_bearer_is_unauthorized_without_agent_call() -> None:
     assert agent.calls == 0
 
 
+def test_missing_idempotency_key_is_rejected_before_agent_call(client: TestClient) -> None:
+    response = client.post(
+        "/v1/lesson-tutor/turns",
+        json=VALID_TURN,
+        headers={"Authorization": AUTH_HEADERS["Authorization"]},
+    )
+
+    assert response.status_code == 422
+    assert cast(FastAPI, client.app).state.test_tutor_agent.calls == 0
+
+
 def test_valid_bearer_disabled_app_returns_unavailable_without_agent_call() -> None:
-    agent = FakeAgent()
+    agent = FakeGateway()
     application = create_app(
         Settings(_env_file=None),
-        lesson_tutor_service=LessonTutorService(
-            enabled=False,
-            agent=agent,
-            content_root=Path(__file__).resolve().parents[4] / "content",
-        ),
+        lesson_tutor_service=tutor_service(enabled=False, gateway=agent),
     )
     application.state.clerk_token_verifier = AcceptingVerifier()
 
@@ -173,14 +199,10 @@ def test_valid_bearer_disabled_app_returns_unavailable_without_agent_call() -> N
 
 
 def test_unconfigured_authentication_fails_closed_before_agent_call() -> None:
-    agent = FakeAgent()
+    agent = FakeGateway()
     application = create_app(
         Settings(_env_file=None),
-        lesson_tutor_service=LessonTutorService(
-            enabled=True,
-            agent=agent,
-            content_root=Path(__file__).resolve().parents[4] / "content",
-        ),
+        lesson_tutor_service=tutor_service(enabled=True, gateway=agent),
     )
 
     with TestClient(application) as unconfigured_client:
@@ -191,7 +213,7 @@ def test_unconfigured_authentication_fails_closed_before_agent_call() -> None:
         )
 
     assert response.status_code == 503
-    assert response.json() == {"detail": "Authentication is unavailable."}
+    assert response.json()["error"]["code"] == "authentication_unavailable"
     assert agent.calls == 0
 
 
@@ -201,7 +223,7 @@ def test_post_cors_is_explicitly_allowed(client: TestClient) -> None:
         headers={
             "Origin": "http://localhost:8081",
             "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "authorization,content-type",
+            "Access-Control-Request-Headers": "authorization,content-type,idempotency-key",
         },
     )
 
@@ -210,6 +232,7 @@ def test_post_cors_is_explicitly_allowed(client: TestClient) -> None:
     assert "POST" in response.headers["access-control-allow-methods"]
     assert "Authorization" in response.headers["access-control-allow-headers"]
     assert "Content-Type" in response.headers["access-control-allow-headers"]
+    assert "Idempotency-Key" in response.headers["access-control-allow-headers"]
 
 
 def test_openapi_documents_tutor_contract(client: TestClient) -> None:
@@ -226,7 +249,8 @@ def test_openapi_documents_tutor_contract(client: TestClient) -> None:
         "$ref": "#/components/schemas/LessonTutorTurnResponse"
     }
     assert "401" in operation["responses"]
-    for status in ("404", "503", "504"):
+    assert any(parameter["name"] == "Idempotency-Key" for parameter in operation["parameters"])
+    for status in ("404", "409", "429", "503", "504"):
         assert operation["responses"][status]["content"]["application/json"]["schema"] == {
             "$ref": "#/components/schemas/ErrorResponse"
         }

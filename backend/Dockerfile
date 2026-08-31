@@ -24,8 +24,6 @@ RUN groupadd --system glidelingo \
     && useradd --system --gid glidelingo --home-dir /app/backend glidelingo
 
 COPY --from=builder --chown=glidelingo:glidelingo /app/backend/.venv /app/backend/.venv
-COPY --chown=glidelingo:glidelingo content /app/content
-
 USER glidelingo
 EXPOSE 8080
 

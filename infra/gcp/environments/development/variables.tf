@@ -14,6 +14,16 @@ variable "region" {
   default     = "us-west1"
 }
 
+variable "billing_account_id" {
+  description = "Billing account attached to the development project, without the billingAccounts/ prefix."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9A-F]{6}-[0-9A-F]{6}-[0-9A-F]{6}$", var.billing_account_id))
+    error_message = "The billing account ID must use the XXXXXX-XXXXXX-XXXXXX format."
+  }
+}
+
 variable "monthly_budget_usd" {
   description = "Alerts-only monthly development budget in USD."
   type        = number

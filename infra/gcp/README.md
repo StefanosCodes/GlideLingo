@@ -55,10 +55,10 @@ Run from the repository root:
 ./infra/gcp/scripts/bootstrap-development.sh
 ```
 
-The script validates the exact project, enables the prerequisite bootstrap APIs, creates a
-versioned/private Terraform-state bucket if missing, initializes the GCS backend, and applies
-the development configuration. Terraform will show the complete resource plan and require
-explicit approval before it creates billable resources.
+The script validates the exact project and its attached billing account, enables the
+prerequisite bootstrap APIs, creates a versioned/private Terraform-state bucket if missing,
+initializes the GCS backend, and applies the development configuration. Terraform will show
+the complete resource plan and require explicit approval before it creates billable resources.
 
 The default region is `us-west1`. Override it only on the first apply:
 

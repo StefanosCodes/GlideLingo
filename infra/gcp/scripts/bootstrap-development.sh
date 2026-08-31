@@ -20,6 +20,16 @@ if [[ "${active_project}" != "${expected_project}" ]]; then
   exit 1
 fi
 
+billing_account_name="$(
+  gcloud billing projects describe "${expected_project}" \
+    --format="value(billingAccountName)"
+)"
+billing_account_id="${billing_account_name#billingAccounts/}"
+if [[ -z "${billing_account_id}" || "${billing_account_id}" == "${billing_account_name}" ]]; then
+  echo "Project ${expected_project} must be linked to an accessible billing account." >&2
+  exit 1
+fi
+
 terraform_version="$(terraform version -json \
   | sed -n 's/.*"terraform_version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
 terraform_major="${terraform_version%%.*}"
@@ -53,5 +63,6 @@ terraform -chdir=infra/gcp/environments/development init \
   -backend-config="bucket=${state_bucket}" \
   -reconfigure
 terraform -chdir=infra/gcp/environments/development apply \
+  -var="billing_account_id=${billing_account_id}" \
   -var="project_id=${expected_project}" \
   -var="region=${region}"

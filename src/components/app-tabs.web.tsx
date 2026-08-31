@@ -1,25 +1,22 @@
 import { createContext, useContext, useState } from 'react';
 import { Image } from 'expo-image';
 import { Tabs, TabList, TabTrigger, TabSlot, type TabListProps, type TabTriggerSlotProps } from 'expo-router/ui';
-import { useRouter } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
-import { ModuleTree } from './module-tree';
 import { ThemedText } from './themed-text';
 import {
-  ChartIcon,
-  ChevronIcon,
   HouseIcon,
+  LettersIcon,
   MapIcon,
   MoonIcon,
   PanelLeftIcon,
-  ReviewIcon,
+  PhrasesIcon,
+  ProfileIcon,
   SunIcon,
 } from './ui/hackathon-icons.web';
 
 import { Fonts, Radii } from '@/constants/theme';
 import { useTheme, useThemeController } from '@/hooks/use-theme';
-import { useLearning } from '@/providers/learning-provider';
 
 const RAIL_WIDTH = 288;
 const COLLAPSED_RAIL_WIDTH = 52;
@@ -35,19 +32,19 @@ export default function AppTabs() {
       <TabList asChild>
         <Sidebar>
           <TabTrigger name="home" href="/" asChild>
-            <TabButton icon="today">Today</TabButton>
+            <TabButton icon="home">Home</TabButton>
           </TabTrigger>
-          <PathNav />
-          <TabTrigger name="path" href="/path" asChild>
-            <TabButton hidden icon="path">
-              Path
-            </TabButton>
+          <TabTrigger name="quests" href="/quests" asChild>
+            <TabButton icon="quests">Quests</TabButton>
           </TabTrigger>
-          <TabTrigger name="review" href="/review" asChild>
-            <TabButton icon="review">Review</TabButton>
+          <TabTrigger name="letters" href="/letters" asChild>
+            <TabButton icon="letters">Letters</TabButton>
           </TabTrigger>
-          <TabTrigger name="progress" href="/progress" asChild>
-            <TabButton icon="progress">Progress</TabButton>
+          <TabTrigger name="phrases" href="/phrases" asChild>
+            <TabButton icon="phrases">Phrases</TabButton>
+          </TabTrigger>
+          <TabTrigger name="profile" href="/profile" asChild>
+            <TabButton icon="profile">Profile</TabButton>
           </TabTrigger>
         </Sidebar>
       </TabList>
@@ -60,39 +57,20 @@ function TabButton({
   children,
   isFocused,
   icon,
-  hidden,
   onPress,
   ...props
-}: TabTriggerSlotProps & { icon: 'today' | 'path' | 'review' | 'progress'; hidden?: boolean }) {
+}: TabTriggerSlotProps & { icon: 'home' | 'quests' | 'letters' | 'phrases' | 'profile' }) {
   const theme = useTheme();
   const collapsed = useContext(CollapsedContext);
-  const { focusModule, openLesson } = useLearning();
   const color = isFocused ? theme.text : theme.textSecondary;
-
-  if (hidden) {
-    return (
-      <Pressable
-        {...props}
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-        onPress={onPress}
-        style={styles.hiddenTab}
-      />
-    );
-  }
 
   return (
     <Pressable
       {...props}
+      accessibilityLabel={typeof children === 'string' ? children : undefined}
       accessibilityRole="tab"
       accessibilityState={{ selected: Boolean(isFocused) }}
-      onPress={(event) => {
-        if (icon === 'today') {
-          focusModule(null);
-          openLesson(null);
-        }
-        onPress?.(event);
-      }}
+      onPress={onPress}
       style={({ pressed, hovered }: PressState) => [
         styles.link,
         collapsed && styles.linkCollapsed,
@@ -109,68 +87,6 @@ function TabButton({
         </ThemedText>
       )}
     </Pressable>
-  );
-}
-
-function PathNav() {
-  const theme = useTheme();
-  const router = useRouter();
-  const collapsed = useContext(CollapsedContext);
-  const { language, enrolledCourse, focusedModuleId, activeLessonId, focusModule, openLesson } = useLearning();
-  const [open, setOpen] = useState(true);
-  const courseLabel = enrolledCourse?.title ?? `${language.name} course`;
-  const showTree = Boolean(enrolledCourse) && open && !collapsed;
-  const color = showTree ? theme.text : theme.textSecondary;
-
-  return (
-    <View>
-      <Pressable
-        accessibilityLabel={
-          enrolledCourse ? `${courseLabel}. ${open ? 'Collapse' : 'Expand'} modules` : courseLabel
-        }
-        accessibilityRole="button"
-        accessibilityState={{ expanded: showTree }}
-        onPress={() => {
-          if (enrolledCourse && !collapsed) {
-            setOpen((current) => !current);
-            return;
-          }
-          router.push('/');
-        }}
-        style={({ pressed, hovered }: PressState) => [
-          styles.link,
-          collapsed && styles.linkCollapsed,
-          { backgroundColor: showTree || pressed || hovered ? theme.backgroundSelected : 'transparent' },
-        ]}>
-        <MapIcon color={color} />
-        {!collapsed && (
-          <ThemedText
-            numberOfLines={1}
-            style={[styles.linkLabel, showTree && styles.linkLabelActive]}
-            themeColor={showTree ? 'text' : 'textSecondary'}>
-            {courseLabel}
-          </ThemedText>
-        )}
-        {!collapsed && enrolledCourse ? <ChevronIcon color={theme.textTertiary} open={open} /> : null}
-      </Pressable>
-      {showTree ? (
-        <View style={styles.pathTree}>
-          <ModuleTree
-            density="rail"
-            selectedModuleId={focusedModuleId}
-            selectedLessonId={activeLessonId}
-            onSelectModule={(moduleId) => {
-              focusModule(moduleId);
-              router.push('/');
-            }}
-            onSelectLesson={(lessonId) => {
-              openLesson(lessonId);
-              router.push('/');
-            }}
-          />
-        </View>
-      ) : null}
-    </View>
   );
 }
 
@@ -263,13 +179,14 @@ function NavGlyph({
   name,
   color,
 }: {
-  name: 'today' | 'path' | 'review' | 'progress';
+  name: 'home' | 'quests' | 'letters' | 'phrases' | 'profile';
   color: string;
 }) {
-  if (name === 'today') return <HouseIcon color={color} />;
-  if (name === 'path') return <MapIcon color={color} />;
-  if (name === 'review') return <ReviewIcon color={color} />;
-  return <ChartIcon color={color} />;
+  if (name === 'home') return <HouseIcon color={color} />;
+  if (name === 'quests') return <MapIcon color={color} />;
+  if (name === 'letters') return <LettersIcon color={color} />;
+  if (name === 'phrases') return <PhrasesIcon color={color} />;
+  return <ProfileIcon color={color} />;
 }
 
 const styles = StyleSheet.create({
@@ -326,7 +243,6 @@ const styles = StyleSheet.create({
   },
   nav: { flex: 1 },
   navContent: { gap: 2, paddingTop: 4 },
-  pathTree: { paddingLeft: 6, paddingTop: 4 },
   link: {
     alignItems: 'center',
     borderRadius: Radii.medium,
@@ -350,5 +266,4 @@ const styles = StyleSheet.create({
   },
   footerButtonCollapsed: { justifyContent: 'center', paddingHorizontal: 0 },
   footerLabel: { fontFamily: Fonts.sans, fontSize: 14, lineHeight: 20 },
-  hiddenTab: { height: 0, overflow: 'hidden', position: 'absolute', width: 0 },
 });

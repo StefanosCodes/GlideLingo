@@ -7,6 +7,8 @@ import { type SittingBeat } from '@/constants/catalog';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
 import { PronunciationControl } from '@/features/learning-session/pronunciation-control';
 import { usePronunciationPlayer } from '@/features/learning-session/audio/use-pronunciation-player';
+import { RhythmClosure } from '@/features/learning-progress/rhythm-closure';
+import type { PracticeCompletionResult } from '@/features/learning-progress/rhythm-policy';
 import { useTheme } from '@/hooks/use-theme';
 
 type PressState = { pressed: boolean; hovered?: boolean };
@@ -61,11 +63,13 @@ export function NoticeBeat({ text, onContinue }: { text: string; onContinue: () 
 export function CheckBeat({
   beat,
   onContinue,
+  onAttempt,
   onSelectChoice,
   selectedChoice,
 }: {
   beat: Extract<SittingBeat, { type: 'check' }>;
   onContinue: () => void;
+  onAttempt: (correct: boolean) => void;
   onSelectChoice: (choice: string) => void;
   selectedChoice: string | null;
 }) {
@@ -80,11 +84,14 @@ export function CheckBeat({
       const index = Number(event.key) - 1;
       if (index < 0 || index >= beat.choices.length || selectedChoice === beat.answer) return;
       const choice = beat.choices[index] ?? null;
-      if (choice) onSelectChoice(choice);
+      if (choice) {
+        onSelectChoice(choice);
+        onAttempt(choice === beat.answer);
+      }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [beat.answer, beat.choices, onSelectChoice, selectedChoice]);
+  }, [beat.answer, beat.choices, onAttempt, onSelectChoice, selectedChoice]);
 
   return (
     <View style={styles.stage}>
@@ -121,7 +128,10 @@ export function CheckBeat({
               accessibilityRole="button"
               accessibilityState={{ selected, disabled: correct }}
               disabled={correct}
-              onPress={() => onSelectChoice(choice)}
+              onPress={() => {
+                onSelectChoice(choice);
+                onAttempt(choice === beat.answer);
+              }}
               style={({ pressed, hovered }: PressState) => [
                 styles.choice,
                 {
@@ -153,7 +163,7 @@ export function CheckBeat({
 
       {selectedChoice && !correct ? (
         <ThemedText type="footnote" themeColor="textSecondary">
-          Not that one. {beat.answer} is the one. Try again.
+          {beat.feedback ?? `Not that one. ${beat.answer} is the one.`} Try again.
         </ThemedText>
       ) : null}
     </View>
@@ -161,24 +171,34 @@ export function CheckBeat({
 }
 
 export function DoneBeat({
+  kicker,
   summary,
+  evidence,
   nextTitle,
   onNext,
-  onToday,
+  onHome,
+  rhythmResult,
 }: {
+  kicker: string;
   summary: string;
+  evidence: string;
   nextTitle: string | null;
   onNext: () => void;
-  onToday: () => void;
+  onHome: () => void;
+  rhythmResult: PracticeCompletionResult | null;
 }) {
   return (
     <View style={styles.stage}>
       <ThemedText type="eyebrow" themeColor="textSecondary" style={styles.kicker}>
-        SITTING COMPLETE
+        {kicker}
       </ThemedText>
       <ThemedText type="title" style={styles.notice}>
         {summary}
       </ThemedText>
+      <ThemedText type="body" themeColor="textSecondary" style={styles.notice}>
+        {evidence}
+      </ThemedText>
+      <RhythmClosure result={rhythmResult} />
       {nextTitle ? (
         <ThemedText type="body" themeColor="textSecondary">
           Next: {nextTitle}
@@ -189,14 +209,14 @@ export function DoneBeat({
         </ThemedText>
       )}
       <GlideButton
-        label={nextTitle ? 'Start next' : 'Back to today'}
-        onPress={nextTitle ? onNext : onToday}
+        label={nextTitle ? 'Start next' : 'Back to Home'}
+        onPress={nextTitle ? onNext : onHome}
         style={styles.continue}
       />
       {nextTitle ? (
-        <Pressable accessibilityRole="button" onPress={onToday} style={styles.textAction}>
+        <Pressable accessibilityRole="button" onPress={onHome} style={styles.textAction}>
           <ThemedText type="footnote" themeColor="textSecondary">
-            Back to today
+            Back to Home
           </ThemedText>
         </Pressable>
       ) : null}

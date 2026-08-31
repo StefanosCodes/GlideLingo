@@ -1,3 +1,5 @@
+import '@/providers/install-local-storage';
+
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-google-fonts/inter';
 import { ClerkProvider, useAuth } from '@clerk/expo';
 import { tokenCache } from '@clerk/expo/token-cache';
@@ -103,6 +105,7 @@ function AppNavigation({ signedIn }: { signedIn: boolean }) {
           <Stack.Screen name="(app)" />
           <Stack.Screen name="course/[id]" />
           <Stack.Screen name="lesson/[id]" />
+          <Stack.Screen name="rhythm" />
           <Stack.Screen name="kit" />
           <Stack.Screen name="diagnostics" />
           <Stack.Screen name="subscription" />

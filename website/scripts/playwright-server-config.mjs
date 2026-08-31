@@ -29,7 +29,7 @@ export function resolvePlaywrightServerConfig(environment = process.env) {
 function serverConfig(port) {
   return Object.freeze({
     host: PLAYWRIGHT_HOST,
-    origin: `http://${PLAYWRIGHT_HOST}:${port}`,
+    origin: new URL(`http://${PLAYWRIGHT_HOST}:${port}`).origin,
     port,
   });
 }

@@ -19,6 +19,14 @@ describe('resolvePlaywrightServerConfig', () => {
     });
   });
 
+  it('canonicalizes the default HTTP port in the origin', () => {
+    expect(resolvePlaywrightServerConfig({ PLAYWRIGHT_PORT: '80' })).toEqual({
+      host: '127.0.0.1',
+      origin: 'http://127.0.0.1',
+      port: 80,
+    });
+  });
+
   it('rejects a numeric prefix with a malformed suffix', () => {
     expect(() => resolvePlaywrightServerConfig({ PLAYWRIGHT_PORT: '4401oops' })).toThrow(
       'expected decimal digits only',

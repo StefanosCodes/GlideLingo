@@ -1,0 +1,4 @@
+interface:
+  display_name: "PR Integration Orchestrator"
+  short_description: "Order and safely integrate dependent PR queues"
+  default_prompt: "Use $pr-integration-orchestrator to map the live PR queue, propose a dependency-safe merge plan, and prepare the review gates."

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -13,28 +13,42 @@ import {
   isLessonTutorEnabled,
   useLessonTutor,
 } from '@/features/learning-session/lesson-tutor/use-lesson-tutor';
+import {
+  type CheckObservation,
+  type LessonMode,
+  summarizeLessonCompletion,
+} from '@/features/learning-progress/evidence-policy';
 import { useTheme } from '@/hooks/use-theme';
 import { useLearning } from '@/providers/learning-provider';
 
 export function LessonSittingView({
   lessonId,
+  mode = 'learn',
   onClose,
 }: {
   lessonId: string;
+  mode?: LessonMode;
   onClose: () => void;
 }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { enrolledCourse, completedLessonIds, completeLesson, openLesson } = useLearning();
+  const { enrolledCourse, completedLessonIds, lessonEvidence, completeLesson, openLesson } = useLearning();
   const found = findLesson(lessonId);
-  const beats = found?.lesson.beats ?? [];
+  const beats = useMemo(
+    () => (mode === 'review' ? (found?.lesson.reviewBeats ?? []) : (found?.lesson.beats ?? [])),
+    [found?.lesson.beats, found?.lesson.reviewBeats, mode],
+  );
   const total = Math.max(beats.length, 1);
-  const following = enrolledCourse
+  const following = mode === 'learn' && enrolledCourse
     ? nextLesson(enrolledCourse, completedLessonIds.includes(lessonId) ? completedLessonIds : [...completedLessonIds, lessonId])
     : null;
+  const followingAuthored = following?.lesson.beats?.length ? following : null;
+  const previousEvidence = lessonEvidence.find((record) => record.lessonId === lessonId);
   const [step, setStep] = useState(0);
   const [askOpen, setAskOpen] = useState(false);
   const [selectedChoices, setSelectedChoices] = useState<Record<number, string | null>>({});
+  const [checkObservations, setCheckObservations] = useState<Record<number, CheckObservation>>({});
+  const completionRecorded = useRef(false);
   const web = Platform.OS === 'web';
   const top = web ? Spacing.three : insets.top + Spacing.two;
   const done = beats.length > 0 && step >= beats.length;
@@ -45,26 +59,60 @@ export function LessonSittingView({
     selected_choice: selectedChoice,
     visible_step_index: step,
   });
-  const tutorAvailable = isLessonTutorEnabled() && beats.length > 0 && !done;
+  const tutorAvailable = isLessonTutorEnabled() && mode === 'learn' && beats.length > 0 && !done;
   const progress = done || beats.length === 0 ? 1 : step / total;
+  const completionInput = useMemo(
+    () => ({
+      lessonId,
+      mode,
+      capability: found?.lesson.capability,
+      introducedModes: found?.lesson.introducedModes ?? [],
+      checks: Object.values(checkObservations).sort((left, right) => left.beatIndex - right.beatIndex),
+    }),
+    [checkObservations, found?.lesson.capability, found?.lesson.introducedModes, lessonId, mode],
+  );
+  const previewEvidence = summarizeLessonCompletion(completionInput, previousEvidence?.lastPracticedAt ?? 0, previousEvidence);
+
+  function recordAttempt(correct: boolean) {
+    const currentBeat = beats[step];
+    if (currentBeat?.type !== 'check') return;
+    setCheckObservations((current) => {
+      const previous = current[step];
+      const attempts = (previous?.attempts ?? 0) + 1;
+      return {
+        ...current,
+        [step]: {
+          beatIndex: step,
+          capabilityId: currentBeat.evidence?.capabilityId,
+          level: currentBeat.evidence?.level,
+          attempts,
+          correct: previous?.correct || correct,
+          correctOnFirstTry: previous ? previous.correctOnFirstTry : correct,
+        },
+      };
+    });
+  }
 
   function advance() {
-    setStep((current) => current + 1);
+    const nextStep = step + 1;
+    if (nextStep >= beats.length && !completionRecorded.current) {
+      completionRecorded.current = true;
+      completeLesson(completionInput);
+    }
+    setStep(nextStep);
   }
 
   function finishAndOpenNext() {
     tutor.cancel();
-    completeLesson(lessonId);
-    if (following?.lesson) {
-      openLesson(following.lesson.id);
+    if (followingAuthored?.lesson) {
+      openLesson(followingAuthored.lesson.id, 'learn');
       return;
     }
     onClose();
   }
 
-  function finishAndToday() {
+  function finishAndHome() {
     tutor.cancel();
-    completeLesson(lessonId);
     onClose();
   }
 
@@ -72,6 +120,34 @@ export function LessonSittingView({
     tutor.cancel();
     onClose();
   }
+
+  const completionCopy = (() => {
+    if (previewEvidence.lastCheckpoint === 'recovered') {
+      return {
+        kicker: 'USEFUL RECOVERY',
+        summary: 'You rebuilt the sound pattern after another try.',
+        evidence:
+          previewEvidence.state === 'demonstrated'
+            ? 'Your earlier demonstration remains. This recovery will shape what returns next.'
+            : 'That is practice evidence. A fresh first attempt can demonstrate it.',
+      };
+    }
+    if (previewEvidence.state === 'demonstrated' && previewEvidence.capability) {
+      return {
+        kicker: mode === 'review' ? 'REVIEW COMPLETE' : 'CHECKPOINT PASSED',
+        summary: previewEvidence.capability.canDo,
+        evidence:
+          mode === 'review'
+            ? 'You recalled the varied pattern without the lesson model. Retention still needs a wider gap.'
+            : 'Demonstrated in a fresh pattern. A delayed review will check whether it sticks.',
+      };
+    }
+    return {
+      kicker: 'PRACTICE COMPLETE',
+      summary: 'You worked through the first Greek sound pattern.',
+      evidence: 'This records practice, not mastery. The next checkpoint will ask for less support.',
+    };
+  })();
 
   return (
     <ThemedView style={[styles.screen, web && styles.webLayout]}>
@@ -115,7 +191,9 @@ export function LessonSittingView({
               </ThemedText>
               <ThemedText type="title">{found.lesson.title}</ThemedText>
               <ThemedText type="body" themeColor="textSecondary" style={styles.emptyCopy}>
-                This sitting is listed on the path. The beats have not been authored yet.
+                {mode === 'review'
+                  ? 'This capability does not have a separate review variation yet.'
+                  : 'This sitting is listed on the path. The beats have not been authored yet.'}
               </ThemedText>
               <Pressable accessibilityRole="button" onPress={leaveLesson} style={styles.textAction}>
                 <ThemedText type="footnote" themeColor="textSecondary">
@@ -125,10 +203,12 @@ export function LessonSittingView({
             </View>
           ) : done ? (
             <DoneBeat
-              nextTitle={following?.lesson.title ?? null}
+              evidence={completionCopy.evidence}
+              kicker={completionCopy.kicker}
+              nextTitle={followingAuthored?.lesson.title ?? null}
               onNext={finishAndOpenNext}
-              onToday={finishAndToday}
-              summary="You can hear α, ε, and ι."
+              onHome={finishAndHome}
+              summary={completionCopy.summary}
             />
           ) : beat?.type === 'hear' ? (
             <HearBeat key={step} beat={beat} onContinue={advance} />
@@ -138,6 +218,7 @@ export function LessonSittingView({
             <CheckBeat
               key={step}
               beat={beat}
+              onAttempt={recordAttempt}
               onContinue={advance}
               onSelectChoice={(choice) =>
                 setSelectedChoices((current) => ({ ...current, [step]: choice }))

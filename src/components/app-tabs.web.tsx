@@ -66,7 +66,7 @@ function TabButton({
 }: TabTriggerSlotProps & { icon: 'today' | 'path' | 'review' | 'progress'; hidden?: boolean }) {
   const theme = useTheme();
   const collapsed = useContext(CollapsedContext);
-  const { focusModule } = useLearning();
+  const { focusModule, openLesson } = useLearning();
   const color = isFocused ? theme.text : theme.textSecondary;
 
   if (hidden) {
@@ -87,7 +87,10 @@ function TabButton({
       accessibilityRole="tab"
       accessibilityState={{ selected: Boolean(isFocused) }}
       onPress={(event) => {
-        if (icon === 'today') focusModule(null);
+        if (icon === 'today') {
+          focusModule(null);
+          openLesson(null);
+        }
         onPress?.(event);
       }}
       style={({ pressed, hovered }: PressState) => [
@@ -113,7 +116,7 @@ function PathNav() {
   const theme = useTheme();
   const router = useRouter();
   const collapsed = useContext(CollapsedContext);
-  const { language, enrolledCourse, focusedModuleId, focusModule } = useLearning();
+  const { language, enrolledCourse, focusedModuleId, activeLessonId, focusModule, openLesson } = useLearning();
   const [open, setOpen] = useState(true);
   const courseLabel = enrolledCourse?.title ?? `${language.name} course`;
   const showTree = Boolean(enrolledCourse) && open && !collapsed;
@@ -155,8 +158,13 @@ function PathNav() {
           <ModuleTree
             density="rail"
             selectedModuleId={focusedModuleId}
+            selectedLessonId={activeLessonId}
             onSelectModule={(moduleId) => {
               focusModule(moduleId);
+              router.push('/');
+            }}
+            onSelectLesson={(lessonId) => {
+              openLesson(lessonId);
               router.push('/');
             }}
           />

@@ -54,7 +54,7 @@ const styles = StyleSheet.create({
   chrome: {
     overflow: 'visible',
     paddingHorizontal: Spacing.threeHalf,
-    zIndex: 20,
+    zIndex: 100,
   },
   content: {
     alignSelf: 'center',

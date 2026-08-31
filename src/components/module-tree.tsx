@@ -19,31 +19,39 @@ type PressState = { pressed: boolean; hovered?: boolean };
 type ModuleTreeProps = {
   density: 'rail' | 'page';
   selectedModuleId?: string | null;
+  selectedLessonId?: string | null;
   onSelectModule?: (moduleId: string) => void;
+  onSelectLesson?: (lessonId: string) => void;
 };
 
-export function ModuleTree({ density, selectedModuleId, onSelectModule }: ModuleTreeProps) {
+export function ModuleTree({
+  density,
+  selectedModuleId,
+  selectedLessonId: propSelectedLessonId,
+  onSelectModule,
+  onSelectLesson,
+}: ModuleTreeProps) {
   const theme = useTheme();
-  const { enrolledCourse, completedModuleIds, currentModule } = useLearning();
-  const currentId = currentModule?.id ?? enrolledCourse?.modules[0]?.id ?? null;
+  const { enrolledCourse, completedModuleIds, currentModule, activeLessonId } = useLearning();
+  const currentId = selectedModuleId ?? currentModule?.id ?? enrolledCourse?.modules[0]?.id ?? null;
   const [openId, setOpenId] = useState<string | null>(currentId);
-  const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
+  const activeLesson = propSelectedLessonId ?? activeLessonId;
 
   if (!enrolledCourse) return null;
 
-  const expandedId = openId;
+  const expandedId = openId ?? selectedModuleId ?? currentId;
   const rail = density === 'rail';
 
   const tree = enrolledCourse.modules.map((module, index) => {
     const status = moduleStatus(enrolledCourse, module.id, completedModuleIds);
-    const expanded = expandedId === module.id;
+    const containsActiveLesson = Boolean(activeLesson && module.lessons.some((l) => l.id === activeLesson));
+    const expanded = expandedId === module.id || containsActiveLesson;
     const selected = selectedModuleId === module.id || (!selectedModuleId && status === 'current' && rail);
     const last = index === enrolledCourse.modules.length - 1;
     const number = String(index + 1).padStart(2, '0');
 
     function selectModule() {
       setOpenId(module.id);
-      setSelectedLessonId(null);
       if (onSelectModule) onSelectModule(module.id);
     }
 
@@ -117,45 +125,57 @@ export function ModuleTree({ density, selectedModuleId, onSelectModule }: Module
           </Pressable>
         )}
         {expanded
-          ? module.lessons.map((lesson, lessonIndex) =>
-              rail ? (
+          ? module.lessons.map((lesson, lessonIndex) => {
+              const isLessonActive = activeLesson === lesson.id;
+              return rail ? (
                 <Pressable
                   key={lesson.id}
                   accessibilityLabel={`${lesson.title}. ${lesson.durationMin} minutes`}
                   accessibilityRole="button"
+                  accessibilityState={{ selected: isLessonActive }}
                   onPress={() => {
                     setOpenId(module.id);
-                    setSelectedLessonId(lesson.id);
-                    onSelectModule?.(module.id);
+                    onSelectLesson?.(lesson.id);
                   }}
                   style={({ pressed, hovered }: PressState) => [
                     styles.railLesson,
-                    (selectedLessonId === lesson.id || pressed || hovered) && {
+                    (isLessonActive || pressed || hovered) && {
                       backgroundColor: theme.backgroundSelected,
                     },
                   ]}>
-                  <ThemedText type="footnote" themeColor={selectedLessonId === lesson.id ? 'text' : 'textSecondary'} numberOfLines={1} style={styles.railLessonTitle}>
+                  <ThemedText
+                    type="footnote"
+                    themeColor={isLessonActive ? 'text' : 'textSecondary'}
+                    numberOfLines={1}
+                    style={[styles.railLessonTitle, isLessonActive && styles.railLessonTitleActive]}>
+                    {lesson.title}
+                  </ThemedText>
+                  <ThemedText type="caption" themeColor={isLessonActive ? 'text' : 'textTertiary'}>
+                    {lesson.durationMin} min
+                  </ThemedText>
+                </Pressable>
+              ) : (
+                <Pressable
+                  key={lesson.id}
+                  accessibilityLabel={`${lesson.title}. ${lesson.durationMin} minutes`}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isLessonActive }}
+                  onPress={() => onSelectLesson?.(lesson.id)}
+                  style={[
+                    styles.pageLesson,
+                    isLessonActive && { backgroundColor: theme.backgroundSelected },
+                    { borderTopColor: theme.separator },
+                    lessonIndex === 0 && { borderTopWidth: StyleSheet.hairlineWidth },
+                  ]}>
+                  <ThemedText type="footnote" style={isLessonActive ? styles.railLessonTitleActive : undefined}>
                     {lesson.title}
                   </ThemedText>
                   <ThemedText type="caption" themeColor="textTertiary">
                     {lesson.durationMin} min
                   </ThemedText>
                 </Pressable>
-              ) : (
-                <View
-                  key={lesson.id}
-                  style={[
-                    styles.pageLesson,
-                    { borderTopColor: theme.separator },
-                    lessonIndex === 0 && { borderTopWidth: StyleSheet.hairlineWidth },
-                  ]}>
-                  <ThemedText type="footnote">{lesson.title}</ThemedText>
-                  <ThemedText type="caption" themeColor="textTertiary">
-                    {lesson.durationMin} min
-                  </ThemedText>
-                </View>
-              ),
-            )
+              );
+            })
           : null}
       </View>
     );
@@ -205,6 +225,7 @@ const styles = StyleSheet.create({
     ...webClickable,
   },
   railLessonTitle: { flex: 1 },
+  railLessonTitleActive: { fontFamily: Fonts.sansMedium },
   pageRow: {
     alignItems: 'center',
     flexDirection: 'row',

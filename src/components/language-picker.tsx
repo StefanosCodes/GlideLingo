@@ -3,7 +3,7 @@ import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { type Language } from '@/constants/catalog';
-import { Fonts, Radii, Shadows, Spacing } from '@/constants/theme';
+import { Fonts, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useLearning } from '@/providers/learning-provider';
 
@@ -21,16 +21,18 @@ export function LanguagePicker() {
     return () => clearTimeout(timer);
   }, [open]);
 
+  function close() {
+    setOpen(false);
+    setDismissable(false);
+  }
+
   return (
     <View style={styles.wrap}>
       {open && dismissable ? (
         <Pressable
           accessibilityLabel="Dismiss language menu"
           accessibilityRole="button"
-          onPress={() => {
-            setOpen(false);
-            setDismissable(false);
-          }}
+          onPress={close}
           style={styles.dismiss}
         />
       ) : null}
@@ -46,9 +48,10 @@ export function LanguagePicker() {
         style={({ pressed, hovered }: PressState) => [
           styles.trigger,
           {
-            backgroundColor: open || pressed || hovered ? theme.backgroundSelected : theme.surface,
-            borderColor: theme.border,
+            backgroundColor: theme.surface,
+            borderColor: open ? theme.text : theme.border,
           },
+          (pressed || hovered) && { backgroundColor: theme.backgroundSelected },
         ]}>
         <ThemedText style={styles.flag}>{language.flag}</ThemedText>
         <ThemedText type="footnote" style={styles.triggerLabel}>
@@ -63,11 +66,17 @@ export function LanguagePicker() {
         <View
           style={[
             styles.menu,
+            styles.menuElevation,
             {
               backgroundColor: theme.surfaceElevated,
               borderColor: theme.border,
             },
           ]}>
+          <View style={styles.menuHeader}>
+            <ThemedText type="eyebrow" themeColor="textTertiary">
+              LANGUAGES
+            </ThemedText>
+          </View>
           {languages.map((item) => (
             <LanguageOption
               key={item.id}
@@ -75,8 +84,7 @@ export function LanguagePicker() {
               selected={item.id === language.id}
               onPress={() => {
                 setLanguage(item.id);
-                setOpen(false);
-                setDismissable(false);
+                close();
               }}
             />
           ))}
@@ -105,18 +113,27 @@ function LanguageOption({
       onPress={onPress}
       style={({ pressed, hovered }: PressState) => [
         styles.option,
-        { backgroundColor: selected || pressed || hovered ? theme.backgroundSelected : 'transparent' },
+        {
+          backgroundColor: selected
+            ? theme.backgroundSelected
+            : pressed || hovered
+              ? theme.backgroundSelected
+              : 'transparent',
+        },
       ]}>
-      <ThemedText style={styles.flag}>{language.flag}</ThemedText>
-      <ThemedText type="headline" style={styles.optionLabel} themeColor={language.available ? 'text' : 'textSecondary'}>
+      <ThemedText style={styles.optionFlag}>{language.flag}</ThemedText>
+      <ThemedText
+        type="footnote"
+        style={[styles.optionLabel, selected && styles.optionLabelSelected]}
+        themeColor={language.available ? 'text' : 'textSecondary'}>
         {language.name}
       </ThemedText>
       {selected ? (
-        <ThemedText type="caption" themeColor="text">
+        <ThemedText type="footnote" themeColor="text" style={styles.check}>
           ✓
         </ThemedText>
       ) : language.available ? null : (
-        <ThemedText type="caption" themeColor="textTertiary">
+        <ThemedText type="caption" themeColor="textTertiary" style={styles.badge}>
           Soon
         </ThemedText>
       )}
@@ -127,7 +144,7 @@ function LanguageOption({
 const webClickable = Platform.select({ web: { cursor: 'pointer' as const }, default: {} });
 
 const styles = StyleSheet.create({
-  wrap: { alignItems: 'flex-end', overflow: 'visible', zIndex: 20 },
+  wrap: { alignItems: 'flex-end', position: 'relative', zIndex: 100 },
   dismiss: Platform.select({
     web: {
       bottom: 0,
@@ -135,48 +152,68 @@ const styles = StyleSheet.create({
       position: 'fixed',
       right: 0,
       top: 0,
-      zIndex: 10,
+      zIndex: 90,
     },
     default: {
       ...StyleSheet.absoluteFill,
-      zIndex: 10,
+      zIndex: 90,
     },
   }) ?? {},
   trigger: {
     alignItems: 'center',
     borderRadius: Radii.capsule,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     flexDirection: 'row',
     gap: 6,
-    height: 32,
-    paddingLeft: 10,
-    paddingRight: 12,
-    zIndex: 20,
+    height: 36,
+    paddingHorizontal: 12,
+    zIndex: 100,
     ...webClickable,
   },
-  triggerLabel: { fontFamily: Fonts.sansMedium },
-  caret: { marginLeft: 2 },
+  triggerLabel: { fontFamily: Fonts.sansMedium, fontSize: 13 },
+  caret: { fontSize: 10, marginLeft: 2 },
   flag: { fontFamily: Fonts.sans, fontSize: 15, lineHeight: 18 },
   menu: {
-    borderRadius: Radii.xlarge,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radii.large,
+    borderWidth: 1,
     gap: 2,
-    minWidth: 196,
+    minWidth: 180,
     padding: 6,
     position: 'absolute',
     right: 0,
-    top: 38,
-    zIndex: 30,
-    ...Shadows.floating,
+    top: 42,
+    zIndex: 100,
+  },
+  menuElevation: Platform.select({
+    web: {
+      boxShadow: '0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04)',
+    },
+    ios: {
+      shadowColor: '#000000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.1,
+      shadowRadius: 10,
+    },
+    default: {
+      elevation: 6,
+    },
+  }) ?? {},
+  menuHeader: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
   option: {
     alignItems: 'center',
-    borderRadius: Radii.large,
+    borderRadius: Radii.medium,
     flexDirection: 'row',
     gap: Spacing.two,
-    minHeight: 40,
-    paddingHorizontal: 10,
+    minHeight: 34,
+    paddingHorizontal: 8,
     ...webClickable,
   },
-  optionLabel: { flex: 1 },
+  optionFlag: { fontFamily: Fonts.sans, fontSize: 15, lineHeight: 18 },
+  optionLabel: { flex: 1, fontFamily: Fonts.sans },
+  optionLabelSelected: { fontFamily: Fonts.sansMedium },
+  check: { fontFamily: Fonts.sansMedium, fontSize: 12 },
+  badge: { fontSize: 10 },
 });

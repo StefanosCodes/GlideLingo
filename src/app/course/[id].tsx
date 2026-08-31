@@ -73,11 +73,11 @@ export default function CoursePreviewScreen() {
           STRUCTURE
         </ThemedText>
         <ThemedText type="title3">
-          {course.modules.length} modules · {course.modules.reduce((sum, module) => sum + module.lessons.length, 0)}{' '}
+          {course.modules.length} quests · {course.modules.reduce((sum, module) => sum + module.lessons.length, 0)}{' '}
           lessons
         </ThemedText>
         <ThemedText type="footnote" themeColor="textSecondary">
-          Each module is a real-world job. Lessons inside it stay 8–15 minutes. The path is authored, not generated
+          Each quest is a real-world job. Lessons inside it stay 8–15 minutes. The path is authored, not generated
           when you start.
         </ThemedText>
       </GlideSurface>

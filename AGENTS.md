@@ -28,6 +28,10 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
   - Evidence-backed emotional behavior design for learning journeys, gamification, retention, and lifecycle messaging.
   - Separates learning outcomes, target behavior, emotional transitions, and business outcomes.
   - Maintains GlideLingo's calm-momentum principles, ethical guardrails, research ledger, and behavior brief format.
+- **Repository Skill (`.agents/skills/pr-integration-orchestrator/SKILL.md`)**:
+  - Reconstructs the live PR, branch, and worktree queue instead of relying on stale chat context.
+  - Builds dependency-safe merge waves, coordinates bounded parallel reviews, and rehearses integration in an isolated worktree.
+  - Separates code, integration, deployment, and feature-enablement readiness and keeps remote merges approval-gated.
 - **Portable Engineering Workflows (`~/.agents/skills/`)**:
   - `$dev-build-feature`: Implement or extend features using the inspect, decide, act, observe, verify loop.
   - `$dev-debug-issue`: Diagnose and fix runtime bugs with evidence, reproducible traces, and root-cause proof.

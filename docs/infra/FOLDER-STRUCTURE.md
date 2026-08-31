@@ -45,7 +45,7 @@ GlideLingo/
 │   │   ├── (auth)/                   Added with authentication
 │   │   └── (app)/                    Added as product navigation grows
 │   │       ├── _layout.tsx
-│   │       ├── index.tsx             Today route
+│   │       ├── index.tsx             Home route
 │   │       ├── path.tsx
 │   │       ├── review.tsx
 │   │       ├── progress.tsx

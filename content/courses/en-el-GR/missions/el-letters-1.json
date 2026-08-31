@@ -1,9 +1,15 @@
 {
   "schemaVersion": 1,
+  "lessonId": "el-letters-1",
   "lessonTitle": "The Greek sound map",
   "moduleTitle": "First sounds",
   "objective": "Recognize α, ε, and ι and use their sounds to read a simple Greek syllable.",
-  "lessonId": "el-letters-1",
+  "capability": {
+    "id": "el-script-vowels-a-e-i",
+    "canDo": "I can recognize α, ε, and ι in a new Greek syllable.",
+    "mode": "reading"
+  },
+  "introducedModes": ["listening", "reading"],
   "blocks": [
     {
       "type": "heading",
@@ -105,6 +111,11 @@
       "prompt": "Which letter is the a in father?",
       "choices": ["α", "ε", "ι"],
       "answer": "α",
+      "feedback": "α carries the open a sound in father. Compare it with ε (e) and ι (ee).",
+      "evidence": {
+        "capabilityId": "el-script-vowels-a-e-i",
+        "level": "practice"
+      },
       "answerAliases": ["alpha", "άλφα"]
     },
     {
@@ -113,7 +124,30 @@
       "greek": "να",
       "choices": ["ma", "na", "ne"],
       "answer": "na",
+      "feedback": "ν is n and α is a, so να reads na.",
+      "evidence": {
+        "capabilityId": "el-script-vowels-a-e-i",
+        "level": "checkpoint"
+      },
       "answerAliases": ["νά"]
+    }
+  ],
+  "reviewBeats": [
+    {
+      "type": "notice",
+      "text": "No model this time. Read the new syllable from the sound pattern you practiced."
+    },
+    {
+      "type": "check",
+      "prompt": "Read this new syllable",
+      "greek": "με",
+      "choices": ["ma", "me", "mi"],
+      "answer": "me",
+      "feedback": "μ is m and ε is e, so με reads me.",
+      "evidence": {
+        "capabilityId": "el-script-vowels-a-e-i",
+        "level": "checkpoint"
+      }
     }
   ]
 }

@@ -1,5 +1,11 @@
 import elLettersOne from '../../content/courses/en-el-GR/missions/el-letters-1.json';
 
+import type {
+  CommunicationMode,
+  EvidenceLevel,
+  LessonCapability,
+} from '@/features/learning-progress/evidence-policy';
+
 export type LanguageId = 'el' | 'es' | 'fr';
 
 export type AudioClipId = string;
@@ -31,6 +37,8 @@ export type SittingBeat =
       answer: string;
       greek?: string;
       audioId?: AudioClipId;
+      feedback?: string;
+      evidence?: { capabilityId: string; level: EvidenceLevel };
     };
 
 export type Lesson = {
@@ -39,6 +47,9 @@ export type Lesson = {
   durationMin: number;
   blocks?: LessonBlock[];
   beats?: SittingBeat[];
+  reviewBeats?: SittingBeat[];
+  capability?: LessonCapability;
+  introducedModes?: CommunicationMode[];
 };
 
 export type CourseModule = {
@@ -68,7 +79,7 @@ export const courses: Course[] = [
   {
     id: 'el-from-zero',
     languageId: 'el',
-    title: 'Greek from zero',
+    title: 'Greek Foundations',
     levelLabel: 'A0–A1',
     summary: 'A clear path from the alphabet to first real conversations in Standard Modern Greek.',
     canDos: [
@@ -88,6 +99,9 @@ export const courses: Course[] = [
             durationMin: 8,
             blocks: elLettersOne.blocks as LessonBlock[],
             beats: elLettersOne.beats as SittingBeat[],
+            reviewBeats: elLettersOne.reviewBeats as SittingBeat[],
+            capability: elLettersOne.capability as LessonCapability,
+            introducedModes: elLettersOne.introducedModes as CommunicationMode[],
           },
           { id: 'el-letters-2', title: 'The alphabet', durationMin: 10 },
           { id: 'el-letters-3', title: 'First words', durationMin: 8 },
@@ -196,8 +210,6 @@ export const courses: Course[] = [
     ],
   },
 ];
-
-export const streakDays = 7;
 
 export function getLanguage(id: LanguageId) {
   const language = languages.find((item) => item.id === id);

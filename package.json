@@ -73,6 +73,7 @@
     "desktop:export": "expo export --platform web",
     "desktop:package": "npm run desktop:export && electron-builder --projectDir desktop --dir",
     "desktop:dist": "npm run desktop:export && electron-builder --projectDir desktop",
+    "desktop:release": "node desktop/release.cjs",
     "audio:estimate": "node --env-file-if-exists=.env scripts/course-audio/cli.mjs estimate",
     "audio:generate": "node --env-file-if-exists=.env scripts/course-audio/cli.mjs generate",
     "audio:validate": "node --env-file-if-exists=.env scripts/course-audio/cli.mjs validate",

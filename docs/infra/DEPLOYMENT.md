@@ -94,6 +94,8 @@ Required configuration includes a permanent Android application ID, signing keys
 
 The current Electron builder targets DMG and ZIP, so the recommended first macOS release is direct distribution rather than the Mac App Store.
 
+The implemented release path builds one universal application for Intel and Apple Silicon. `npm run desktop:dist` remains an unsigned packaging check; `npm run desktop:release` is the fail-safe public release command. The latter requires an exact HTTPS API configuration, Developer ID signing, and notarization credentials. The tag-triggered GitHub workflow validates the signature, stapled notarization ticket, Gatekeeper acceptance, and both architecture slices before publishing.
+
 ```text
 Verify Expo and Electron
 → export the Expo web bundle
@@ -108,6 +110,8 @@ Verify Expo and Electron
 ```
 
 Direct distribution and the Mac App Store are separate channels. A future Mac App Store build requires its own target, certificates, provisioning, mandatory Apple App Sandbox entitlements, review path, and testing. Chromium’s Electron renderer sandbox is not the same as the Apple App Sandbox.
+
+Credential names, local setup, the `desktop-v<version>` tag contract, and the release workflow are documented in [Desktop release operations](./DESKTOP-RELEASE.md).
 
 ## Desktop authentication and deep links
 

@@ -18,10 +18,14 @@ extraResources:
 
 mac:
   category: public.app-category.education
+  hardenedRuntime: true
   icon: ../assets/images/icon.png
+  notarize: true
   target:
-    - dmg
-    - zip
+    - target: dmg
+      arch: universal
+    - target: zip
+      arch: universal
   artifactName: ${productName}-${version}-${arch}.${ext}
 
 win:

@@ -7,29 +7,21 @@ const { app, BrowserWindow, net, protocol, session, shell } = require('electron'
 const {
   APP_HOST,
   APP_SCHEME,
+  createContentSecurityPolicy,
   isAllowedNavigation,
   isSafeExternalUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
+  validateProductionApiOrigin,
 } = require('./runtime.cjs');
+const { glidelingoApiOrigin } = require('./package.json');
 
 const DEVELOPMENT_URL = validateDevelopmentUrl(process.env.ELECTRON_RENDERER_URL);
 const AUDIO_SMOKE_TEST = process.env.ELECTRON_AUDIO_SMOKE_TEST === '1';
 const PRODUCTION_URL = `${APP_SCHEME}://${APP_HOST}/`;
 const RENDERER_URL = DEVELOPMENT_URL ?? PRODUCTION_URL;
-const CONTENT_SECURITY_POLICY = [
-  "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "font-src 'self' data:",
-  "connect-src 'self'",
-  "media-src 'self' data: blob:",
-  "object-src 'none'",
-  "frame-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-].join('; ');
+const PRODUCTION_API_ORIGIN = validateProductionApiOrigin(glidelingoApiOrigin);
+const CONTENT_SECURITY_POLICY = createContentSecurityPolicy(PRODUCTION_API_ORIGIN);
 
 protocol.registerSchemesAsPrivileged([
   {

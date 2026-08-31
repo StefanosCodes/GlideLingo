@@ -1,0 +1,68 @@
+name: Desktop Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - desktop-v*
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    name: Sign and notarize macOS
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+      EXPO_PUBLIC_API_BASE_URL: ${{ vars.GLIDELINGO_PRODUCTION_API_ORIGIN }}
+      GLIDELINGO_DESKTOP_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run desktop:release
+      - name: Verify signature, notarization, and architecture
+        run: |
+          codesign --verify --deep --strict --verbose=2 release/mac-universal/GlideLingo.app
+          spctl --assess --type execute --verbose=4 release/mac-universal/GlideLingo.app
+          xcrun stapler validate release/mac-universal/GlideLingo.app
+          ARCHITECTURES="$(lipo -archs release/mac-universal/GlideLingo.app/Contents/MacOS/GlideLingo)"
+          grep -qw x86_64 <<< "$ARCHITECTURES"
+          grep -qw arm64 <<< "$ARCHITECTURES"
+      - name: Create checksums
+        working-directory: release
+        run: shasum -a 256 ./*.dmg ./*.zip > SHA256SUMS.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: GlideLingo-macOS-${{ github.sha }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          release/*.dmg
+          release/*.zip
+          release/SHA256SUMS.txt
+          --generate-notes
+          --title "GlideLingo $GITHUB_REF_NAME"
+          --verify-tag

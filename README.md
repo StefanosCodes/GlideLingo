@@ -45,7 +45,8 @@ Run commands from this directory—the one containing `package.json`:
 | Clear mobile Metro state | `npm run start:clear` |
 | Clear desktop Metro state | `npm run desktop:clear` |
 | Build a local macOS `.app` | `npm run desktop:package` |
-| Build macOS DMG and ZIP | `npm run desktop:dist` |
+| Build unsigned universal macOS artifacts | `npm run desktop:dist` |
+| Build a signed/notarized universal release | `npm run desktop:release` |
 
 The npm scripts are the source of truth for developers, CI, and Codex. `AGENTS.md` tells Codex when to use them, while `.codex/environments/environment.toml` exposes the common ones as one-click action buttons in the Codex desktop app.
 
@@ -151,13 +152,19 @@ npm run desktop:package
 open release/mac-arm64/GlideLingo.app
 ```
 
-Create distributable DMG and ZIP artifacts:
+Create unsigned universal DMG and ZIP artifacts for packaging checks:
 
 ```bash
 npm run desktop:dist
 ```
 
-Generated artifacts are placed in `release/`. Local builds can be tested on this Mac; public distribution requires Apple Developer signing and notarization.
+Create a public-release candidate only after the production API origin and Apple credentials are configured:
+
+```bash
+npm run desktop:release
+```
+
+Generated artifacts are placed in `release/`. The release command refuses to build without an HTTPS production API origin, a real Developer ID signature, and complete notarization credentials. It produces one universal app for Intel and Apple Silicon Macs and embeds only the exact production API origin in Electron's Content Security Policy. See [`docs/infra/DESKTOP-RELEASE.md`](docs/infra/DESKTOP-RELEASE.md) for credential setup, GitHub secrets, verification, and publishing.
 
 ## Useful checks
 

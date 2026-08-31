@@ -4,6 +4,55 @@ const APP_SCHEME = 'glidelingo';
 const APP_HOST = 'app';
 const DEVELOPMENT_PORT = '8081';
 
+function validateProductionApiOrigin(value) {
+  if (value == null || value === '') {
+    return null;
+  }
+
+  if (typeof value !== 'string' || value !== value.trim()) {
+    throw new Error('The packaged API origin must be a trimmed HTTPS origin.');
+  }
+
+  let url;
+
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('The packaged API origin must be a valid absolute URL.');
+  }
+
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error('The packaged API origin must be an HTTPS origin without credentials or a path.');
+  }
+
+  return url.origin;
+}
+
+function createContentSecurityPolicy(apiOrigin) {
+  const connectSources = apiOrigin == null ? "'self'" : `'self' ${apiOrigin}`;
+
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    `connect-src ${connectSources}`,
+    "media-src 'self' data: blob:",
+    "object-src 'none'",
+    "frame-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join('; ');
+}
+
 function validateDevelopmentUrl(value) {
   if (!value) {
     return null;
@@ -115,8 +164,10 @@ function isSafeExternalUrl(targetUrl) {
 module.exports = {
   APP_HOST,
   APP_SCHEME,
+  createContentSecurityPolicy,
   isAllowedNavigation,
   isSafeExternalUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
+  validateProductionApiOrigin,
 };

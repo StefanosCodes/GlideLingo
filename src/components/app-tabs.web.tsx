@@ -1,4 +1,5 @@
 import { createContext, useContext, useState } from 'react';
+import { Image } from 'expo-image';
 import { Tabs, TabList, TabTrigger, TabSlot, type TabListProps, type TabTriggerSlotProps } from 'expo-router/ui';
 import { useRouter } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
@@ -11,7 +12,6 @@ import {
   HouseIcon,
   MapIcon,
   MoonIcon,
-  OpenFDEMark,
   PanelLeftIcon,
   ReviewIcon,
   SunIcon,
@@ -210,9 +210,12 @@ function Sidebar(props: TabListProps) {
               collapsed && styles.brandCollapsed,
               { backgroundColor: pressed || hovered ? theme.backgroundSelected : 'transparent' },
             ]}>
-            <View style={styles.brandMark}>
-              <OpenFDEMark color={theme.text} size={22} />
-            </View>
+            <Image
+              accessibilityIgnoresInvertColors
+              contentFit="contain"
+              source={require('@/assets/brand/glidelingo-bird.png')}
+              style={styles.brandMark}
+            />
             {!collapsed && <ThemedText style={styles.brandName}>GlideLingo</ThemedText>}
           </Pressable>
 
@@ -306,7 +309,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     width: 44,
   },
-  brandMark: { height: 22, width: 22 },
+  brandMark: { height: 32, width: 32 },
   brandName: {
     fontFamily: Fonts.sansSemibold,
     fontSize: 18,

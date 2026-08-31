@@ -28,5 +28,5 @@ export default function LessonScreen() {
     router.replace('/');
   }
 
-  return <LessonLectureView lessonId={id ?? ''} onClose={goBack} />;
+  return <LessonLectureView key={id} lessonId={id ?? ''} onClose={goBack} />;
 }

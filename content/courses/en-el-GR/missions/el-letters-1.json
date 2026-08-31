@@ -67,5 +67,48 @@
       "choices": ["α", "ε", "ι"],
       "answer": "α"
     }
+  ],
+  "beats": [
+    {
+      "type": "hear",
+      "greek": "α · Α",
+      "gloss": "like the a in father",
+      "audioId": "el-letter-alpha"
+    },
+    {
+      "type": "hear",
+      "greek": "ε · Ε",
+      "gloss": "like the e in red",
+      "audioId": "el-letter-epsilon"
+    },
+    {
+      "type": "hear",
+      "greek": "ι · Ι",
+      "gloss": "like the ee in see",
+      "audioId": "el-letter-iota"
+    },
+    {
+      "type": "notice",
+      "text": "η and υ also sound like ι in Standard Modern Greek. Same sound, different letters. Treat them as one for now."
+    },
+    {
+      "type": "hear",
+      "greek": "καλημέρα",
+      "gloss": "kalimera — good morning",
+      "audioId": "el-kalimera"
+    },
+    {
+      "type": "check",
+      "prompt": "Which letter is the a in father?",
+      "choices": ["α", "ε", "ι"],
+      "answer": "α"
+    },
+    {
+      "type": "check",
+      "prompt": "What sound does this make?",
+      "greek": "να",
+      "choices": ["ma", "na", "ne"],
+      "answer": "na"
+    }
   ]
 }

@@ -16,9 +16,9 @@ const skillProfile = [
 
 export default function ProgressScreen() {
   const theme = useTheme();
-  const { language, enrolledCourse, currentModule, progress, completedModuleIds } = useLearning();
+  const { language, enrolledCourse, currentModule, progress, completedLessonIds } = useLearning();
   const percent = Math.round(progress * 100);
-  const introduced = completedModuleIds.length > 0;
+  const introduced = completedLessonIds.length > 0;
 
   return (
     <ScreenFrame>

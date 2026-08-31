@@ -32,7 +32,7 @@ export function ModuleTree({
   onSelectLesson,
 }: ModuleTreeProps) {
   const theme = useTheme();
-  const { enrolledCourse, completedModuleIds, currentModule, activeLessonId } = useLearning();
+  const { enrolledCourse, completedLessonIds, currentModule, activeLessonId } = useLearning();
   const currentId = selectedModuleId ?? currentModule?.id ?? enrolledCourse?.modules[0]?.id ?? null;
   const [openId, setOpenId] = useState<string | null>(currentId);
   const activeLesson = propSelectedLessonId ?? activeLessonId;
@@ -43,7 +43,7 @@ export function ModuleTree({
   const rail = density === 'rail';
 
   const tree = enrolledCourse.modules.map((module, index) => {
-    const status = moduleStatus(enrolledCourse, module.id, completedModuleIds);
+    const status = moduleStatus(enrolledCourse, module.id, completedLessonIds);
     const containsActiveLesson = Boolean(activeLesson && module.lessons.some((l) => l.id === activeLesson));
     const expanded = expandedId === module.id || containsActiveLesson;
     const selected = selectedModuleId === module.id || (!selectedModuleId && status === 'current' && rail);
@@ -127,10 +127,12 @@ export function ModuleTree({
         {expanded
           ? module.lessons.map((lesson, lessonIndex) => {
               const isLessonActive = activeLesson === lesson.id;
+              const lessonDone = completedLessonIds.includes(lesson.id);
+              const lessonMeta = lessonDone ? 'Done' : `${lesson.durationMin} min`;
               return rail ? (
                 <Pressable
                   key={lesson.id}
-                  accessibilityLabel={`${lesson.title}. ${lesson.durationMin} minutes`}
+                  accessibilityLabel={`${lesson.title}. ${lessonMeta}`}
                   accessibilityRole="button"
                   accessibilityState={{ selected: isLessonActive }}
                   onPress={() => {
@@ -145,19 +147,19 @@ export function ModuleTree({
                   ]}>
                   <ThemedText
                     type="footnote"
-                    themeColor={isLessonActive ? 'text' : 'textSecondary'}
+                    themeColor={isLessonActive || lessonDone ? 'text' : 'textSecondary'}
                     numberOfLines={1}
                     style={[styles.railLessonTitle, isLessonActive && styles.railLessonTitleActive]}>
                     {lesson.title}
                   </ThemedText>
-                  <ThemedText type="caption" themeColor={isLessonActive ? 'text' : 'textTertiary'}>
-                    {lesson.durationMin} min
+                  <ThemedText type="caption" themeColor={isLessonActive || lessonDone ? 'text' : 'textTertiary'}>
+                    {lessonMeta}
                   </ThemedText>
                 </Pressable>
               ) : (
                 <Pressable
                   key={lesson.id}
-                  accessibilityLabel={`${lesson.title}. ${lesson.durationMin} minutes`}
+                  accessibilityLabel={`${lesson.title}. ${lessonMeta}`}
                   accessibilityRole="button"
                   accessibilityState={{ selected: isLessonActive }}
                   onPress={() => onSelectLesson?.(lesson.id)}
@@ -171,7 +173,7 @@ export function ModuleTree({
                     {lesson.title}
                   </ThemedText>
                   <ThemedText type="caption" themeColor="textTertiary">
-                    {lesson.durationMin} min
+                    {lessonMeta}
                   </ThemedText>
                 </Pressable>
               );

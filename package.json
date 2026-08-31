@@ -105,7 +105,7 @@
     "test:auth": "node --test src/api/__tests__/*.test.mjs src/features/auth/__tests__/*.test.mjs src/providers/__tests__/*.test.mjs",
     "test:billing": "node --test src/features/billing/__tests__/*.test.mjs",
     "test:desktop": "node --test desktop/*.test.cjs",
-    "lint": "expo lint",
+    "lint": "expo lint --no-cache",
     "verify": "npm run lint && npm run typecheck && npm test",
     "verify:full": "npm run verify && npm run doctor && npm run desktop:export && npm run api:verify && npm run tutor:verify && npm run db:config",
     "verify:full-stack": "npm run verify:full && npm run db:up && npm run api:test:integration"

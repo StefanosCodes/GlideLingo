@@ -16,6 +16,11 @@ extraResources:
   - from: ../dist
     to: dist
 
+protocols:
+  - name: GlideLingo authentication callback
+    schemes:
+      - glidelingo
+
 mac:
   category: public.app-category.education
   icon: ../assets/images/icon.png

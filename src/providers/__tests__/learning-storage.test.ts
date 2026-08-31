@@ -2,7 +2,8 @@ import { describe, expect, it, jest } from '@jest/globals';
 
 import {
   emptyStoredLearning,
-  LEARNING_STORAGE_KEY,
+  getLearningStorage,
+  learningStorageKey,
   parseStoredLearning,
   readStoredLearning,
   writeStoredLearning,
@@ -29,7 +30,7 @@ describe('learning storage', () => {
     expect(value.practiceDayKeys).toEqual(['2026-08-24', '2026-08-31']);
   });
 
-  it('filters malformed v2 data and deduplicates practice days', () => {
+  it('filters malformed v2 fields and deduplicates practice days', () => {
     const value = parseStoredLearning(
       JSON.stringify({
         version: 2,
@@ -54,27 +55,63 @@ describe('learning storage', () => {
     expect(value.weeklyGoalChanges).toEqual([{ effectiveWeekKey: '2026-08-31', goal: 2 }]);
   });
 
-  it('falls back safely when stored JSON or storage access fails', () => {
-    expect(parseStoredLearning('{')).toEqual(emptyStoredLearning());
-
-    const unavailable = readStoredLearning({
+  it('distinguishes missing, corrupt, and failed reads', () => {
+    const missing = readStoredLearning('scoped', {
+      getItem: jest.fn(() => null),
+      removeItem: jest.fn(),
+      setItem: jest.fn(),
+    });
+    const corrupt = readStoredLearning('scoped', {
+      getItem: jest.fn(() => '{'),
+      removeItem: jest.fn(),
+      setItem: jest.fn(),
+    });
+    const failed = readStoredLearning('scoped', {
       getItem: () => {
         throw new Error('unavailable');
       },
+      removeItem: jest.fn(),
       setItem: jest.fn(),
     });
-    expect(unavailable.status).toBe('unavailable');
-    expect(unavailable.value).toEqual(emptyStoredLearning());
+
+    expect(missing.kind).toBe('missing');
+    expect(corrupt.kind).toBe('corrupt');
+    expect(failed.kind).toBe('read-error');
+    expect(failed.value).toEqual(emptyStoredLearning());
   });
 
-  it('writes a versioned payload and reports write failures', () => {
+  it('guards localStorage acquisition when the host getter throws', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new Error('blocked');
+      },
+    });
+    try {
+      expect(getLearningStorage()).toBeUndefined();
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, 'localStorage', descriptor);
+      else Reflect.deleteProperty(globalThis, 'localStorage');
+    }
+  });
+
+  it('writes a versioned account-scoped payload and reports write failures', () => {
     const setItem = jest.fn();
-    expect(writeStoredLearning(emptyStoredLearning(), { getItem: jest.fn(() => null), setItem })).toBe(true);
-    expect(setItem).toHaveBeenCalledWith(LEARNING_STORAGE_KEY, JSON.stringify(emptyStoredLearning()));
+    const key = learningStorageKey('user-a');
+    expect(
+      writeStoredLearning(key, emptyStoredLearning(), {
+        getItem: jest.fn(() => null),
+        removeItem: jest.fn(),
+        setItem,
+      }),
+    ).toBe(true);
+    expect(setItem).toHaveBeenCalledWith(key, JSON.stringify(emptyStoredLearning()));
 
     expect(
-      writeStoredLearning(emptyStoredLearning(), {
+      writeStoredLearning(key, emptyStoredLearning(), {
         getItem: jest.fn(() => null),
+        removeItem: jest.fn(),
         setItem: () => {
           throw new Error('full');
         },

@@ -45,34 +45,37 @@ export function useLessonTutor(
   const stateRef = useRef(state);
   const contextRef = useRef(pageContext);
   const activeRequest = useRef<AbortController | null>(null);
-  const lessonRef = useRef(lessonId);
+  const requestGeneration = useRef(0);
+  const pageKey = `${lessonId}:${pageContext.visible_step_index}:${pageContext.selected_choice ?? ''}`;
+  const pageKeyRef = useRef(pageKey);
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
 
-  useEffect(() => {
-    contextRef.current = pageContext;
-  }, [pageContext]);
-
   const cancel = useCallback(() => {
+    requestGeneration.current += 1;
     activeRequest.current?.abort();
     activeRequest.current = null;
   }, []);
 
   useEffect(() => {
-    if (lessonRef.current !== lessonId) {
+    contextRef.current = pageContext;
+    if (pageKeyRef.current !== pageKey) {
       cancel();
-      lessonRef.current = lessonId;
-      dispatch({ type: 'reset', conversationId: createConversationId() });
+      pageKeyRef.current = pageKey;
+      const resetAction = { type: 'reset', conversationId: createConversationId() } as const;
+      dispatch(resetAction);
+      stateRef.current = lessonTutorReducer(stateRef.current, resetAction);
     }
-    return cancel;
-  }, [cancel, lessonId]);
+  }, [cancel, pageContext, pageKey]);
+
+  useEffect(() => cancel, [cancel]);
 
   const runTurn = useCallback(
     async (userMessage: TutorMessage) => {
       const requestState = stateRef.current;
-      const requestLesson = lessonRef.current;
+      const generation = requestGeneration.current;
       const controller = new AbortController();
       activeRequest.current = controller;
       try {
@@ -85,7 +88,7 @@ export function useLessonTutor(
           },
           controller.signal,
         );
-        if (controller.signal.aborted || lessonRef.current !== requestLesson) return;
+        if (controller.signal.aborted || requestGeneration.current !== generation) return;
         dispatch({
           type: 'succeed',
           messageId: userMessage.id,
@@ -94,7 +97,7 @@ export function useLessonTutor(
       } catch (error) {
         if (
           controller.signal.aborted ||
-          lessonRef.current !== requestLesson ||
+          requestGeneration.current !== generation ||
           (error instanceof LessonTutorRequestError && error.cancelled)
         ) {
           return;

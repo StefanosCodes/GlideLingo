@@ -1,0 +1,163 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { resolveMacDownload } from '../lib/download-config.mjs';
+
+const download = resolveMacDownload(process.env);
+const description =
+  'GlideLingo is a calm language-learning app with guided lessons, focused review, and a weekly rhythm you can keep.';
+---
+
+<BaseLayout title="GlideLingo — Language practice that keeps moving" description={description}>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand-link" href="/" aria-label="GlideLingo home">
+        <img src="/brand/glidelingo-wordmark.png" width="238" height="87" alt="GlideLingo" />
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="#how-it-works">How it works</a>
+        <a href="#download">Download</a>
+      </nav>
+      <a
+        class="button button-small button-primary header-download"
+        href={download.available ? download.downloadUrl : '#download'}
+        aria-label={download.available ? `Download GlideLingo ${download.version} for Mac` : 'See Mac availability'}
+      >
+        Download for Mac
+      </a>
+    </div>
+  </header>
+
+  <main id="main-content">
+    <section class="hero shell" aria-labelledby="hero-heading">
+      <div class="hero-copy">
+        <p class="eyebrow">Language learning, without the noise</p>
+        <h1 id="hero-heading">Build a language habit that feels clear.</h1>
+        <p class="hero-lede">
+          GlideLingo brings authored lessons, focused review, and a calm weekly rhythm into one practice you can keep.
+        </p>
+        <div class="hero-actions">
+          <a
+            class="button button-primary"
+            href={download.available ? download.downloadUrl : '#download'}
+            aria-label={download.available ? `Download GlideLingo ${download.version} for Mac` : 'See Mac availability'}
+          >
+            Download for Mac
+          </a>
+          <a class="text-link" href="#how-it-works">See how it works <span aria-hidden="true">↓</span></a>
+        </div>
+        <p class="availability-note">Universal Mac app for Apple silicon and Intel.</p>
+      </div>
+
+      <figure class="product-frame">
+        <div class="window-bar" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <img
+          src="/images/product-home.png"
+          width="1440"
+          height="1000"
+          alt="GlideLingo showing the Greek Foundations course and its focused lesson path"
+        />
+        <figcaption>A focused home for your next useful lesson.</figcaption>
+      </figure>
+    </section>
+
+    <section class="principles shell" id="how-it-works" aria-labelledby="principles-heading">
+      <div class="section-intro">
+        <p class="eyebrow">How it works</p>
+        <h2 id="principles-heading">Everything you need to make steady progress.</h2>
+        <p>Nothing designed to keep you tapping after the useful practice is done.</p>
+      </div>
+
+      <div class="principle-grid">
+        <article class="principle">
+          <span class="principle-number" aria-hidden="true">01</span>
+          <h3>Follow a clear lesson path</h3>
+          <p>Authored lessons move from sound and script to practical phrases, with a clear next step.</p>
+        </article>
+        <article class="principle">
+          <span class="principle-number" aria-hidden="true">02</span>
+          <h3>Practice what matters</h3>
+          <p>Focused review and meaningful completions count. Opening the app or repeating busywork does not.</p>
+        </article>
+        <article class="principle">
+          <span class="principle-number" aria-hidden="true">03</span>
+          <h3>Keep a calm weekly rhythm</h3>
+          <p>Choose a sustainable weekly target and see your consistency without XP, currency, or leaderboards.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="download-section" id="download" aria-labelledby="download-heading">
+      <div class="shell download-grid">
+        <div class="download-copy">
+          <img class="download-bird" src="/brand/glidelingo-bird.png" width="333" height="315" alt="" />
+          <p class="eyebrow">Desktop first</p>
+          <h2 id="download-heading">Your next lesson, ready on Mac.</h2>
+          <p>
+            Download one universal app for Apple silicon and Intel. Mobile and Windows versions will follow later.
+          </p>
+
+          {
+            download.available ? (
+              <div class="download-actions" data-download-state="available">
+                <a
+                  class="button button-primary"
+                  href={download.downloadUrl}
+                  aria-label={`Download GlideLingo ${download.version} for Mac`}
+                >
+                  Download for Mac
+                </a>
+                <p class="release-meta">
+                  Version {download.version} · <time datetime={download.releaseDate}>{download.formattedReleaseDate}</time>
+                </p>
+                <a class="checksum-link" href={download.checksumUrl}>View SHA-256 checksum</a>
+              </div>
+            ) : (
+              <div class="download-actions" data-download-state="unavailable">
+                <span class="button button-disabled" aria-disabled="true">Mac release coming soon</span>
+                <p class="release-meta">The signed and notarized build is in final release preparation.</p>
+              </div>
+            )
+          }
+        </div>
+
+        <div class="platform-list" aria-label="Platform availability">
+          <div class="platform-row">
+            <div>
+              <strong>macOS</strong>
+              <span>Apple silicon and Intel</span>
+            </div>
+            <span class:list={['status', { 'status-ready': download.available }]}>
+              {download.available ? 'Available' : 'Coming soon'}
+            </span>
+          </div>
+          <div class="platform-row">
+            <div>
+              <strong>iPhone and Android</strong>
+              <span>Mobile practice</span>
+            </div>
+            <span class="status">Coming later</span>
+          </div>
+          <div class="platform-row">
+            <div>
+              <strong>Windows</strong>
+              <span>Desktop app</span>
+            </div>
+            <span class="status">Coming later</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-inner">
+      <a class="brand-link footer-brand" href="/" aria-label="GlideLingo home">
+        <img src="/brand/glidelingo-wordmark.png" width="238" height="87" alt="GlideLingo" />
+      </a>
+      <p>© {new Date().getFullYear()} GlideLingo</p>
+      <a href="https://github.com/StefanosCodes/GlideLingo/releases">GitHub releases</a>
+    </div>
+  </footer>
+</BaseLayout>

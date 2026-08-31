@@ -1,3 +1,4 @@
+import { getApiAuthorizationHeader } from '@/api/auth-token';
 import {
   ApiConfigurationError,
   resolveApiRuntimeConfiguration,
@@ -131,10 +132,12 @@ async function requestJson<T>({
   }, timeoutMs);
 
   try {
+    const authorizationHeader = await getApiAuthorizationHeader();
     const response = await fetch(requestUrl, {
       body: body === undefined ? undefined : JSON.stringify(body),
       headers: {
         Accept: 'application/json',
+        ...authorizationHeader,
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
       method,

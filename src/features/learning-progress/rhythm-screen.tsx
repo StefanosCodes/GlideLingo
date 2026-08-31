@@ -63,14 +63,20 @@ export function RhythmScreen({ onBack }: { onBack: () => void }) {
         </ThemedText>
       </View>
 
-      {persistenceStatus === 'unavailable' ? (
+      {persistenceStatus !== 'available' ? (
         <GlideSurface
           accessibilityRole="alert"
           padding="roomy"
           style={[styles.notice, { backgroundColor: theme.warningSoft }]}>
-          <ThemedText type="headline">Practice is being kept for this session only.</ThemedText>
+          <ThemedText type="headline">
+            {persistenceStatus === 'corrupt'
+              ? 'Saved practice could not be read safely.'
+              : 'Practice is being kept for this session only.'}
+          </ThemedText>
           <ThemedText type="footnote" themeColor="textSecondary">
-            Local storage is unavailable. Your current session still works, but this device may not remember it after restart.
+            {persistenceStatus === 'corrupt'
+              ? 'The stored value was left untouched instead of being replaced with an empty calendar.'
+              : 'Local storage is unavailable. Your current session still works, but this device may not remember it after restart.'}
           </ThemedText>
         </GlideSurface>
       ) : null}

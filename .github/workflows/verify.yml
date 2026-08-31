@@ -19,8 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
           cache: npm
@@ -50,7 +50,7 @@ jobs:
     env:
       GLIDELINGO_DATABASE_URL: postgresql+psycopg://glidelingo:ci_only@localhost:5432/glidelingo
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install uv and Python
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -61,3 +61,110 @@ jobs:
       - run: npm run api:verify
       - run: npm run api:test:integration
       - run: npm run db:config
+      - name: Build and smoke the production API container
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="glidelingo-api:verify"
+          docker build --file backend/Dockerfile --tag "${image}" .
+          container_id="$(docker run --detach --network host \
+            --env GLIDELINGO_DATABASE_URL="${GLIDELINGO_DATABASE_URL}" \
+            "${image}")"
+          trap 'docker rm --force "${container_id}" >/dev/null 2>&1 || true' EXIT
+          test "$(docker inspect --format='{{.Config.User}}' "${container_id}")" = "glidelingo"
+          curl --fail --retry 6 --retry-all-errors --retry-delay 2 http://127.0.0.1:8080/health/live
+          curl --fail --retry 6 --retry-all-errors --retry-delay 2 http://127.0.0.1:8080/health/ready
+          tutor_payload='{"conversation_id":"00000000-0000-4000-8000-000000000001","lesson_id":"el-letters-1","visible_step_index":2,"selected_choice":null,"message":"Why does this sound like ee?","history":[]}'
+          unauthorized_response="$(curl --silent --show-error \
+            --header 'Content-Type: application/json' \
+            --request POST \
+            --data "${tutor_payload}" \
+            --write-out $'\n%{http_code}' \
+            http://127.0.0.1:8080/v1/lesson-tutor/turns)"
+          test "${unauthorized_response##*$'\n'}" = "401"
+          jq --exit-status '.detail == "Authentication credentials are invalid."' \
+            <<< "${unauthorized_response%$'\n'*}"
+
+          docker run --rm --interactive "${image}" python - <<'PY'
+          from pathlib import Path
+          from uuid import UUID
+
+          from fastapi.testclient import TestClient
+
+          from app.auth.clerk import ClerkPrincipal
+          from app.core.config import Settings
+          from app.main import create_app
+          from app.modules.lesson_tutor.context import LessonTutorContext
+          from app.modules.lesson_tutor.schemas import TutorHistoryMessage
+          from app.modules.lesson_tutor.service import LessonTutorService
+
+
+          class FakeAgent:
+              def __init__(self) -> None:
+                  self.calls = 0
+
+              async def reply(
+                  self,
+                  *,
+                  context: LessonTutorContext,
+                  history: list[TutorHistoryMessage],
+                  message: str,
+                  conversation_id: UUID,
+              ) -> str:
+                  self.calls += 1
+                  assert "ι · Ι" in context.model_visible_context
+                  return "The ι sound is close to the ee in see."
+
+
+          class FakeVerifier:
+              def verify(self, token: str) -> ClerkPrincipal:
+                  assert token == "container-smoke-token"
+                  return ClerkPrincipal(user_id="container-smoke-user")
+
+
+          agent = FakeAgent()
+          service = LessonTutorService(
+              enabled=True,
+              agent=agent,
+              content_root=Path("../content"),
+          )
+          application = create_app(
+              Settings(_env_file=None),
+              lesson_tutor_service=service,
+          )
+          application.state.clerk_token_verifier = FakeVerifier()
+          payload = {
+              "conversation_id": "00000000-0000-4000-8000-000000000001",
+              "lesson_id": "el-letters-1",
+              "visible_step_index": 2,
+              "selected_choice": None,
+              "message": "Why does this sound like ee?",
+              "history": [],
+          }
+          with TestClient(application) as client:
+              response = client.post(
+                  "/v1/lesson-tutor/turns",
+                  json=payload,
+                  headers={"Authorization": "Bearer container-smoke-token"},
+              )
+          assert response.status_code == 200, response.text
+          assert response.json()["prompt_version"] == "lesson-tutor-v1"
+          assert agent.calls == 1
+          PY
+
+  infrastructure:
+    name: Terraform
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infra/gcp/environments/development
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+        with:
+          terraform_version: 1.15.9
+      - run: terraform fmt -check
+      - run: terraform init -backend=false -lockfile=readonly
+      - run: terraform validate

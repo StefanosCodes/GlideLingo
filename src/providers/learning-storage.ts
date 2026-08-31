@@ -1,5 +1,5 @@
-import type { LanguageId } from '@/constants/catalog';
-import { isLessonEvidenceRecord, type LessonEvidenceRecord } from '@/features/learning-progress/evidence-policy';
+import type { LanguageId } from '../constants/catalog.ts';
+import { isLessonEvidenceRecord, type LessonEvidenceRecord } from '../features/learning-progress/evidence-policy.ts';
 import {
   isWeeklyGoalChange,
   localWeekKey,
@@ -7,7 +7,7 @@ import {
   normalizePracticeDayKeys,
   type WeeklyGoalChange,
   type WeeklyPracticeGoal,
-} from '@/features/learning-progress/rhythm-policy';
+} from '../features/learning-progress/rhythm-policy.ts';
 
 export const LEARNING_STORAGE_KEY = 'glidelingo-learning';
 export const LEARNING_STORAGE_VERSION = 2;
@@ -22,9 +22,14 @@ export type StoredLearningV2 = {
   weeklyGoalChanges: WeeklyGoalChange[];
 };
 
-export type LearningPersistenceStatus = 'available' | 'unavailable';
+export type LearningPersistenceStatus = 'available' | 'corrupt' | 'unavailable';
+export type LearningStorageReadKind = 'found' | 'missing' | 'corrupt' | 'read-error';
+export type LearningStorageReadResult = {
+  kind: LearningStorageReadKind;
+  value: StoredLearningV2;
+};
 
-type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
+export type LearningStorage = Pick<Storage, 'getItem' | 'removeItem' | 'setItem'>;
 
 function isLanguageId(value: unknown): value is LanguageId {
   return value === 'el' || value === 'es' || value === 'fr';
@@ -60,57 +65,96 @@ export function emptyStoredLearning(): StoredLearningV2 {
   };
 }
 
-export function parseStoredLearning(raw: string | null, now: Date | number = new Date()): StoredLearningV2 {
-  if (!raw) return emptyStoredLearning();
+export function learningStorageKey(storageScope: string) {
+  return `${LEARNING_STORAGE_KEY}:v${LEARNING_STORAGE_VERSION}:${storageScope}`;
+}
+
+export function legacyScopedLearningStorageKey(storageScope: string) {
+  return `${LEARNING_STORAGE_KEY}:${storageScope}`;
+}
+
+export function legacyDecisionStorageKey(storageScope: string) {
+  return `${LEARNING_STORAGE_KEY}:legacy-decision:${storageScope}`;
+}
+
+export function getLearningStorage(): LearningStorage | undefined {
+  try {
+    return globalThis.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+export function parseStoredLearningResult(
+  raw: string | null,
+  now: Date | number = new Date(),
+): LearningStorageReadResult {
+  if (raw === null) return { kind: 'missing', value: emptyStoredLearning() };
 
   try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const legacyGoal = isWeeklyPracticeGoal(parsed.weeklyPracticeGoal) ? parsed.weeklyPracticeGoal : null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { kind: 'corrupt', value: emptyStoredLearning() };
+    }
+
+    const candidate = parsed as Record<string, unknown>;
+    if (candidate.version !== undefined && candidate.version !== 1 && candidate.version !== LEARNING_STORAGE_VERSION) {
+      return { kind: 'corrupt', value: emptyStoredLearning() };
+    }
+
+    const legacyGoal = isWeeklyPracticeGoal(candidate.weeklyPracticeGoal) ? candidate.weeklyPracticeGoal : null;
     const weeklyGoalChanges =
-      parsed.version === LEARNING_STORAGE_VERSION && Array.isArray(parsed.weeklyGoalChanges)
-        ? normalizeGoalChanges(parsed.weeklyGoalChanges.filter(isWeeklyGoalChange))
+      candidate.version === LEARNING_STORAGE_VERSION && Array.isArray(candidate.weeklyGoalChanges)
+        ? normalizeGoalChanges(candidate.weeklyGoalChanges.filter(isWeeklyGoalChange))
         : legacyGoal
           ? [{ effectiveWeekKey: localWeekKey(now), goal: legacyGoal }]
           : [];
 
     return {
-      version: LEARNING_STORAGE_VERSION,
-      languageId: isLanguageId(parsed.languageId) ? parsed.languageId : 'el',
-      enrolledByLanguage: enrolledCourses(parsed.enrolledByLanguage),
-      completedLessonIds: stringArray(parsed.completedLessonIds),
-      lessonEvidence: Array.isArray(parsed.lessonEvidence)
-        ? parsed.lessonEvidence.filter(isLessonEvidenceRecord)
-        : [],
-      practiceDayKeys: normalizePracticeDayKeys(stringArray(parsed.practiceDayKeys)),
-      weeklyGoalChanges,
+      kind: 'found',
+      value: {
+        version: LEARNING_STORAGE_VERSION,
+        languageId: isLanguageId(candidate.languageId) ? candidate.languageId : 'el',
+        enrolledByLanguage: enrolledCourses(candidate.enrolledByLanguage),
+        completedLessonIds: stringArray(candidate.completedLessonIds),
+        lessonEvidence: Array.isArray(candidate.lessonEvidence)
+          ? candidate.lessonEvidence.filter(isLessonEvidenceRecord)
+          : [],
+        practiceDayKeys: normalizePracticeDayKeys(stringArray(candidate.practiceDayKeys)),
+        weeklyGoalChanges,
+      },
     };
   } catch {
-    return emptyStoredLearning();
+    return { kind: 'corrupt', value: emptyStoredLearning() };
   }
+}
+
+export function parseStoredLearning(raw: string | null, now: Date | number = new Date()): StoredLearningV2 {
+  return parseStoredLearningResult(raw, now).value;
 }
 
 export function readStoredLearning(
-  storage: StorageLike | undefined = globalThis.localStorage,
+  storageKey: string,
+  storage: LearningStorage | undefined = getLearningStorage(),
   now: Date | number = new Date(),
-) {
-  if (!storage) {
-    return { value: emptyStoredLearning(), status: 'unavailable' as LearningPersistenceStatus };
-  }
+): LearningStorageReadResult {
+  if (!storage) return { kind: 'read-error', value: emptyStoredLearning() };
 
   try {
-    return {
-      value: parseStoredLearning(storage.getItem(LEARNING_STORAGE_KEY), now),
-      status: 'available' as LearningPersistenceStatus,
-    };
+    return parseStoredLearningResult(storage.getItem(storageKey), now);
   } catch {
-    return { value: emptyStoredLearning(), status: 'unavailable' as LearningPersistenceStatus };
+    return { kind: 'read-error', value: emptyStoredLearning() };
   }
 }
 
-export function writeStoredLearning(value: StoredLearningV2, storage: StorageLike | undefined = globalThis.localStorage) {
+export function writeStoredLearning(
+  storageKey: string,
+  value: StoredLearningV2,
+  storage: LearningStorage | undefined = getLearningStorage(),
+) {
   if (!storage) return false;
   try {
-    storage.setItem(LEARNING_STORAGE_KEY, JSON.stringify(value));
+    storage.setItem(storageKey, JSON.stringify(value));
     return true;
   } catch {
     return false;

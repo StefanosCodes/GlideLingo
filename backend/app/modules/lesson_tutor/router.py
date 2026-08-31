@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Request
 
+from app.auth.clerk import CurrentClerkPrincipal
 from app.core.errors import ErrorResponse
 from app.modules.lesson_tutor.schemas import LessonTutorTurnRequest, LessonTutorTurnResponse
 from app.modules.lesson_tutor.service import LessonTutorService
@@ -14,13 +15,16 @@ router = APIRouter(prefix="/v1/lesson-tutor", tags=["lesson-tutor"])
     operation_id="create_lesson_tutor_turn",
     response_model=LessonTutorTurnResponse,
     responses={
+        401: {"description": "The Clerk session token is missing or invalid."},
         404: {"model": ErrorResponse},
         503: {"model": ErrorResponse},
         504: {"model": ErrorResponse},
     },
 )
 async def create_lesson_tutor_turn(
-    turn: LessonTutorTurnRequest, request: Request
+    turn: LessonTutorTurnRequest,
+    request: Request,
+    _principal: CurrentClerkPrincipal,
 ) -> LessonTutorTurnResponse:
     service: LessonTutorService = request.app.state.lesson_tutor_service
     return await service.turn(turn)

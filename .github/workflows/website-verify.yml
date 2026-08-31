@@ -1,0 +1,66 @@
+name: Website Verify
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - website/**
+      - .github/workflows/website-verify.yml
+  push:
+    branches: [main]
+    paths:
+      - website/**
+      - .github/workflows/website-verify.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  website:
+    name: Static production states
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - name: Build explicit production coming-soon state
+        env:
+          CF_PAGES_BRANCH: main
+          PUBLIC_MAC_DOWNLOAD_STATE: disabled
+        run: npm run build
+      - name: Install browser engines
+        run: npx playwright install --with-deps chromium webkit
+      - name: Build active production state
+        env:
+          CF_PAGES_BRANCH: main
+          PUBLIC_MAC_DOWNLOAD_STATE: active
+          PUBLIC_MAC_DOWNLOAD_URL: https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/GlideLingo-0.1.0-universal.dmg
+          PUBLIC_MAC_CHECKSUM_URL: https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/SHA256SUMS.txt
+          PUBLIC_MAC_VERSION: "0.1.0"
+          PUBLIC_MAC_RELEASE_DATE: "2026-08-31"
+        run: npm run build
+      - name: Exercise active production output
+        run: npm run test:e2e:built
+      - name: Verify active-to-disabled rollback output
+        env:
+          CF_PAGES_BRANCH: main
+          PUBLIC_MAC_DOWNLOAD_STATE: disabled
+          PUBLIC_MAC_DOWNLOAD_URL: https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/GlideLingo-0.1.0-universal.dmg
+          PUBLIC_MAC_CHECKSUM_URL: https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/SHA256SUMS.txt
+          PUBLIC_MAC_VERSION: "0.1.0"
+          PUBLIC_MAC_RELEASE_DATE: "2026-08-31"
+        run: npm run build

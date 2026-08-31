@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
+from app.auth.clerk import ClerkTokenVerifier
+from app.auth.router import router as auth_router
 from app.core.config import Settings
 from app.core.errors import (
     DependencyUnavailableError,
@@ -27,7 +29,11 @@ from app.modules.lesson_tutor.router import router as lesson_tutor_router
 from app.modules.lesson_tutor.service import LessonTutorService
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    lesson_tutor_service: LessonTutorService | None = None,
+) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings.log_level)
     database_engine = create_database_engine(settings)
@@ -36,16 +42,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             api_key=settings.openai_api_key.get_secret_value(),
             model=settings.openai_model,
         )
-        if settings.lesson_tutor_enabled and settings.openai_api_key is not None
+        if lesson_tutor_service is None
+        and settings.lesson_tutor_enabled
+        and settings.openai_api_key is not None
         else None
     )
+    clerk_configuration = settings.clerk_configuration
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        yield
-        if lesson_tutor_agent is not None:
-            await lesson_tutor_agent.close()
-        database_engine.dispose()
+        try:
+            yield
+        finally:
+            try:
+                if lesson_tutor_agent is not None:
+                    await lesson_tutor_agent.close()
+            finally:
+                database_engine.dispose()
 
     application = FastAPI(
         title="GlideLingo API",
@@ -53,9 +66,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.database_probe = create_database_probe(database_engine)
-    application.state.lesson_tutor_service = LessonTutorService(
+    application.state.lesson_tutor_service = lesson_tutor_service or LessonTutorService(
         enabled=settings.lesson_tutor_enabled,
         agent=lesson_tutor_agent,
+        content_root=settings.lesson_content_root,
+        deadline_seconds=settings.lesson_tutor_deadline_seconds,
+    )
+    application.state.clerk_token_verifier = (
+        ClerkTokenVerifier(
+            issuer=clerk_configuration[0],
+            jwks_url=clerk_configuration[1],
+            audience=clerk_configuration[2],
+            authorized_parties=clerk_configuration[3],
+        )
+        if clerk_configuration is not None
+        else None
     )
     application.add_exception_handler(
         DependencyUnavailableError,
@@ -79,12 +104,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origins=settings.normalized_cors_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST"],
-        allow_headers=["Accept", "Content-Type"],
+        allow_headers=["Accept", "Authorization", "Content-Type"],
         expose_headers=[REQUEST_ID_HEADER],
     )
     application.add_middleware(RequestIdMiddleware)
     application.include_router(health_router)
     application.include_router(lesson_tutor_router)
+    application.include_router(auth_router)
     return application
 
 

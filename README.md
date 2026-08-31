@@ -119,6 +119,10 @@ Both feature flags are disabled by default. To use the tutor locally, set `EXPO_
 
 Normal verification uses fake adapters and does not require a key. Run `npm run api:test:agent-live` only with the server feature flag and API key explicitly enabled; it executes the stable cases in `backend/evals/lesson_tutor/cases.json` against the configured model.
 
+The production image includes the whitelisted authored content under `/app/content`. Request deadlines are nested so the provider stops at 10 seconds, the service at 12 seconds, Cloud Run at 15 seconds, and the client at 25 seconds. Authored answer aliases provide a deterministic final guard against disclosing an unattempted check answer.
+
+The tutor route requires a verified Clerk principal before it can reach the service, and the request schema does not accept a user or tenant identifier from the client. Keep both tutor flags disabled in shared environments until the server passes a stable pseudonymous subject as the provider safety identifier and applies per-principal rate and spend limits before invoking the provider. `backend/app/main.py` remains responsible for wiring authentication and the provider; this disabled slice does not provision an OpenAI key.
+
 Stop the project database without deleting its named volume:
 
 ```bash

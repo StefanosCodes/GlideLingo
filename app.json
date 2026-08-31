@@ -8,9 +8,12 @@
     "scheme": "glidelingo",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.stefanoscodes.glidelingo",
+      "usesAppleSignIn": true
     },
     "android": {
+      "package": "com.stefanoscodes.glidelingo",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -43,11 +46,21 @@
         }
       ],
       "expo-asset",
+      "@clerk/expo",
+      "expo-secure-store",
+      "expo-apple-authentication",
       "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7305042d-b99b-432d-a285-e135ac447005"
+      }
+    },
+    "owner": "stefanoscodes"
   }
 }

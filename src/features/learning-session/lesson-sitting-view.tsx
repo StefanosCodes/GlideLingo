@@ -18,9 +18,8 @@ import {
   type LessonMode,
   summarizeLessonCompletion,
 } from '@/features/learning-progress/evidence-policy';
-import type { PracticeCompletionResult } from '@/features/learning-progress/rhythm-policy';
 import { useTheme } from '@/hooks/use-theme';
-import { useLearning } from '@/providers/learning-provider';
+import { type LessonCompletionResult, useLearning } from '@/providers/learning-provider';
 
 export function LessonSittingView({
   lessonId,
@@ -49,7 +48,7 @@ export function LessonSittingView({
   const [askOpen, setAskOpen] = useState(false);
   const [selectedChoices, setSelectedChoices] = useState<Record<number, string | null>>({});
   const [checkObservations, setCheckObservations] = useState<Record<number, CheckObservation>>({});
-  const [practiceResult, setPracticeResult] = useState<PracticeCompletionResult | null>(null);
+  const [practiceResult, setPracticeResult] = useState<LessonCompletionResult | null>(null);
   const completionRecorded = useRef(false);
   const web = Platform.OS === 'web';
   const top = web ? Spacing.three : insets.top + Spacing.two;
@@ -74,6 +73,7 @@ export function LessonSittingView({
     [checkObservations, found?.lesson.capability, found?.lesson.introducedModes, lessonId, mode],
   );
   const previewEvidence = summarizeLessonCompletion(completionInput, previousEvidence?.lastPracticedAt ?? 0, previousEvidence);
+  const closureEvidence = practiceResult?.evidence ?? previewEvidence;
 
   function recordAttempt(correct: boolean) {
     const currentBeat = beats[step];
@@ -124,20 +124,20 @@ export function LessonSittingView({
   }
 
   const completionCopy = (() => {
-    if (previewEvidence.lastCheckpoint === 'recovered') {
+    if (closureEvidence.lastCheckpoint === 'recovered') {
       return {
         kicker: 'USEFUL RECOVERY',
         summary: 'You rebuilt the sound pattern after another try.',
         evidence:
-          previewEvidence.state === 'demonstrated'
+          closureEvidence.state === 'demonstrated'
             ? 'Your earlier demonstration remains. This recovery will shape what returns next.'
             : 'That is practice evidence. A fresh first attempt can demonstrate it.',
       };
     }
-    if (previewEvidence.state === 'demonstrated' && previewEvidence.capability) {
+    if (closureEvidence.state === 'demonstrated' && closureEvidence.capability) {
       return {
         kicker: mode === 'review' ? 'REVIEW COMPLETE' : 'CHECKPOINT PASSED',
-        summary: previewEvidence.capability.canDo,
+        summary: closureEvidence.capability.canDo,
         evidence:
           mode === 'review'
             ? 'You recalled the varied pattern without the lesson model. Retention still needs a wider gap.'

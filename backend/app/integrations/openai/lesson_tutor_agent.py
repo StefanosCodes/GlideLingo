@@ -20,6 +20,8 @@ from app.modules.lesson_tutor.schemas import TutorHistoryMessage
 from openai import AsyncOpenAI
 from openai.types.shared import Reasoning
 
+PROVIDER_TIMEOUT_SECONDS = 10
+
 
 def _dynamic_instructions(
     wrapper: RunContextWrapper[LessonTutorContext],
@@ -33,7 +35,11 @@ class OpenAILessonTutorAgent:
 
     def __init__(self, *, api_key: str, model: str) -> None:
         self._model = model
-        self._client = AsyncOpenAI(api_key=api_key, max_retries=0, timeout=20)
+        self._client = AsyncOpenAI(
+            api_key=api_key,
+            max_retries=0,
+            timeout=PROVIDER_TIMEOUT_SECONDS,
+        )
         self._provider = OpenAIProvider(openai_client=self._client, use_responses=True)
         self._agent = Agent[LessonTutorContext](
             name="GlideLingo lesson tutor",
@@ -43,7 +49,7 @@ class OpenAILessonTutorAgent:
                 max_tokens=400,
                 reasoning=Reasoning(effort="none"),
                 verbosity="low",
-                timeout=20,
+                timeout=PROVIDER_TIMEOUT_SECONDS,
                 store=False,
                 retry=ModelRetrySettings(max_retries=0),
             ),

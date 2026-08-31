@@ -7,6 +7,7 @@ import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
+import { AccountSummary } from '@/features/auth/account-summary';
 import {
   capabilityStateForMode,
   strongestCapabilityEvidence,
@@ -44,7 +45,12 @@ export default function ProfileScreen() {
     practiceDaysThisWeek,
     weeklyPracticeGoal,
     completedModuleIds,
+    legacyProgressAvailable,
+    legacyProgressError,
+    persistenceStatus,
     setWeeklyPracticeGoal,
+    dismissLegacyProgress,
+    importLegacyProgress,
   } = useLearning();
   const percent = Math.round(progress * 100);
   const capabilities = strongestCapabilityEvidence(lessonEvidence);
@@ -113,6 +119,56 @@ export default function ProfileScreen() {
           </ThemedText>
         </GlideSurface>
       </View>
+
+      {persistenceStatus !== 'available' ? (
+        <GlideSurface accessibilityRole="alert" padding="roomy" style={styles.block} variant="tinted">
+          <ThemedText type="headline">
+            {persistenceStatus === 'corrupt'
+              ? 'Saved progress could not be read safely.'
+              : 'Progress is being kept for this session only.'}
+          </ThemedText>
+          <ThemedText type="footnote" themeColor="textSecondary">
+            {persistenceStatus === 'corrupt'
+              ? 'GlideLingo left the stored value untouched instead of replacing it with an empty profile.'
+              : 'Device storage is unavailable. Your session still works, but changes may not survive a restart.'}
+          </ThemedText>
+        </GlideSurface>
+      ) : null}
+
+      {legacyProgressAvailable ? (
+        <GlideSurface padding="roomy" style={styles.block} variant="tinted">
+          <ThemedText type="eyebrow" themeColor="textSecondary">
+            EXISTING PROGRESS FOUND
+          </ThemedText>
+          <ThemedText type="title3">Bring this device’s earlier progress into your account?</ThemedText>
+          <ThemedText type="footnote" themeColor="textSecondary">
+            Import only if this progress is yours. Lessons, ability evidence, practice dates, and weekly goals are combined
+            with this account before the older shared copy is removed.
+          </ThemedText>
+          <View style={styles.legacyActions}>
+            <GlideButton label="Import progress" onPress={importLegacyProgress} size="regular" />
+            <GlideButton label="Not mine" onPress={dismissLegacyProgress} size="regular" variant="tertiary" />
+          </View>
+          {legacyProgressError ? (
+            <ThemedText accessibilityRole="alert" type="footnote" style={{ color: theme.danger }}>
+              {legacyProgressError}
+            </ThemedText>
+          ) : null}
+        </GlideSurface>
+      ) : null}
+
+      <GlideSurface padding="roomy" style={styles.block}>
+        <ThemedText type="eyebrow" themeColor="textSecondary">
+          MEMBERSHIP
+        </ThemedText>
+        <ThemedText type="title3">GlideLingo Pro</ThemedText>
+        <ThemedText type="footnote" themeColor="textSecondary">
+          View your access, choose a plan, or restore a purchase.
+        </ThemedText>
+        <GlideButton label="Manage Pro" onPress={() => router.push('/subscription')} variant="secondary" />
+      </GlideSurface>
+
+      <AccountSummary />
 
       <View style={styles.section}>
         <View style={styles.sectionHeading}>
@@ -219,6 +275,7 @@ const styles = StyleSheet.create({
   section: { gap: Spacing.three },
   sectionHeading: { gap: Spacing.one },
   block: { gap: Spacing.twoHalf },
+  legacyActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   rhythmChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, paddingTop: Spacing.one },
   rhythmChoice: {
     alignItems: 'center',

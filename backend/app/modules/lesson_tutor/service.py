@@ -3,6 +3,7 @@
 import asyncio
 import re
 import unicodedata
+from pathlib import Path
 from typing import Protocol
 from uuid import UUID
 
@@ -34,15 +35,15 @@ class LessonTutorAgent(Protocol):
     ) -> str: ...
 
 
-def _contains_answer(reply: str, answer: str) -> bool:
+def _contains_term(reply: str, term: str) -> bool:
     normalized_reply = unicodedata.normalize("NFKC", reply).casefold()
-    normalized_answer = unicodedata.normalize("NFKC", answer).casefold().strip()
-    if not normalized_answer:
+    normalized_term = unicodedata.normalize("NFKC", term).casefold().strip()
+    if not normalized_term:
         return False
-    if re.fullmatch(r"[\w-]+", normalized_answer, flags=re.UNICODE):
-        pattern = rf"(?<!\w){re.escape(normalized_answer)}(?!\w)"
+    if re.fullmatch(r"[\w-]+", normalized_term, flags=re.UNICODE):
+        pattern = rf"(?<!\w){re.escape(normalized_term)}(?!\w)"
         return re.search(pattern, normalized_reply) is not None
-    return normalized_answer in normalized_reply
+    return normalized_term in normalized_reply
 
 
 class LessonTutorService:
@@ -53,20 +54,24 @@ class LessonTutorService:
         *,
         enabled: bool,
         agent: LessonTutorAgent | None,
-        deadline_seconds: float = 20,
+        content_root: Path,
+        deadline_seconds: float = 12,
     ) -> None:
         self._enabled = enabled
         self._agent = agent
+        self._content_root = content_root
         self._deadline_seconds = deadline_seconds
 
     async def turn(self, request: LessonTutorTurnRequest) -> LessonTutorTurnResponse:
+        if not self._enabled or self._agent is None:
+            raise LessonTutorUnavailableError
+
         context = load_lesson_context(
+            content_root=self._content_root,
             lesson_id=request.lesson_id,
             visible_step_index=request.visible_step_index,
             selected_choice=request.selected_choice,
         )
-        if not self._enabled or self._agent is None:
-            raise LessonTutorUnavailableError
 
         try:
             reply = await asyncio.wait_for(
@@ -88,10 +93,8 @@ class LessonTutorService:
         safe_reply = reply.strip()
         if not safe_reply:
             raise LessonTutorUnavailableError
-        if (
-            context.canonical_answer is not None
-            and not context.answer_attempted
-            and _contains_answer(safe_reply, context.canonical_answer)
+        if not context.answer_attempted and any(
+            _contains_term(safe_reply, term) for term in context.answer_disclosure_terms
         ):
             safe_reply = HINT_FALLBACK
 

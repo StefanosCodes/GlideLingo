@@ -115,7 +115,8 @@
       "evidence": {
         "capabilityId": "el-script-vowels-a-e-i",
         "level": "practice"
-      }
+      },
+      "answerAliases": ["alpha", "άλφα"]
     },
     {
       "type": "check",
@@ -127,7 +128,8 @@
       "evidence": {
         "capabilityId": "el-script-vowels-a-e-i",
         "level": "checkpoint"
-      }
+      },
+      "answerAliases": ["νά"]
     }
   ],
   "reviewBeats": [

@@ -6,8 +6,7 @@ const DEVELOPMENT_PORT = '8081';
 const PRODUCTION_API_ORIGIN = 'https://glidelingo-api-50843312405.us-west1.run.app';
 const PRODUCTION_CLERK_ORIGIN = 'https://vast-gator-9531.clerk.accounts.dev';
 const AUTH_CALLBACK_PATHS = new Set(['/sign-in', '/sso-callback']);
-const AUTH_PROVIDER_ORIGINS = new Set([
-  PRODUCTION_CLERK_ORIGIN,
+const STATIC_AUTH_PROVIDER_ORIGINS = new Set([
   'https://accounts.google.com',
   'https://appleid.apple.com',
 ]);
@@ -30,21 +29,81 @@ function isExactAppUrl(value) {
   );
 }
 
-function buildContentSecurityPolicy() {
+function buildContentSecurityPolicy({
+  apiOrigin = PRODUCTION_API_ORIGIN,
+  clerkOrigin = PRODUCTION_CLERK_ORIGIN,
+} = {}) {
+  const exactApiOrigin = validateProductionApiOrigin(apiOrigin);
+  const exactClerkOrigin = validateProductionClerkOrigin(clerkOrigin);
+
   return [
     "default-src 'self'",
-    `script-src 'self' 'unsafe-inline' ${PRODUCTION_CLERK_ORIGIN} https://challenges.cloudflare.com https://*.protect.clerk.com https://js.stripe.com https://cdn.paddle.com`,
+    `script-src 'self' 'unsafe-inline' ${exactClerkOrigin} https://challenges.cloudflare.com https://*.protect.clerk.com https://js.stripe.com https://cdn.paddle.com`,
     "style-src 'self' 'unsafe-inline'",
-    `img-src 'self' data: blob: ${PRODUCTION_CLERK_ORIGIN} https://img.clerk.com https://*.clerk.com https://*.stripe.com https://*.paddle.com https://*.revenuecat.com`,
+    `img-src 'self' data: blob: ${exactClerkOrigin} https://img.clerk.com https://*.clerk.com https://*.stripe.com https://*.paddle.com https://*.revenuecat.com`,
     "font-src 'self' data:",
-    `connect-src 'self' ${PRODUCTION_API_ORIGIN} ${PRODUCTION_CLERK_ORIGIN} https://api.clerk.com https://*.protect.clerk.com:* https://api.revenuecat.com https://e.revenue.cat https://sdk.revenuecat-static.com https://*.stripe.com https://*.paddle.com wss://${new URL(PRODUCTION_CLERK_ORIGIN).hostname}`,
+    `connect-src 'self' ${exactApiOrigin} ${exactClerkOrigin} https://api.clerk.com https://*.protect.clerk.com:* https://api.revenuecat.com https://e.revenue.cat https://sdk.revenuecat-static.com https://*.stripe.com https://*.paddle.com wss://${new URL(exactClerkOrigin).hostname}`,
     "media-src 'self' data: blob:",
     "object-src 'none'",
-    `frame-src ${PRODUCTION_CLERK_ORIGIN} https://accounts.google.com https://appleid.apple.com https://challenges.cloudflare.com https://*.protect.clerk.com https://js.stripe.com https://hooks.stripe.com https://*.paddle.com`,
-    `form-action 'self' ${PRODUCTION_CLERK_ORIGIN} https://accounts.google.com https://appleid.apple.com https://*.stripe.com https://*.paddle.com`,
+    `frame-src ${exactClerkOrigin} https://accounts.google.com https://appleid.apple.com https://challenges.cloudflare.com https://*.protect.clerk.com https://js.stripe.com https://hooks.stripe.com https://*.paddle.com`,
+    `form-action 'self' ${exactClerkOrigin} https://accounts.google.com https://appleid.apple.com https://*.stripe.com https://*.paddle.com`,
     "base-uri 'self'",
     "worker-src 'self' blob:",
   ].join('; ');
+}
+
+function validateProductionApiOrigin(value) {
+  if (typeof value !== 'string' || value !== value.trim()) {
+    throw new Error('The packaged API origin must be a trimmed HTTPS origin.');
+  }
+
+  let url;
+
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('The packaged API origin must be a valid absolute URL.');
+  }
+
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error('The packaged API origin must be an HTTPS origin without credentials or a path.');
+  }
+
+  return url.origin;
+}
+
+function validateProductionClerkOrigin(value) {
+  if (typeof value !== 'string' || value !== value.trim()) {
+    throw new Error('The packaged Clerk origin must be a trimmed HTTPS origin.');
+  }
+
+  let url;
+
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('The packaged Clerk origin must be a valid absolute URL.');
+  }
+
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error('The packaged Clerk origin must be an HTTPS origin without credentials or a path.');
+  }
+
+  return url.origin;
 }
 
 function validateDevelopmentUrl(value) {
@@ -155,12 +214,15 @@ function isSafeExternalUrl(targetUrl) {
   }
 }
 
-function isAllowedAuthWindowUrl(targetUrl) {
+function isAllowedAuthWindowUrl(targetUrl, clerkOrigin = PRODUCTION_CLERK_ORIGIN) {
   try {
     const url = new URL(targetUrl);
     if (url.protocol !== 'https:' || url.username || url.password) return false;
 
-    return AUTH_PROVIDER_ORIGINS.has(url.origin);
+    return (
+      url.origin === validateProductionClerkOrigin(clerkOrigin) ||
+      STATIC_AUTH_PROVIDER_ORIGINS.has(url.origin)
+    );
   } catch {
     return false;
   }
@@ -219,4 +281,6 @@ module.exports = {
   parseAuthCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
+  validateProductionApiOrigin,
+  validateProductionClerkOrigin,
 };

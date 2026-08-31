@@ -1,0 +1,366 @@
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+
+const { version } = require('./package.json');
+const { validateReleaseTag } = require('./release.cjs');
+
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+const FULL_COMMIT_PATTERN = /^[0-9a-f]{40}$/i;
+
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: options.cwd ?? PROJECT_ROOT,
+    encoding: 'utf8',
+    env: options.env ?? process.env,
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0 && !options.allowFailure) {
+    const detail = (result.stderr || result.stdout || '').trim();
+    throw new Error(`${command} ${args.join(' ')} failed${detail ? `: ${detail}` : ''}`);
+  }
+
+  return result;
+}
+
+function createGitAdapter() {
+  return {
+    resolveCommit(reference) {
+      return run('git', ['rev-parse', '--verify', `${reference}^{commit}`]).stdout.trim();
+    },
+    readDesktopVersion(commit) {
+      const manifest = run('git', ['show', `${commit}:desktop/package.json`]).stdout;
+      return JSON.parse(manifest).version;
+    },
+    isAncestor(ancestor, descendant) {
+      const result = run('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
+        allowFailure: true,
+      });
+      if (result.status !== 0 && result.status !== 1) {
+        throw new Error('Unable to verify the selected commit against complete main history.');
+      }
+      return result.status === 0;
+    },
+  };
+}
+
+function resolveReleaseSelection(input, git = createGitAdapter()) {
+  let selectedCommit;
+  let releaseTag;
+
+  if (input.eventName === 'push') {
+    if (input.refType !== 'tag') {
+      throw new Error('Automatic desktop releases only accept a protected tag event.');
+    }
+    selectedCommit = input.eventSha;
+    releaseTag = input.refName;
+  } else if (input.eventName === 'workflow_dispatch') {
+    selectedCommit = input.manualCommit;
+    releaseTag = input.manualTag;
+  } else {
+    throw new Error(`Unsupported desktop release event: ${input.eventName || '(missing)'}.`);
+  }
+
+  if (!FULL_COMMIT_PATTERN.test(selectedCommit || '')) {
+    throw new Error('The selected release commit must be an exact 40-character Git commit SHA.');
+  }
+  if (!releaseTag) {
+    throw new Error('An existing protected desktop release tag is required.');
+  }
+
+  const resolvedCommit = git.resolveCommit(selectedCommit);
+  const taggedCommit = git.resolveCommit(`refs/tags/${releaseTag}`);
+  const mainCommit = git.resolveCommit('refs/remotes/origin/main');
+
+  if (resolvedCommit.toLowerCase() !== selectedCommit.toLowerCase()) {
+    throw new Error('The selected release commit did not resolve to the exact requested commit.');
+  }
+  if (taggedCommit !== resolvedCommit) {
+    throw new Error(`Protected tag ${releaseTag} does not point to the selected release commit.`);
+  }
+  if (!git.isAncestor(resolvedCommit, mainCommit)) {
+    throw new Error('The selected release commit is not reachable from the complete origin/main history.');
+  }
+
+  const selectedVersion = git.readDesktopVersion(resolvedCommit);
+  validateReleaseTag(releaseTag, selectedVersion);
+
+  return { commitSha: resolvedCommit, releaseTag, version: selectedVersion };
+}
+
+function expectedReleaseAssetNames(desktopVersion = version) {
+  return [
+    `GlideLingo-${desktopVersion}-universal.dmg`,
+    `GlideLingo-${desktopVersion}-universal.zip`,
+    'SHA256SUMS.txt',
+  ];
+}
+
+function sha256(filePath) {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+function writeChecksums(releaseDirectory, desktopVersion = version) {
+  const directory = path.resolve(releaseDirectory);
+  const [dmgName, zipName, manifestName] = expectedReleaseAssetNames(desktopVersion);
+  const distributables = [dmgName, zipName];
+
+  for (const name of distributables) {
+    const filePath = path.join(directory, name);
+    const stats = fs.statSync(filePath);
+    if (!stats.isFile() || stats.size === 0) {
+      throw new Error(`Release asset ${name} must be a non-empty file.`);
+    }
+  }
+
+  const manifest = distributables
+    .map((name) => `${sha256(path.join(directory, name))}  ${name}`)
+    .join('\n');
+  fs.writeFileSync(path.join(directory, manifestName), `${manifest}\n`, { flag: 'w' });
+}
+
+function assertExactNames(actualNames, expectedNames) {
+  const actual = [...actualNames].sort();
+  const expected = [...expectedNames].sort();
+  if (actual.length !== expected.length || actual.some((name, index) => name !== expected[index])) {
+    throw new Error(`Release assets must be exactly: ${expected.join(', ')}.`);
+  }
+}
+
+function inspectLocalAssets(releaseDirectory, desktopVersion = version) {
+  const directory = path.resolve(releaseDirectory);
+  const expectedNames = expectedReleaseAssetNames(desktopVersion);
+  const publishableNames = fs
+    .readdirSync(directory, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        (entry.name.endsWith('.dmg') ||
+          entry.name.endsWith('.zip') ||
+          entry.name === 'SHA256SUMS.txt'),
+    )
+    .map((entry) => entry.name)
+    .sort();
+
+  assertExactNames(publishableNames, expectedNames);
+
+  const assets = expectedNames.map((name) => {
+    const filePath = path.join(directory, name);
+    const size = fs.statSync(filePath).size;
+    if (size === 0) {
+      throw new Error(`Release asset ${name} must be non-empty.`);
+    }
+    return { name, path: filePath, size, sha256: sha256(filePath) };
+  });
+
+  const expectedChecksums = new Map(
+    expectedNames.slice(0, 2).map((name) => [name, sha256(path.join(directory, name))]),
+  );
+  const manifestLines = fs
+    .readFileSync(path.join(directory, 'SHA256SUMS.txt'), 'utf8')
+    .trim()
+    .split('\n');
+
+  if (manifestLines.length !== expectedChecksums.size) {
+    throw new Error('SHA256SUMS.txt must contain exactly the DMG and ZIP checksums.');
+  }
+
+  const seen = new Set();
+  for (const line of manifestLines) {
+    const match = /^([0-9a-f]{64})  (.+)$/.exec(line);
+    if (!match || !expectedChecksums.has(match[2]) || seen.has(match[2])) {
+      throw new Error('SHA256SUMS.txt contains an unexpected or duplicate asset entry.');
+    }
+    if (expectedChecksums.get(match[2]) !== match[1]) {
+      throw new Error(`SHA256SUMS.txt does not match ${match[2]}.`);
+    }
+    seen.add(match[2]);
+  }
+
+  return assets;
+}
+
+function assertRemoteDraft(release, localAssets, releaseTag) {
+  if (!release || release.tag_name !== releaseTag || release.draft !== true) {
+    throw new Error('The converged GitHub release must exist and remain a draft.');
+  }
+
+  const remoteAssets = release.assets || [];
+  assertExactNames(
+    remoteAssets.map((asset) => asset.name),
+    localAssets.map((asset) => asset.name),
+  );
+
+  const localByName = new Map(localAssets.map((asset) => [asset.name, asset]));
+  for (const asset of remoteAssets) {
+    const localAsset = localByName.get(asset.name);
+    if (
+      asset.state !== 'uploaded' ||
+      asset.size !== localAsset.size ||
+      asset.digest !== `sha256:${localAsset.sha256}`
+    ) {
+      throw new Error(`Remote release asset ${asset.name} is incomplete or does not match locally.`);
+    }
+  }
+}
+
+async function convergeDraftRelease(selection, localAssets, github) {
+  let release = await github.getRelease(selection.releaseTag);
+
+  if (release && release.draft !== true) {
+    throw new Error(`Release ${selection.releaseTag} is already published and cannot be replaced.`);
+  }
+
+  if (!release) {
+    release = await github.createDraft(selection);
+  } else {
+    await github.updateDraft(release.id, selection);
+  }
+
+  if (!release) {
+    throw new Error(`Draft release ${selection.releaseTag} could not be created.`);
+  }
+
+  for (const asset of release.assets || []) {
+    await github.deleteAsset(asset.id);
+  }
+
+  await github.uploadAssets(selection.releaseTag, localAssets.map((asset) => asset.path));
+  const converged = await github.getRelease(selection.releaseTag);
+  assertRemoteDraft(converged, localAssets, selection.releaseTag);
+  return converged;
+}
+
+function createGitHubAdapter(repository) {
+  const api = (args, options) => run('gh', ['api', ...args], options);
+
+  return {
+    async getRelease(tag) {
+      const endpoint = `repos/${repository}/releases/tags/${encodeURIComponent(tag)}`;
+      const result = api([endpoint], { allowFailure: true });
+      if (result.status !== 0) {
+        const detail = `${result.stdout}\n${result.stderr}`;
+        if (/HTTP 404|release not found|Not Found/i.test(detail)) {
+          return null;
+        }
+        throw new Error(`Unable to inspect draft release ${tag}: ${detail.trim()}`);
+      }
+      return JSON.parse(result.stdout);
+    },
+    async createDraft(selection) {
+      run('gh', [
+        'release',
+        'create',
+        selection.releaseTag,
+        '--repo',
+        repository,
+        '--draft',
+        '--verify-tag',
+        '--target',
+        selection.commitSha,
+        '--title',
+        `GlideLingo ${selection.releaseTag}`,
+        '--generate-notes',
+      ]);
+      return this.getRelease(selection.releaseTag);
+    },
+    async updateDraft(releaseId, selection) {
+      api([
+        '--method',
+        'PATCH',
+        `repos/${repository}/releases/${releaseId}`,
+        '-f',
+        `name=GlideLingo ${selection.releaseTag}`,
+        '-F',
+        'draft=true',
+      ]);
+    },
+    async deleteAsset(assetId) {
+      api(['--method', 'DELETE', `repos/${repository}/releases/assets/${assetId}`]);
+    },
+    async uploadAssets(tag, assetPaths) {
+      run('gh', ['release', 'upload', tag, '--repo', repository, '--clobber', ...assetPaths]);
+    },
+  };
+}
+
+function workflowInput(environment = process.env) {
+  return {
+    eventName: environment.GLIDELINGO_EVENT_NAME,
+    eventSha: environment.GLIDELINGO_EVENT_SHA,
+    refName: environment.GLIDELINGO_REF_NAME,
+    refType: environment.GLIDELINGO_REF_TYPE,
+    manualCommit: environment.GLIDELINGO_SELECTED_COMMIT,
+    manualTag: environment.GLIDELINGO_SELECTED_TAG,
+  };
+}
+
+function writeWorkflowOutputs(selection, outputPath) {
+  if (!outputPath) {
+    return;
+  }
+  fs.appendFileSync(
+    outputPath,
+    `commit_sha=${selection.commitSha}\nrelease_tag=${selection.releaseTag}\nversion=${selection.version}\n`,
+  );
+}
+
+async function main(argv = process.argv.slice(2), environment = process.env) {
+  const [command, releaseDirectory = 'release'] = argv;
+
+  if (command === 'validate-selection') {
+    const selection = resolveReleaseSelection(workflowInput(environment));
+    writeWorkflowOutputs(selection, environment.GITHUB_OUTPUT);
+    console.log(`[desktop-release] Validated ${selection.releaseTag} at ${selection.commitSha}.`);
+    return;
+  }
+  if (command === 'write-checksums') {
+    writeChecksums(releaseDirectory);
+    return;
+  }
+  if (command === 'validate-assets') {
+    inspectLocalAssets(releaseDirectory);
+    return;
+  }
+  if (command === 'stage-draft') {
+    const commitSha = environment.GLIDELINGO_RELEASE_COMMIT;
+    const releaseTag = environment.GLIDELINGO_RELEASE_TAG;
+    if (!FULL_COMMIT_PATTERN.test(commitSha || '')) {
+      throw new Error('GLIDELINGO_RELEASE_COMMIT must be an exact commit SHA.');
+    }
+    validateReleaseTag(releaseTag, version);
+    const repository = environment.GITHUB_REPOSITORY;
+    if (!repository || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
+      throw new Error('GITHUB_REPOSITORY must identify the release repository.');
+    }
+    await convergeDraftRelease(
+      { commitSha, releaseTag, version },
+      inspectLocalAssets(releaseDirectory),
+      createGitHubAdapter(repository),
+    );
+    console.log(`[desktop-release] ${releaseTag} converged to an exact draft release.`);
+    return;
+  }
+
+  throw new Error('Expected validate-selection, write-checksums, validate-assets, or stage-draft.');
+}
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(`[desktop-release] ${error.message}`);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  assertRemoteDraft,
+  convergeDraftRelease,
+  expectedReleaseAssetNames,
+  inspectLocalAssets,
+  resolveReleaseSelection,
+  writeChecksums,
+};

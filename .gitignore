@@ -13,6 +13,7 @@ __pycache__/
 .expo/
 dist/
 release/
+release-dry-run/
 web-build/
 expo-env.d.ts
 

@@ -6,7 +6,7 @@ This directory is the independently built, static marketing site for GlideLingo.
 
 The website self-hosts the Satoshi variable display font and composes its typographic lockup with the approved monochrome GlideLingo bird SVG. Satoshi is distributed by Fontshare under the ITF Free Font License preserved at `licenses/Satoshi-ITF-FFL.txt`. Inter remains the body and interface typeface. Production pages make no third-party font requests.
 
-The product-demo frame intentionally uses the current application screenshot and a visible `Video coming soon` state until an approved first-party MP4 or WebM is supplied. It must not be replaced with a third-party embed. The landing page intentionally exposes no desktop installer controls or release asset URLs.
+The product-demo frame intentionally uses the current application screenshot and a visible `Video coming soon` state until an approved first-party MP4 or WebM is supplied. It must not be replaced with a third-party embed. The landing page has no desktop-apps section; it retains only the Mac hero CTA.
 
 ## Local development
 
@@ -17,6 +17,10 @@ npm ci
 npx playwright install chromium webkit
 npm run dev
 ```
+
+## Mac hero CTA
+
+The Apple `Download for Mac` button always remains visible. Without release metadata it is safely disabled. Set `PUBLIC_MAC_DOWNLOAD_STATE=active` together with `PUBLIC_MAC_DOWNLOAD_URL`, `PUBLIC_MAC_CHECKSUM_URL`, `PUBLIC_MAC_VERSION`, and `PUBLIC_MAC_RELEASE_DATE` only after the signed and notarized release is ready. The existing release resolver validates that all metadata identifies the same GitHub Release before emitting the DMG link.
 
 ## Cloudflare Pages
 
@@ -56,4 +60,4 @@ npm run test:e2e
 npm run build:fixture:rollback
 ```
 
-The production-state fixtures exercise the same static landing output and verify that no installer URL is emitted. The browser suite covers Chromium at mobile, tablet, and desktop widths plus WebKit at desktop width. These checks never download fixture assets.
+The production-state fixtures verify both the linked and safely disabled hero CTA. The browser suite covers Chromium at mobile, tablet, and desktop widths plus WebKit at desktop width. These checks never download fixture assets.

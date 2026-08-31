@@ -3,6 +3,7 @@ import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const root = new URL('../dist/', import.meta.url);
+const active = process.env.PUBLIC_MAC_DOWNLOAD_STATE === 'active';
 /** @param {string} path */
 const read = (path) => readFile(new URL(path, root), 'utf8');
 
@@ -29,8 +30,9 @@ assert.match(home, /glidelingo-bird-black\.svg/);
 assert.match(home, /brand-name/);
 assert.match(home, /data-video-state="awaiting-source"/);
 assert.match(home, /Video coming soon/);
-assert.doesNotMatch(home, /Desktop apps|Choose your desktop|Download for Mac|Download for Windows/);
-assert.doesNotMatch(home, /releases\/download/);
+assert.match(home, /Download for Mac/);
+assert.match(home, /button-platform-icon/);
+assert.doesNotMatch(home, /Desktop apps|Choose your desktop|Download for Windows/);
 assert.doesNotMatch(home, /<script(?:\s|>)/i);
 assert.doesNotMatch(home, /<form(?:\s|>)/i);
 assert.doesNotMatch(home, /document\.cookie|localStorage|sessionStorage/i);
@@ -40,4 +42,15 @@ assert.match(headers, /script-src 'none'/);
 assert.match(headers, /Permissions-Policy:/);
 assert.match(robots, /Sitemap: https:\/\/glidelingo\.com\/sitemap-index\.xml/);
 
-console.log(`Verified static landing page output in ${join(root.pathname)}.`);
+if (active) {
+  const downloadUrl = process.env.PUBLIC_MAC_DOWNLOAD_URL?.trim();
+
+  assert.ok(downloadUrl, 'Active output verification requires PUBLIC_MAC_DOWNLOAD_URL.');
+  assert.match(home, /data-download-state="available"/);
+  assert.ok(home.includes(downloadUrl), 'Active output must contain the configured DMG URL.');
+} else {
+  assert.match(home, /data-download-state="unavailable"/);
+  assert.doesNotMatch(home, /releases\/download/);
+}
+
+console.log(`Verified ${active ? 'active' : 'disabled'} hero CTA output in ${join(root.pathname)}.`);

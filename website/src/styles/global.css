@@ -163,6 +163,14 @@ a {
   text-decoration: none;
 }
 
+.button-platform-icon {
+  width: 19px;
+  height: 19px;
+  flex: none;
+  margin-right: 9px;
+  fill: currentColor;
+}
+
 .button-primary {
   color: var(--white);
   border-color: var(--black);
@@ -173,6 +181,10 @@ a {
 .button-primary:hover {
   border-color: var(--navy);
   background: var(--navy);
+}
+
+.button-inactive {
+  cursor: not-allowed;
 }
 
 .hero {
@@ -257,6 +269,13 @@ h3 {
   color: var(--ink-muted);
   font-size: 20px;
   line-height: 1.5;
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 36px;
 }
 
 .product-showcase {
@@ -525,6 +544,12 @@ h3 {
 }
 
 @media (max-width: 440px) {
+  .hero-actions {
+    align-items: stretch;
+    flex-direction: column;
+    padding-inline: 18px;
+  }
+
   .product-frame {
     border-radius: 12px;
   }

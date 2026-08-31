@@ -3,6 +3,8 @@ import { expect, test } from '@playwright/test';
 
 import { resolvePlaywrightServerConfig } from '../scripts/playwright-server-config.mjs';
 
+const downloadUrl =
+  'https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/GlideLingo-0.1.0-universal.dmg';
 const { origin: testOrigin } = resolvePlaywrightServerConfig();
 
 test('renders the complete landing page without third-party requests or horizontal overflow', async ({ page }) => {
@@ -35,7 +37,12 @@ test('renders the complete landing page without third-party requests or horizont
   await expect(page.getByLabel('Product demonstration video coming soon')).toBeVisible();
   await expect(page.locator('.download-section')).toHaveCount(0);
   await expect(page.locator('body')).not.toContainText('Desktop apps');
-  await expect(page.locator('a[href*="/releases/download/"]')).toHaveCount(0);
+  await expect(page.locator('.hero-actions .button-platform-icon')).toHaveCount(1);
+  await expect(page.locator('.hero-actions[data-download-state="available"]')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Download GlideLingo 0.1.0 for Mac' })).toHaveAttribute(
+    'href',
+    downloadUrl,
+  );
 
   const sizes = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,

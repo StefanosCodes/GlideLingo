@@ -3,10 +3,12 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  createContentSecurityPolicy,
   isAllowedNavigation,
   isSafeExternalUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
+  validateProductionApiOrigin,
 } = require('./runtime.cjs');
 
 test('development renderer URL is restricted to the local Expo server', () => {
@@ -56,4 +58,37 @@ test('navigation stays in the renderer and only HTTPS links may open externally'
   assert.equal(isSafeExternalUrl('https://docs.expo.dev/'), true);
   assert.equal(isSafeExternalUrl('http://example.com/'), false);
   assert.equal(isSafeExternalUrl('javascript:alert(1)'), false);
+});
+
+test('packaged API access is restricted to one exact HTTPS origin', () => {
+  assert.equal(validateProductionApiOrigin(undefined), null);
+  assert.equal(
+    validateProductionApiOrigin('https://api.glidelingo.com'),
+    'https://api.glidelingo.com',
+  );
+  assert.equal(
+    validateProductionApiOrigin('https://api.glidelingo.com:8443'),
+    'https://api.glidelingo.com:8443',
+  );
+
+  for (const value of [
+    'http://api.glidelingo.com',
+    'https://user@example.com',
+    'https://api.glidelingo.com/v1',
+    'https://api.glidelingo.com?debug=true',
+    ' https://api.glidelingo.com',
+  ]) {
+    assert.throws(() => validateProductionApiOrigin(value));
+  }
+});
+
+test('packaged CSP permits only the configured API origin for network requests', () => {
+  assert.match(createContentSecurityPolicy(null), /connect-src 'self';/);
+  const connectDirective = createContentSecurityPolicy('https://api.glidelingo.com')
+    .split('; ')
+    .find((directive) => directive.startsWith('connect-src'));
+  assert.equal(
+    connectDirective,
+    "connect-src 'self' https://api.glidelingo.com",
+  );
 });

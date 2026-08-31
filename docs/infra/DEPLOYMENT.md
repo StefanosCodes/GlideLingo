@@ -145,6 +145,18 @@ Backend checks
 
 Exact ordering depends on the migration. Prefer additive expand-and-contract changes so old mobile clients and rolling server replicas remain compatible.
 
+### Google Cloud development platform
+
+The implemented development lane uses one public Cloud Run service, one Cloud SQL for
+PostgreSQL instance, Artifact Registry, Secret Manager, and GitHub Workload Identity
+Federation. Terraform configuration and the operating procedure live in
+[`infra/gcp/README.md`](../../infra/gcp/README.md).
+
+Cloud Run remains public at the network edge for installed clients. FastAPI owns application
+authentication and resource authorization when those product endpoints are added. GitHub
+deployments use short-lived OIDC credentials; the repository and GitHub settings must not
+contain a Google service-account key.
+
 ## Worker lane
 
 Workers may share the backend source and container image while using a different startup command. They remain an independent scaling and release unit.

@@ -313,7 +313,7 @@ resource "google_service_account_iam_member" "github_uses_runtime" {
 }
 
 resource "google_billing_budget" "development" {
-  billing_account = "billingAccounts/${var.billing_account_id}"
+  billing_account = var.billing_account_id
   display_name    = "GlideLingo development monthly budget"
 
   budget_filter {

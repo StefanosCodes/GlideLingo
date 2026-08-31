@@ -21,6 +21,7 @@ type ErrorCode = Literal[
     "lesson_tutor_conflict",
     "lesson_tutor_limited",
     "pro_required",
+    "billing_unavailable",
 ]
 
 
@@ -68,6 +69,10 @@ class LessonTutorLimitedError(Exception):
 
 class ProRequiredError(Exception):
     """The authenticated principal lacks fresh server-verified Pro access."""
+
+
+class BillingUnavailableError(Exception):
+    """Billing cannot currently establish a fresh authorization decision."""
 
 
 def error_response(
@@ -149,6 +154,15 @@ async def pro_required_handler(request: Request, _error: Exception) -> JSONRespo
         status_code=403,
         code="pro_required",
         message="An active Pro subscription is required.",
+        request_id=request.state.request_id,
+    )
+
+
+async def billing_unavailable_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=503,
+        code="billing_unavailable",
+        message="Billing authorization is unavailable.",
         request_id=request.state.request_id,
     )
 

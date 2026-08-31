@@ -51,7 +51,7 @@ class MemoryRepository:
 
     @staticmethod
     def _stored(values: dict[str, object]) -> StoredProEntitlement:
-        observed = values.get("observed_at", values.get("verified_at"))
+        observed = values.get("observed_at", values.get("snapshot_at", values.get("verified_at")))
         expires_at = values.get("expires_at")
         assert isinstance(observed, datetime)
         assert expires_at is None or isinstance(expires_at, datetime)
@@ -142,6 +142,29 @@ def test_status_reconciles_only_the_verified_clerk_subject() -> None:
     assert "user_route_123" not in str(response.json())
 
 
+def test_reconcile_forces_provider_fetch_over_fresh_inactive_state() -> None:
+    client, repository, provider = make_client()
+    repository.stored = StoredProEntitlement(
+        actor_ref=derive_billing_actor_ref(key=KEY, app_user_id="user_route_123"),
+        environment="SANDBOX",
+        is_active=False,
+        expires_at=None,
+        provider_event_at=NOW,
+        verified_at=datetime.now(UTC),
+    )
+
+    with client:
+        response = client.post(
+            "/v1/billing/entitlements/pro/reconcile",
+            headers={"Authorization": "Bearer valid-test-token"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "active"
+    assert response.json()["is_pro"] is True
+    assert provider.users == ["user_route_123"]
+
+
 def test_webhook_verifies_raw_body_and_deduplicates_event_id() -> None:
     client, repository, provider = make_client()
     raw = json.dumps(
@@ -202,6 +225,9 @@ def test_billing_openapi_separates_clerk_status_from_public_webhook() -> None:
         schema = cast(FastAPI, client.app).openapi()
 
     status_operation = schema["paths"]["/v1/billing/entitlements/pro"]["get"]
+    reconcile_operation = schema["paths"]["/v1/billing/entitlements/pro/reconcile"]["post"]
     webhook_operation = schema["paths"]["/v1/billing/revenuecat/webhook"]["post"]
     assert status_operation["security"] == [{"ClerkSessionToken": []}]
+    assert reconcile_operation["security"] == [{"ClerkSessionToken": []}]
+    assert "requestBody" not in reconcile_operation
     assert "security" not in webhook_operation

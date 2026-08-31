@@ -131,9 +131,9 @@ def test_webhook_event_is_deduplicated_and_out_of_order_update_is_ignored(
             actor_ref=ACTOR,
             environment="SANDBOX",
             event_at=newer,
+            snapshot_at=newer,
             is_active=False,
             expires_at=now - timedelta(days=1),
-            verified_at=now,
         )
         == "applied"
     )
@@ -143,9 +143,9 @@ def test_webhook_event_is_deduplicated_and_out_of_order_update_is_ignored(
             actor_ref=ACTOR,
             environment="SANDBOX",
             event_at=newer,
+            snapshot_at=newer,
             is_active=True,
             expires_at=now + timedelta(days=30),
-            verified_at=now,
         )
         == "duplicate"
     )
@@ -155,9 +155,9 @@ def test_webhook_event_is_deduplicated_and_out_of_order_update_is_ignored(
             actor_ref=ACTOR,
             environment="SANDBOX",
             event_at=older,
+            snapshot_at=older,
             is_active=True,
             expires_at=now + timedelta(days=30),
-            verified_at=now,
         )
         == "out_of_order"
     )
@@ -165,6 +165,40 @@ def test_webhook_event_is_deduplicated_and_out_of_order_update_is_ignored(
     assert stored is not None
     assert stored.is_active is False
     assert stored.provider_event_at == newer
+
+
+@pytest.mark.integration
+def test_delayed_webhook_applies_newer_current_snapshot_after_reconciliation(
+    revenuecat_engine: Engine,
+) -> None:
+    repository = PostgresEntitlementRepository(engine=revenuecat_engine)
+    now = datetime.now(UTC).replace(microsecond=0)
+    reconciled_at = now + timedelta(seconds=10)
+    delayed_event_at = now - timedelta(minutes=5)
+    webhook_snapshot_at = now + timedelta(seconds=20)
+    repository.store_reconciliation(
+        actor_ref=ACTOR,
+        environment="SANDBOX",
+        is_active=False,
+        expires_at=now - timedelta(days=1),
+        observed_at=reconciled_at,
+    )
+
+    result = repository.record_webhook_snapshot(
+        event_id="evt_delayed_new_snapshot",
+        actor_ref=ACTOR,
+        environment="SANDBOX",
+        event_at=delayed_event_at,
+        snapshot_at=webhook_snapshot_at,
+        is_active=True,
+        expires_at=now + timedelta(days=30),
+    )
+
+    stored = repository.get_pro(actor_ref=ACTOR, environment="SANDBOX")
+    assert result == "applied"
+    assert stored is not None
+    assert stored.is_active is True
+    assert stored.provider_event_at == webhook_snapshot_at
 
 
 @pytest.mark.integration

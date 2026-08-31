@@ -7,7 +7,11 @@ from typing import cast
 import pytest
 
 from app.auth.clerk import ClerkPrincipal
-from app.core.errors import DependencyUnavailableError, ProRequiredError
+from app.core.errors import (
+    BillingUnavailableError,
+    DependencyUnavailableError,
+    ProRequiredError,
+)
 from app.integrations.revenuecat.client import RevenueCatSnapshot, RevenueCatUnavailableError
 from app.modules.billing.identity import derive_billing_actor_ref
 from app.modules.billing.repository import EntitlementRepository, StoredProEntitlement
@@ -29,6 +33,7 @@ class FakeRepository:
         self.apply_result = "applied"
         self.store_calls = 0
         self.raise_unavailable = False
+        self.webhook_snapshot: dict[str, object] | None = None
 
     def get_pro(self, **_kwargs: object) -> StoredProEntitlement | None:
         if self.raise_unavailable:
@@ -51,8 +56,9 @@ class FakeRepository:
         )
         return self.stored
 
-    def record_webhook_snapshot(self, *, event_id: str, **_kwargs: object) -> str:
+    def record_webhook_snapshot(self, *, event_id: str, **kwargs: object) -> str:
         self.events.add(event_id)
+        self.webhook_snapshot = kwargs
         return self.apply_result
 
 
@@ -98,9 +104,11 @@ def stored_entitlement(
 def service(
     repository: FakeRepository,
     provider: FakeProvider | None = None,
+    *,
+    enabled: bool = True,
 ) -> BillingService:
     return BillingService(
-        enabled=True,
+        enabled=enabled,
         repository=cast(EntitlementRepository, repository),
         provider=provider,
         pseudonym_key=KEY,
@@ -196,13 +204,62 @@ def test_database_failure_fails_closed() -> None:
     assert status.is_pro is False
 
 
-def test_require_pro_rejects_stale_state() -> None:
+def test_require_pro_rejects_verified_inactive_state_as_pro_required() -> None:
+    repository = FakeRepository(stored_entitlement(active=False))
+
+    with pytest.raises(ProRequiredError):
+        asyncio.run(service(repository).require_pro(principal=PRINCIPAL))
+
+
+def test_require_pro_rejects_stale_state_as_billing_unavailable() -> None:
     repository = FakeRepository(
         stored_entitlement(active=True, verified_at=NOW - timedelta(hours=1))
     )
 
-    with pytest.raises(ProRequiredError):
+    with pytest.raises(BillingUnavailableError):
         asyncio.run(service(repository).require_pro(principal=PRINCIPAL))
+
+
+def test_require_pro_rejects_disabled_billing_as_unavailable() -> None:
+    with pytest.raises(BillingUnavailableError):
+        asyncio.run(service(FakeRepository(), enabled=False).require_pro(principal=PRINCIPAL))
+
+
+def test_require_pro_rejects_database_failure_as_unavailable() -> None:
+    repository = FakeRepository()
+    repository.raise_unavailable = True
+
+    with pytest.raises(BillingUnavailableError):
+        asyncio.run(service(repository).require_pro(principal=PRINCIPAL))
+
+
+def test_require_pro_rejects_provider_failure_as_unavailable() -> None:
+    repository = FakeRepository(
+        stored_entitlement(active=True, verified_at=NOW - timedelta(hours=1))
+    )
+    provider = FakeProvider(error=RevenueCatUnavailableError())
+
+    with pytest.raises(BillingUnavailableError):
+        asyncio.run(service(repository, provider).require_pro(principal=PRINCIPAL))
+
+
+def test_reconcile_forces_provider_over_fresh_inactive_state() -> None:
+    repository = FakeRepository(stored_entitlement(active=False))
+    provider = FakeProvider(
+        RevenueCatSnapshot(
+            is_active=True,
+            environment="SANDBOX",
+            expires_at=NOW + timedelta(days=30),
+            observed_at=NOW,
+        )
+    )
+
+    status = asyncio.run(service(repository, provider).reconcile(principal=PRINCIPAL))
+
+    assert status.state == "active"
+    assert status.is_pro is True
+    assert provider.calls == [PRINCIPAL.user_id]
+    assert repository.store_calls == 1
 
 
 def signed_headers(raw_body: bytes, *, timestamp: int | None = None) -> tuple[str, str]:
@@ -294,6 +351,29 @@ def test_webhook_preserves_repository_out_of_order_result() -> None:
     response = asyncio.run(service(repository, provider).process_webhook(webhook_payload()))
 
     assert response.status == "out_of_order"
+
+
+def test_webhook_orders_current_state_by_snapshot_observation_time() -> None:
+    repository = FakeRepository()
+    snapshot_at = NOW + timedelta(seconds=20)
+    provider = FakeProvider(
+        RevenueCatSnapshot(
+            is_active=True,
+            environment="SANDBOX",
+            expires_at=NOW + timedelta(days=30),
+            observed_at=snapshot_at,
+        )
+    )
+
+    response = asyncio.run(
+        service(repository, provider).process_webhook(
+            webhook_payload(timestamp_ms=int((NOW - timedelta(minutes=5)).timestamp() * 1000))
+        )
+    )
+
+    assert response.status == "applied"
+    assert repository.webhook_snapshot is not None
+    assert repository.webhook_snapshot["snapshot_at"] == snapshot_at
 
 
 def test_webhook_from_other_environment_is_ignored() -> None:

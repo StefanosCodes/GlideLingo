@@ -12,6 +12,7 @@ from app.auth.router import router as auth_router
 from app.core.config import Settings
 from app.core.errors import (
     AuthenticationUnavailableError,
+    BillingUnavailableError,
     DependencyUnavailableError,
     InternalErrorMiddleware,
     LessonContextNotFoundError,
@@ -21,6 +22,7 @@ from app.core.errors import (
     LessonTutorUnavailableError,
     ProRequiredError,
     authentication_unavailable_handler,
+    billing_unavailable_handler,
     dependency_unavailable_handler,
     lesson_context_not_found_handler,
     lesson_tutor_conflict_handler,
@@ -177,6 +179,7 @@ def create_app(
     application.add_exception_handler(LessonTutorConflictError, lesson_tutor_conflict_handler)
     application.add_exception_handler(LessonTutorLimitedError, lesson_tutor_limited_handler)
     application.add_exception_handler(ProRequiredError, pro_required_handler)
+    application.add_exception_handler(BillingUnavailableError, billing_unavailable_handler)
     application.add_middleware(InternalErrorMiddleware)
     application.add_middleware(
         CORSMiddleware,

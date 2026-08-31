@@ -88,6 +88,26 @@ class DenyingBillingService:
         raise ProRequiredError
 
 
+class CountingBillingService:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def require_pro(self, **_kwargs: object) -> ProEntitlementStatus:
+        self.calls += 1
+        return ProEntitlementStatus(
+            state="active",
+            is_pro=True,
+            environment="SANDBOX",
+        )
+
+
+class UnavailableBillingService:
+    async def require_pro(self, **_kwargs: object) -> ProEntitlementStatus:
+        from app.core.errors import BillingUnavailableError
+
+        raise BillingUnavailableError
+
+
 def tutor_service(*, enabled: bool, gateway: FakeGateway) -> LessonTutorService:
     return LessonTutorService(
         enabled=enabled,
@@ -212,7 +232,8 @@ def test_valid_bearer_disabled_app_returns_unavailable_without_agent_call() -> N
         lesson_tutor_service=tutor_service(enabled=False, gateway=agent),
     )
     application.state.clerk_token_verifier = AcceptingVerifier()
-    allow_billing(application)
+    billing = CountingBillingService()
+    application.state.billing_service = cast(BillingService, billing)
 
     with TestClient(application) as disabled_client:
         response = disabled_client.post(
@@ -224,7 +245,48 @@ def test_valid_bearer_disabled_app_returns_unavailable_without_agent_call() -> N
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "lesson_tutor_unavailable"
     assert "openai" not in response.text.lower()
+    assert billing.calls == 0
     assert agent.calls == 0
+
+
+def test_authentication_precedes_disabled_tutor_and_billing() -> None:
+    agent = FakeGateway()
+    application = create_app(
+        Settings(_env_file=None),
+        lesson_tutor_service=tutor_service(enabled=False, gateway=agent),
+    )
+    application.state.clerk_token_verifier = AcceptingVerifier()
+    billing = CountingBillingService()
+    application.state.billing_service = cast(BillingService, billing)
+
+    with TestClient(application) as disabled_client:
+        response = disabled_client.post(
+            "/v1/lesson-tutor/turns",
+            json=VALID_TURN,
+            headers={"Idempotency-Key": AUTH_HEADERS["Idempotency-Key"]},
+        )
+
+    assert response.status_code == 401
+    assert billing.calls == 0
+    assert agent.calls == 0
+
+
+def test_unconfigured_tutor_precedes_billing() -> None:
+    application = create_app(Settings(_env_file=None))
+    application.state.clerk_token_verifier = AcceptingVerifier()
+    billing = CountingBillingService()
+    application.state.billing_service = cast(BillingService, billing)
+
+    with TestClient(application) as unconfigured_client:
+        response = unconfigured_client.post(
+            "/v1/lesson-tutor/turns",
+            json=VALID_TURN,
+            headers=AUTH_HEADERS,
+        )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "lesson_tutor_unavailable"
+    assert billing.calls == 0
 
 
 def test_forged_client_pro_state_is_denied_before_guard_or_private_call() -> None:
@@ -255,6 +317,41 @@ def test_forged_client_pro_state_is_denied_before_guard_or_private_call() -> Non
         "error": {
             "code": "pro_required",
             "message": "An active Pro subscription is required.",
+            "request_id": request_id,
+        }
+    }
+    assert guard.admissions == 0
+    assert agent.calls == 0
+
+
+def test_billing_unavailable_has_stable_503_before_guard_or_private_call() -> None:
+    agent = FakeGateway()
+    guard = FakeGuard()
+    application = create_app(
+        Settings(_env_file=None),
+        lesson_tutor_service=LessonTutorService(
+            enabled=True,
+            gateway=agent,
+            guard=guard,
+            pseudonym_key=b"router-test-pseudonym-key-at-least-32-bytes",
+        ),
+    )
+    application.state.clerk_token_verifier = AcceptingVerifier()
+    application.state.billing_service = cast(BillingService, UnavailableBillingService())
+
+    with TestClient(application) as unavailable_client:
+        response = unavailable_client.post(
+            "/v1/lesson-tutor/turns",
+            json=VALID_TURN,
+            headers=AUTH_HEADERS,
+        )
+
+    request_id = response.headers[REQUEST_ID_HEADER]
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {
+            "code": "billing_unavailable",
+            "message": "Billing authorization is unavailable.",
             "request_id": request_id,
         }
     }

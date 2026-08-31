@@ -47,9 +47,9 @@ class EntitlementRepository(Protocol):
         actor_ref: str,
         environment: RevenueCatEnvironment,
         event_at: datetime,
+        snapshot_at: datetime,
         is_active: bool,
         expires_at: datetime | None,
-        verified_at: datetime,
     ) -> WebhookApplyStatus: ...
 
 
@@ -187,9 +187,9 @@ class PostgresEntitlementRepository:
         actor_ref: str,
         environment: RevenueCatEnvironment,
         event_at: datetime,
+        snapshot_at: datetime,
         is_active: bool,
         expires_at: datetime | None,
-        verified_at: datetime,
     ) -> WebhookApplyStatus:
         try:
             with self._engine.begin() as connection:
@@ -219,7 +219,7 @@ class PostgresEntitlementRepository:
                            provider_event_at, verified_at)
                         VALUES
                           (:actor_ref, 'pro', :environment, :is_active, :expires_at,
-                           :event_at, :verified_at)
+                           :snapshot_at, :snapshot_at)
                         ON CONFLICT (actor_ref, entitlement_id, environment) DO UPDATE
                         SET is_active = EXCLUDED.is_active,
                             expires_at = EXCLUDED.expires_at,
@@ -235,8 +235,7 @@ class PostgresEntitlementRepository:
                         "environment": environment,
                         "is_active": is_active,
                         "expires_at": expires_at,
-                        "event_at": event_at,
-                        "verified_at": verified_at,
+                        "snapshot_at": snapshot_at,
                     },
                 )
                 return "applied" if state_result.rowcount == 1 else "out_of_order"

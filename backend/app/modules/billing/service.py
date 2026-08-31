@@ -10,7 +10,11 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from app.auth.clerk import ClerkPrincipal
-from app.core.errors import DependencyUnavailableError, ProRequiredError
+from app.core.errors import (
+    BillingUnavailableError,
+    DependencyUnavailableError,
+    ProRequiredError,
+)
 from app.integrations.revenuecat.client import (
     RevenueCatProvider,
     RevenueCatUnavailableError,
@@ -78,6 +82,19 @@ class BillingService:
         self._now = now or (lambda: datetime.now(UTC))
 
     async def status(self, *, principal: ClerkPrincipal) -> ProEntitlementStatus:
+        return await self._resolve_status(principal=principal, force_reconcile=False)
+
+    async def reconcile(self, *, principal: ClerkPrincipal) -> ProEntitlementStatus:
+        """Force a bounded provider refresh for the verified Clerk principal."""
+
+        return await self._resolve_status(principal=principal, force_reconcile=True)
+
+    async def _resolve_status(
+        self,
+        *,
+        principal: ClerkPrincipal,
+        force_reconcile: bool,
+    ) -> ProEntitlementStatus:
         if not self._enabled or self._pseudonym_key is None:
             return self._unavailable()
         actor_ref = derive_billing_actor_ref(
@@ -92,7 +109,7 @@ class BillingService:
             )
         except DependencyUnavailableError:
             return self._unavailable()
-        if stored is not None and self._is_fresh(stored):
+        if not force_reconcile and stored is not None and self._is_fresh(stored):
             return self._from_stored(stored)
         if self._provider is None:
             return self._stale_or_unavailable(stored)
@@ -118,8 +135,10 @@ class BillingService:
 
     async def require_pro(self, *, principal: ClerkPrincipal) -> ProEntitlementStatus:
         status = await self.status(principal=principal)
-        if not status.is_pro or status.state != "active":
+        if status.state == "inactive":
             raise ProRequiredError
+        if status.state != "active" or not status.is_pro:
+            raise BillingUnavailableError
         return status
 
     def verify_webhook(
@@ -187,9 +206,9 @@ class BillingService:
             actor_ref=actor_ref,
             environment=self._environment,
             event_at=event_at,
+            snapshot_at=snapshot.observed_at,
             is_active=snapshot.is_active,
             expires_at=snapshot.expires_at,
-            verified_at=snapshot.observed_at,
         )
         return RevenueCatWebhookResponse(status=result)
 

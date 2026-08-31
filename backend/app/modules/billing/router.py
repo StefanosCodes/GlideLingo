@@ -50,6 +50,21 @@ async def get_pro_entitlement_status(
 
 
 @router.post(
+    "/entitlements/pro/reconcile",
+    operation_id="reconcile_pro_entitlement_status",
+    response_model=ProEntitlementStatus,
+    responses={
+        401: {"description": "The Clerk session token is missing or invalid."},
+    },
+)
+async def reconcile_pro_entitlement_status(
+    principal: CurrentClerkPrincipal,
+    service: BillingServiceDependency,
+) -> ProEntitlementStatus:
+    return await service.reconcile(principal=principal)
+
+
+@router.post(
     "/revenuecat/webhook",
     operation_id="receive_revenuecat_webhook",
     response_model=RevenueCatWebhookResponse,

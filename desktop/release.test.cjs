@@ -53,7 +53,11 @@ test('release environment accepts macOS and rejects unsigned or non-macOS builds
   });
   assert.throws(() => validateReleaseEnvironment(apiKeyEnvironment, 'linux'), /built on macOS/);
   assert.throws(
-    () => validateReleaseEnvironment({ ...apiKeyEnvironment, EXPO_PUBLIC_API_BASE_URL: '' }),
+    () =>
+      validateReleaseEnvironment(
+        { ...apiKeyEnvironment, EXPO_PUBLIC_API_BASE_URL: '' },
+        'darwin',
+      ),
     /must be set/,
   );
 });

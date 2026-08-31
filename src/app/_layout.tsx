@@ -51,6 +51,7 @@ function AppNavigation() {
         <Stack.Screen name="(app)" />
         <Stack.Screen name="course/[id]" />
         <Stack.Screen name="kit" />
+        <Stack.Screen name="diagnostics" />
       </Stack>
     </NavigationThemeProvider>
   );

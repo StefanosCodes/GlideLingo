@@ -47,6 +47,8 @@ Acceptance:
 
 ## Slice 2: Full-stack walking skeleton
 
+Status: implemented as the current infrastructure foundation.
+
 Outcome:
 
 - A real client can call FastAPI, FastAPI can prove PostgreSQL readiness, and the full environment has canonical startup and verification commands.
@@ -59,6 +61,13 @@ Work:
 - Add typed client configuration and one visible internal diagnostics path.
 - Add backend tests and root orchestration commands.
 - Re-check local port ownership during implementation.
+
+Implemented boundaries:
+
+- FastAPI uses port `8123` and exposes `/health/live` and `/health/ready`.
+- PostgreSQL uses loopback-only host port `55433` through `infra/compose.yaml`.
+- `/diagnostics` traces the real client → API → PostgreSQL readiness path.
+- Root npm scripts and `.github/workflows/verify.yml` enforce repeatable local and PR verification.
 
 Acceptance:
 

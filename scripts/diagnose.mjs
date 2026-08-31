@@ -6,6 +6,11 @@ import { fileURLToPath } from 'node:url';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const packageJson = JSON.parse(readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
+const environmentPath = path.join(projectRoot, '.env');
+
+if (existsSync(environmentPath)) {
+  process.loadEnvFile(environmentPath);
+}
 
 function commandOutput(command, args = []) {
   const result = spawnSync(command, args, { cwd: projectRoot, encoding: 'utf8' });
@@ -39,7 +44,15 @@ const dependenciesInstalled = existsSync(path.join(projectRoot, 'node_modules', 
 const npmVersion = commandOutput('npm', ['--version']) ?? 'unavailable';
 const xcodeVersion = commandOutput('xcodebuild', ['-version']) ?? 'not installed (required for iOS Simulator)';
 const adbVersion = commandOutput('adb', ['version']) ?? 'not on PATH (required for Android emulator CLI)';
-const metroStatus = await checkPort(8081);
+const uvVersion = commandOutput('uv', ['--version']) ?? 'not installed (required for FastAPI)';
+const dockerVersion = commandOutput('docker', ['--version']) ?? 'not installed (required for PostgreSQL)';
+const configuredDatabasePort = Number.parseInt(process.env.GLIDELINGO_DB_PORT ?? '55433', 10);
+const databasePort = configuredDatabasePort >= 1 && configuredDatabasePort <= 65_535 ? configuredDatabasePort : 55433;
+const [metroStatus, apiStatus, databaseStatus] = await Promise.all([
+  checkPort(8081),
+  checkPort(8123),
+  checkPort(databasePort),
+]);
 
 console.log('GlideLingo environment');
 console.log(`Project:   ${projectRoot}`);
@@ -49,11 +62,17 @@ console.log(`Expo:      ${packageJson.dependencies.expo}`);
 console.log(`Electron:  ${packageJson.devDependencies.electron}`);
 console.log(`Packages:  ${dependenciesInstalled ? 'installed' : 'missing — run npm ci'}`);
 console.log(`Port 8081: ${metroStatus}`);
+console.log(`Port 8123: ${apiStatus} (GlideLingo API)`);
+console.log(`Port ${databasePort}: ${databaseStatus} (GlideLingo PostgreSQL)`);
+console.log(`uv:        ${uvVersion}`);
+console.log(`Docker:    ${dockerVersion}`);
 console.log(`Xcode:     ${xcodeVersion}`);
 console.log(`ADB:       ${adbVersion}`);
 console.log('');
 console.log('Next checks:');
 console.log('  npm run verify        lint, types, and tests');
+console.log('  npm run api:verify    backend lint, types, and unit tests');
+console.log('  npm run db:up         start the GlideLingo PostgreSQL container');
 console.log('  npm run doctor        Expo dependency and configuration checks');
 console.log('  npm run start:clear   clear Metro cache for mobile');
 console.log('  npm run desktop:clear clear Metro cache for Electron');

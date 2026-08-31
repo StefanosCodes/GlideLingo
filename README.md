@@ -2,11 +2,19 @@
 
 GlideLingo is an Expo SDK 57 app using TypeScript and Expo Router. The same source project targets Android, iOS, web, and an Electron desktop shell.
 
-## Infrastructure and architecture reference
+## Full-stack foundation
 
-The future full-stack direction, folder ownership, feature-development pattern, local operations, deployment lanes, and implementation roadmap live in [`docs/infra/README.md`](docs/infra/README.md).
+The repository now contains a deliberately small full-stack walking skeleton:
 
-Those documents distinguish the client that exists today from planned FastAPI, PostgreSQL, content, worker, and deployment infrastructure. They are architectural guidance, not a claim that future systems have already been implemented.
+- Expo SDK 57 serves Android, iOS, and web from one TypeScript application.
+- Electron packages the Expo web target as the macOS desktop application.
+- FastAPI exposes liveness and PostgreSQL readiness on port `8123`.
+- Docker Compose runs a project-owned PostgreSQL instance on `55433`.
+- The internal `/diagnostics` route proves the client-to-database wiring.
+
+The long-term direction, folder ownership, feature-development pattern, local operations, deployment lanes, and implementation roadmap live in [`docs/infra/README.md`](docs/infra/README.md). Product tables, authentication, migrations, workers, and production deployment remain intentionally unimplemented.
+
+This slice proves development connectivity. A packaged Electron release still needs an exact production HTTPS API origin and matching restrictive Content Security Policy before it can call the deployed API; that belongs to the release-foundation slice.
 
 ## Command center
 
@@ -15,6 +23,11 @@ Run commands from this directory—the one containing `package.json`:
 | Goal | Command |
 | --- | --- |
 | Install the locked dependencies | `npm ci` |
+| Install the locked backend environment | `npm run setup:backend` |
+| Start PostgreSQL | `npm run db:up` |
+| Start FastAPI | `npm run api` |
+| Start database, API, and interactive Expo | `npm run dev` |
+| Start database, API, and Electron | `npm run dev:desktop` |
 | Start Expo for mobile | `npm start` |
 | Open Android directly | `npm run android` |
 | Open iOS directly | `npm run ios` |
@@ -22,6 +35,7 @@ Run commands from this directory—the one containing `package.json`:
 | Check the local environment | `npm run diagnose` |
 | Run lint, types, and tests | `npm run verify` |
 | Run all Expo and desktop checks | `npm run verify:full` |
+| Run the database integration gate | `npm run verify:full-stack` |
 | Clear mobile Metro state | `npm run start:clear` |
 | Clear desktop Metro state | `npm run desktop:clear` |
 | Build a local macOS `.app` | `npm run desktop:package` |
@@ -43,6 +57,8 @@ UI and business logic are shared by default. When a target genuinely needs diffe
 ## Prerequisites
 
 - Node.js 22.13 or newer and npm
+- [uv](https://docs.astral.sh/uv/) for the locked Python 3.13 backend environment
+- Docker Desktop for local PostgreSQL
 - For a physical Android or iPhone: install a compatible Expo Go app
 - For an Android emulator or local Android build: Android Studio, Android SDK 36, and JDK 17
 - For the iOS Simulator or local iOS build: Xcode and an installed Simulator runtime
@@ -52,7 +68,7 @@ You do not need a global Expo CLI. Use the project-local CLI through `npx expo .
 ## Run the starter
 
 ```bash
-npm install
+npm ci
 npm start
 ```
 
@@ -71,7 +87,29 @@ npm run ios
 npm run web
 ```
 
-Start editing in `src/app/index.tsx`. Routes are files under `src/app`, and `src/app/_layout.tsx` owns the root navigation layout.
+Routes are files under `src/app`, and `src/app/_layout.tsx` owns the root navigation layout. Product behavior should move into `src/features` as each working feature is introduced.
+
+## Run the full stack
+
+Install both locked environments once, then start the database, API, and the client target you want:
+
+```bash
+npm ci
+npm run setup:backend
+npm run dev
+```
+
+The committed local defaults work without an environment file. Copy `.env.example` to `.env` only when you need to override the database port/password, CORS origins, or a device-reachable client URL; keep the paired database URL and Compose values consistent.
+
+`npm run dev` starts PostgreSQL, FastAPI, and interactive Expo. Press `a` or `i` in Expo for a native client. For the macOS desktop window instead, run `npm run dev:desktop`.
+
+Open `/diagnostics` from the internal Prompt Kit screen to see the exact API origin, target platform, API reachability, and PostgreSQL readiness. Android emulators default to `10.0.2.2:8123`; iOS Simulator, web, and Electron development default to `localhost:8123`. A physical phone must receive an explicit reachable value such as `EXPO_PUBLIC_API_BASE_URL=http://192.168.1.20:8123` before Metro starts.
+
+Stop the project database without deleting its named volume:
+
+```bash
+npm run db:down
+```
 
 ## Run the macOS desktop app
 
@@ -120,6 +158,8 @@ Generated artifacts are placed in `release/`. Local builds can be tested on this
 ```bash
 npm run diagnose
 npm run verify
+npm run api:verify
+npm run verify:full-stack
 npm run doctor
 npm run test:desktop
 npm run verify:full

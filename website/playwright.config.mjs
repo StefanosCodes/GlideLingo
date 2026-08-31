@@ -1,4 +1,4 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 
 const viewports = [
   { name: 'mobile', width: 375, height: 812 },
@@ -14,14 +14,19 @@ export default defineConfig({
   reporter: 'list',
   use: {
     baseURL: 'http://127.0.0.1:4322',
-    channel: 'chrome',
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
   },
-  projects: viewports.map(({ name, width, height }) => ({
-    name,
-    use: { viewport: { width, height } },
-  })),
+  projects: [
+    ...viewports.map(({ name, width, height }) => ({
+      name: `chromium-${name}`,
+      use: { ...devices['Desktop Chrome'], viewport: { width, height } },
+    })),
+    {
+      name: 'webkit-desktop',
+      use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 1000 } },
+    },
+  ],
   webServer: {
     command: 'node scripts/serve-dist.mjs',
     url: 'http://127.0.0.1:4322',

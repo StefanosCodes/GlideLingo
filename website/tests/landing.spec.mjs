@@ -3,7 +3,8 @@ import { expect, test } from '@playwright/test';
 
 const downloadUrl =
   'https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/GlideLingo-0.1.0-universal.dmg';
-const checksumUrl = `${downloadUrl}.sha256`;
+const checksumUrl =
+  'https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/SHA256SUMS.txt';
 
 test('renders the complete landing page without third-party requests or horizontal overflow', async ({ page }) => {
   /** @type {string[]} */
@@ -36,11 +37,11 @@ test('renders the complete landing page without third-party requests or horizont
   expect(await page.context().cookies()).toEqual([]);
 });
 
-test('supports keyboard navigation and reduced motion', async ({ page }) => {
+test('supports keyboard navigation and reduced motion', async ({ page, browserName }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
 
-  await page.keyboard.press('Tab');
+  await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
   await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();
   expect(await page.evaluate(() => getComputedStyle(document.documentElement).scrollBehavior)).toBe('auto');
 });

@@ -3,7 +3,7 @@ import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const root = new URL('../dist/', import.meta.url);
-const active = process.argv.includes('--active');
+const active = process.env.PUBLIC_MAC_DOWNLOAD_STATE === 'active';
 /** @param {string} path */
 const read = (path) => readFile(new URL(path, root), 'utf8');
 
@@ -37,9 +37,14 @@ assert.match(headers, /Permissions-Policy:/);
 assert.match(robots, /Sitemap: https:\/\/glidelingo\.com\/sitemap-index\.xml/);
 
 if (active) {
+  const downloadUrl = process.env.PUBLIC_MAC_DOWNLOAD_URL?.trim();
+  const checksumUrl = process.env.PUBLIC_MAC_CHECKSUM_URL?.trim();
+
+  assert.ok(downloadUrl, 'Active output verification requires PUBLIC_MAC_DOWNLOAD_URL.');
+  assert.ok(checksumUrl, 'Active output verification requires PUBLIC_MAC_CHECKSUM_URL.');
   assert.match(home, /data-download-state="available"/);
-  assert.match(home, /GlideLingo-0\.1\.0-universal\.dmg/);
-  assert.match(home, /GlideLingo-0\.1\.0-universal\.dmg\.sha256/);
+  assert.ok(home.includes(downloadUrl), 'Active output must contain the configured DMG URL.');
+  assert.ok(home.includes(checksumUrl), 'Active output must contain the configured checksum URL.');
 } else {
   assert.match(home, /data-download-state="unavailable"/);
   assert.match(home, /Mac release coming soon/);

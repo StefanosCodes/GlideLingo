@@ -5,6 +5,8 @@ const REQUIRED_KEYS = [
   'PUBLIC_MAC_RELEASE_DATE',
 ];
 
+const DOWNLOAD_STATE_KEY = 'PUBLIC_MAC_DOWNLOAD_STATE';
+const DOWNLOAD_STATES = new Set(['active', 'disabled']);
 const RELEASE_PREFIX = '/StefanosCodes/GlideLingo/releases/download/';
 const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -15,6 +17,7 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
  * @property {string | undefined} [PUBLIC_MAC_CHECKSUM_URL]
  * @property {string | undefined} [PUBLIC_MAC_VERSION]
  * @property {string | undefined} [PUBLIC_MAC_RELEASE_DATE]
+ * @property {string | undefined} [PUBLIC_MAC_DOWNLOAD_STATE]
  * @property {string | undefined} [CF_PAGES_BRANCH]
  */
 
@@ -60,8 +63,9 @@ function validateReleaseUrl(rawValue, kind) {
 }
 
 /** @param {URL} url */
-function releaseTag(url) {
-  return url.pathname.slice(RELEASE_PREFIX.length).split('/')[0];
+function releaseIdentity(url) {
+  const [tag, asset] = url.pathname.slice(RELEASE_PREFIX.length).split('/');
+  return { tag, asset };
 }
 
 /** @param {string} value */
@@ -79,20 +83,42 @@ function validateDate(value) {
 /** @param {DownloadEnvironment | NodeJS.ProcessEnv} env */
 export function resolveMacDownload(env) {
   const configuredValues = [
-    env.PUBLIC_MAC_DOWNLOAD_URL,
-    env.PUBLIC_MAC_CHECKSUM_URL,
-    env.PUBLIC_MAC_VERSION,
-    env.PUBLIC_MAC_RELEASE_DATE,
+    env.PUBLIC_MAC_DOWNLOAD_URL?.trim(),
+    env.PUBLIC_MAC_CHECKSUM_URL?.trim(),
+    env.PUBLIC_MAC_VERSION?.trim(),
+    env.PUBLIC_MAC_RELEASE_DATE?.trim(),
   ];
-  const missingKeys = REQUIRED_KEYS.filter((_key, index) => !configuredValues[index]?.trim());
+  const configuredKeys = REQUIRED_KEYS.filter((_key, index) => Boolean(configuredValues[index]));
+  const missingKeys = REQUIRED_KEYS.filter((_key, index) => !configuredValues[index]);
+  const rawState = env[DOWNLOAD_STATE_KEY]?.trim();
   const isProductionBranch = env.CF_PAGES_BRANCH === 'main';
 
-  if (missingKeys.length > 0) {
-    if (isProductionBranch) {
-      throw new Error(`Production download configuration is missing: ${missingKeys.join(', ')}.`);
-    }
+  if (rawState && !DOWNLOAD_STATES.has(rawState)) {
+    throw new Error(`${DOWNLOAD_STATE_KEY} must be either active or disabled.`);
+  }
 
+  if (!rawState && configuredKeys.length > 0) {
+    throw new Error(`${DOWNLOAD_STATE_KEY} is required whenever release metadata is configured.`);
+  }
+
+  if (!rawState && isProductionBranch) {
+    throw new Error(`Production must explicitly set ${DOWNLOAD_STATE_KEY} to active or disabled.`);
+  }
+
+  if (!rawState) {
     return { available: false, reason: 'release-not-configured' };
+  }
+
+  if (configuredKeys.length > 0 && missingKeys.length > 0) {
+    throw new Error(`Download configuration is incomplete; missing: ${missingKeys.join(', ')}.`);
+  }
+
+  if (rawState === 'active' && missingKeys.length > 0) {
+    throw new Error(`Active download configuration is missing: ${missingKeys.join(', ')}.`);
+  }
+
+  if (rawState === 'disabled' && configuredKeys.length === 0) {
+    return { available: false, reason: 'release-disabled' };
   }
 
   const downloadUrl = validateReleaseUrl(String(env.PUBLIC_MAC_DOWNLOAD_URL).trim(), 'download');
@@ -106,8 +132,25 @@ export function resolveMacDownload(env) {
 
   validateDate(releaseDate);
 
-  if (releaseTag(downloadUrl) !== releaseTag(checksumUrl)) {
-    throw new Error('download and checksum URLs must reference the same GitHub release tag.');
+  const expectedTag = `desktop-v${version}`;
+  const expectedDmg = `GlideLingo-${version}-universal.dmg`;
+  const downloadIdentity = releaseIdentity(downloadUrl);
+  const checksumIdentity = releaseIdentity(checksumUrl);
+
+  if (downloadIdentity.tag !== expectedTag || checksumIdentity.tag !== expectedTag) {
+    throw new Error(`release URLs must use the tag ${expectedTag}.`);
+  }
+
+  if (downloadIdentity.asset !== expectedDmg) {
+    throw new Error(`download URL must reference ${expectedDmg}.`);
+  }
+
+  if (checksumIdentity.asset !== 'SHA256SUMS.txt') {
+    throw new Error('checksum URL must reference SHA256SUMS.txt.');
+  }
+
+  if (rawState === 'disabled') {
+    return { available: false, reason: 'release-disabled' };
   }
 
   return {

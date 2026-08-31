@@ -60,6 +60,35 @@ def test_lesson_tutor_is_disabled_by_default() -> None:
     assert not hasattr(settings, "openai_api_key")
 
 
+def test_revenuecat_server_authorization_is_disabled_by_default() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.revenuecat_enabled is False
+    assert settings.revenuecat_environment == "SANDBOX"
+    assert settings.revenuecat_api_key is None
+    assert settings.revenuecat_entitlement_freshness_seconds == 900
+
+
+def test_enabled_revenuecat_requires_all_server_only_secrets() -> None:
+    with pytest.raises(ValidationError, match="RevenueCat API key"):
+        Settings(_env_file=None, revenuecat_enabled=True)
+
+
+def test_enabled_revenuecat_accepts_complete_fail_closed_configuration() -> None:
+    settings = Settings(
+        _env_file=None,
+        revenuecat_enabled=True,
+        revenuecat_environment="PRODUCTION",
+        revenuecat_api_key="secret-key",
+        revenuecat_pseudonym_key="p" * 32,
+        revenuecat_webhook_authorization="Bearer webhook-secret-value",
+        revenuecat_webhook_signing_secret="s" * 32,
+    )
+
+    assert settings.revenuecat_enabled is True
+    assert settings.revenuecat_environment == "PRODUCTION"
+
+
 def test_enabled_lesson_tutor_requires_bounded_database_timeouts() -> None:
     with pytest.raises(ValidationError, match="database pool timeout"):
         Settings(_env_file=None, lesson_tutor_enabled=True)

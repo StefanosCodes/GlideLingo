@@ -20,6 +20,7 @@ type ErrorCode = Literal[
     "lesson_tutor_timeout",
     "lesson_tutor_conflict",
     "lesson_tutor_limited",
+    "pro_required",
 ]
 
 
@@ -63,6 +64,10 @@ class LessonTutorConflictError(Exception):
 
 class LessonTutorLimitedError(Exception):
     """A per-actor or global tutor safety limit rejected the request."""
+
+
+class ProRequiredError(Exception):
+    """The authenticated principal lacks fresh server-verified Pro access."""
 
 
 def error_response(
@@ -135,6 +140,15 @@ async def lesson_tutor_limited_handler(request: Request, _error: Exception) -> J
         status_code=429,
         code="lesson_tutor_limited",
         message="The lesson tutor limit has been reached. Try again later.",
+        request_id=request.state.request_id,
+    )
+
+
+async def pro_required_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=403,
+        code="pro_required",
+        message="An active Pro subscription is required.",
         request_id=request.state.request_id,
     )
 

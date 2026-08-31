@@ -20,8 +20,9 @@ Clerk Billing for the same subscription.
   must not erase a previously confirmed entitlement. A successful checkout is followed by a `getCustomerInfo()` refresh.
 - Use `CustomerInfo.managementURL` for subscription management. RevenueCat Billing returns its customer portal there;
   the React Native SDK's native `showManageSubscriptions()` method is not supported on Web/Electron.
-- The client entitlement makes the UI responsive. A future paid API operation must verify access independently in FastAPI;
-  it must never trust a client `isPro` boolean.
+- The client entitlement makes the UI responsive. Paid tutor calls are authorized independently in
+  FastAPI from fresh server-owned state derived only from the verified Clerk principal. The API never
+  accepts a client `isPro` boolean or submitted billing user ID.
 
 ## Public client configuration
 
@@ -105,10 +106,43 @@ purchases require an Expo development build; Expo Go is preview-only for this in
 - Every platform uses the same authenticated Clerk user ID so a single RevenueCat customer receives the same `pro`
   entitlement across devices.
 
+## Server authorization configuration
+
+The FastAPI integration is disabled by default. Server-only values belong in the ignored root `.env`
+for local development and Secret Manager in deployed environments; never prefix them with
+`EXPO_PUBLIC_`:
+
+```dotenv
+GLIDELINGO_REVENUECAT_ENABLED=false
+GLIDELINGO_REVENUECAT_ENVIRONMENT=SANDBOX
+GLIDELINGO_REVENUECAT_API_KEY=
+GLIDELINGO_REVENUECAT_PSEUDONYM_KEY=
+GLIDELINGO_REVENUECAT_WEBHOOK_AUTHORIZATION=
+GLIDELINGO_REVENUECAT_WEBHOOK_SIGNING_SECRET=
+```
+
+Create separate sandbox and production webhook integrations in RevenueCat. Set the dashboard
+Authorization value to exactly `GLIDELINGO_REVENUECAT_WEBHOOK_AUTHORIZATION`, enable RevenueCat HMAC
+signing, and store the one-time signing secret as `GLIDELINGO_REVENUECAT_WEBHOOK_SIGNING_SECRET`.
+Point the selected-environment integration to `POST /v1/billing/revenuecat/webhook`. RevenueCat signs
+the exact raw body as `<unix_timestamp>.<raw_json_body>`; the API requires both credentials, applies a
+five-minute signature tolerance, rejects oversized or invalid payloads, deduplicates event IDs, and
+ignores events from the other store environment.
+
+`GET /v1/billing/entitlements/pro` requires a valid Clerk session. It returns only the authenticated
+principal's server view and reconciles missing or stale state through RevenueCat's server API with a
+bounded timeout. Active state is fresh for 15 minutes by default. Missing, expired, stale, provider-
+unavailable, or database-unavailable state always fails closed. The paid tutor route returns the
+stable `403 pro_required` error before creating a guard row or calling the private tutor.
+
+Apply `backend/migrations/002_revenuecat_entitlements.sql` with the migration operator and schedule
+`maintenance_revenuecat_webhooks.sql` with a separate delete-capable maintenance identity before
+enabling this integration.
+
 ## Deferred production work
 
 - Apple App Store and Google Play billing products and prices.
-- RevenueCat webhooks, server-owned entitlement persistence, reconciliation, and paid API authorization.
+- Production RevenueCat Billing/Stripe web configuration, live prices, webhooks, and secret provisioning.
 - Remote paywalls, analytics, trials, and launch copy.
 - Account deletion and subscription-management policy/copy required for store release.
 

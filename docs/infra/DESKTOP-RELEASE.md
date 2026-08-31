@@ -9,7 +9,7 @@ GlideLingo's first desktop channel is a direct macOS download, not the Mac App S
 - SHA-256 checksums;
 - a signed and notarized `GlideLingo.app` containing both x64 and arm64 code.
 
-Expo exports the shared web renderer. Electron packages that renderer and restricts packaged API requests to the origin derived from `EXPO_PUBLIC_API_BASE_URL`. `npm run desktop:release` fails before packaging when production HTTPS or notarization configuration is missing, and electron-builder fails when it cannot produce a real Developer ID signature.
+Expo exports the shared web renderer. Electron packages that renderer and restricts packaged API and Clerk requests to the exact origins validated from the release environment and embedded in the package metadata. `npm run desktop:release` fails before packaging when the production API, Clerk, RevenueCat Web, or notarization configuration is missing, and electron-builder fails when it cannot produce a real Developer ID signature.
 
 The post-sign hook applies a final metadata-preserving signature to the combined universal bundle, verifies it, and only then invokes Apple's notarization service and staples the returned ticket. This preserves Electron's per-process entitlements while preventing an invalid universal signature from reaching Apple.
 
@@ -51,17 +51,22 @@ repository-level secrets:
 | `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password created for GlideLingo notarization |
 | `APPLE_TEAM_ID` | Personal Stefanos Sophocleous Apple Developer Team ID |
 
-Configure this environment variable on `desktop-release-signing`:
+Configure these environment variables on `desktop-release-signing`. They are public client values,
+not secrets, but the protected environment keeps the complete release configuration under the same
+approval boundary as signing:
 
 | Name | Value |
 | --- | --- |
 | `GLIDELINGO_PRODUCTION_API_ORIGIN` | Public HTTPS FastAPI base URL used by the production client |
+| `GLIDELINGO_PRODUCTION_CLERK_ORIGIN` | Exact HTTPS Clerk frontend origin allowed by the packaged shell |
+| `GLIDELINGO_CLERK_PUBLISHABLE_KEY` | Clerk public production publishable key for that exact frontend origin |
+| `GLIDELINGO_REVENUECAT_WEB_API_KEY` | RevenueCat public Web SDK key used by Electron |
 
 On macOS, `base64 < file | pbcopy` copies a file's encoded value without writing another secret file. Keep the originals in an approved secure location until credential rotation, then remove unsecured copies.
 
 ## Build and publish
 
-For a signed local build, install the Developer ID identity in the login keychain, expose one supported notarization credential set in the environment, set `EXPO_PUBLIC_API_BASE_URL`, and run:
+For a signed local build, install the Developer ID identity in the login keychain, expose one supported notarization credential set, set `EXPO_PUBLIC_API_BASE_URL`, `GLIDELINGO_CLERK_ORIGIN`, `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`, and `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY`, and run:
 
 ```bash
 npm run desktop:release
@@ -110,10 +115,12 @@ release in draft state and contains no publish step. Do not publish the draft or
 clean-Mac evidence and an authorized approval. Until then, the landing page remains in its
 explicit disabled state.
 
-During later integration with the authentication PR, preserve its corrected desktop origin and
-OAuth contract exactly: FastAPI CORS must allow `glidelingo://app`, and Electron must use the
-system browser for OAuth. Do not replace either behavior with a wildcard origin or embedded
-authentication window when resolving merge conflicts.
+The authentication integration preserves the corrected desktop origin and OAuth contract:
+FastAPI CORS allows `glidelingo://app`, packaged Electron uses the system browser for OAuth, and
+the callback handler accepts only the exact application authority and bounded callback routes.
+The release command embeds only validated, exact API and Clerk origins in Electron package
+metadata; the default development origins remain exact as well. The public Clerk key must belong
+to the configured Clerk origin, and mock billing is rejected by release validation.
 
 ## Credential rotation and failure behavior
 

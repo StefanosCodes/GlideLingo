@@ -3,6 +3,7 @@ import {
   resolveApiRuntimeConfiguration,
   type ApiRuntimeConfiguration,
 } from '@/config/api';
+import { getApiAuthorizationHeader } from '@/api/auth-token';
 
 const DEFAULT_TIMEOUT_MS = 9_000;
 
@@ -101,8 +102,12 @@ export async function getJson<T>({
   }, timeoutMs);
 
   try {
+    const authorizationHeader = await getApiAuthorizationHeader();
     const response = await fetch(requestUrl, {
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        ...authorizationHeader,
+      },
       method: 'GET',
       signal: controller.signal,
     });

@@ -97,6 +97,9 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
           EXPO_PUBLIC_API_BASE_URL: ${{ vars.GLIDELINGO_PRODUCTION_API_ORIGIN }}
+          EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.GLIDELINGO_CLERK_PUBLISHABLE_KEY }}
+          EXPO_PUBLIC_REVENUECAT_WEB_API_KEY: ${{ vars.GLIDELINGO_REVENUECAT_WEB_API_KEY }}
+          GLIDELINGO_CLERK_ORIGIN: ${{ vars.GLIDELINGO_PRODUCTION_CLERK_ORIGIN }}
           GLIDELINGO_DESKTOP_RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
         run: npm run desktop:release
       - name: Verify signature, notarization, and architecture

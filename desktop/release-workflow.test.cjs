@@ -245,5 +245,8 @@ test('workflow keeps all Apple credentials out of preflight validation', () => {
   assert.doesNotMatch(validationJob, /secrets\./);
   assert.match(workflow, /needs: validate/);
   assert.match(workflow, /environment: desktop-release-signing/);
+  assert.match(workflow, /EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: \$\{\{ vars\.GLIDELINGO_CLERK_PUBLISHABLE_KEY \}\}/);
+  assert.match(workflow, /EXPO_PUBLIC_REVENUECAT_WEB_API_KEY: \$\{\{ vars\.GLIDELINGO_REVENUECAT_WEB_API_KEY \}\}/);
+  assert.match(workflow, /GLIDELINGO_CLERK_ORIGIN: \$\{\{ vars\.GLIDELINGO_PRODUCTION_CLERK_ORIGIN \}\}/);
   assert.doesNotMatch(workflow, /gh release create[\s\S]*--latest/);
 });

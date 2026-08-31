@@ -45,7 +45,8 @@ Run commands from this directory—the one containing `package.json`:
 | Clear mobile Metro state | `npm run start:clear` |
 | Clear desktop Metro state | `npm run desktop:clear` |
 | Build a local macOS `.app` | `npm run desktop:package` |
-| Build unsigned universal macOS artifacts | `npm run desktop:dist` |
+| Verify unsigned universal macOS packaging | `npm run desktop:package:dry-run` |
+| Build configured macOS distribution artifacts | `npm run desktop:dist` |
 | Build a signed/notarized universal release | `npm run desktop:release` |
 
 The npm scripts are the source of truth for developers, CI, and Codex. `AGENTS.md` tells Codex when to use them, while `.codex/environments/environment.toml` exposes the common ones as one-click action buttons in the Codex desktop app.
@@ -152,10 +153,10 @@ npm run desktop:package
 open release/mac-arm64/GlideLingo.app
 ```
 
-Create unsigned universal DMG and ZIP artifacts for packaging checks:
+Create an unsigned universal `.app` for packaging checks:
 
 ```bash
-npm run desktop:dist
+npm run desktop:package:dry-run
 ```
 
 Create a public-release candidate only after the production API origin and Apple credentials are configured:
@@ -164,7 +165,7 @@ Create a public-release candidate only after the production API origin and Apple
 npm run desktop:release
 ```
 
-Generated artifacts are placed in `release/`. The release command refuses to build without an HTTPS production API origin, a real Developer ID signature, and complete notarization credentials. It produces one universal app for Intel and Apple Silicon Macs and embeds only the exact production API origin in Electron's Content Security Policy. See [`docs/infra/DESKTOP-RELEASE.md`](docs/infra/DESKTOP-RELEASE.md) for credential setup, GitHub secrets, verification, and publishing.
+Dry-run artifacts are placed in `release-dry-run/`; configured distribution and release artifacts use `release/`. The release command refuses to build without exact HTTPS production API and Clerk origins, public Clerk and RevenueCat Web keys, a real Developer ID signature, and complete notarization credentials. It produces one universal app for Intel and Apple Silicon Macs and embeds only the exact configured API and Clerk origins in Electron's Content Security Policy. See [`docs/infra/DESKTOP-RELEASE.md`](docs/infra/DESKTOP-RELEASE.md) for credential setup, GitHub configuration, verification, and publishing.
 
 ## Useful checks
 

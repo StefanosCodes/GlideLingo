@@ -17,6 +17,11 @@ extraResources:
   - from: ../dist
     to: dist
 
+protocols:
+  - name: GlideLingo authentication callback
+    schemes:
+      - glidelingo
+
 mac:
   category: public.app-category.education
   hardenedRuntime: true

@@ -15,6 +15,7 @@ import {
   nextLesson,
   streakDays,
 } from '@/constants/catalog';
+import { mergeLegacyLearning, persistLegacyLearningImport } from '@/providers/learning-migration';
 
 const STORAGE_KEY = 'glidelingo-learning';
 const DEFAULT_LANGUAGE: LanguageId = 'el';
@@ -39,11 +40,15 @@ type LearningContextValue = {
   streakDays: number;
   completedModuleIds: string[];
   completedLessonIds: string[];
+  legacyProgressAvailable: boolean;
+  legacyProgressError: string | null;
   setLanguage: (id: LanguageId) => void;
   startCourse: (courseId: string) => boolean;
   focusModule: (moduleId: string | null) => void;
   openLesson: (lessonId: string | null) => void;
   completeLesson: (lessonId: string) => void;
+  dismissLegacyProgress: () => void;
+  importLegacyProgress: () => void;
 };
 
 const LearningContext = createContext<LearningContextValue | null>(null);
@@ -52,7 +57,7 @@ function isLanguageId(value: string): value is LanguageId {
   return value === 'el' || value === 'es' || value === 'fr';
 }
 
-function readStored(): StoredLearning {
+function readStored(storageKey: string): StoredLearning {
   const fallback: StoredLearning = {
     languageId: DEFAULT_LANGUAGE,
     enrolledByLanguage: {},
@@ -62,7 +67,7 @@ function readStored(): StoredLearning {
   if (Platform.OS !== 'web') return fallback;
 
   try {
-    const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
+    const raw = globalThis.localStorage?.getItem(storageKey);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw) as Partial<StoredLearning> & { completedModuleIds?: string[] };
     return {
@@ -75,8 +80,23 @@ function readStored(): StoredLearning {
   }
 }
 
-export function LearningProvider({ children }: PropsWithChildren) {
-  const [initial] = useState(() => readStored());
+function legacyProgressNeedsDecision(decisionKey: string) {
+  if (Platform.OS !== 'web') return false;
+  try {
+    return !globalThis.localStorage?.getItem(decisionKey) && Boolean(globalThis.localStorage?.getItem(STORAGE_KEY));
+  } catch {
+    return false;
+  }
+}
+
+export function LearningProvider({ children, storageScope }: PropsWithChildren<{ storageScope: string }>) {
+  const storageKey = `${STORAGE_KEY}:${storageScope}`;
+  const legacyDecisionKey = `${STORAGE_KEY}:legacy-decision:${storageScope}`;
+  const [initial] = useState(() => readStored(storageKey));
+  const [legacyProgressAvailable, setLegacyProgressAvailable] = useState(() =>
+    legacyProgressNeedsDecision(legacyDecisionKey),
+  );
+  const [legacyProgressError, setLegacyProgressError] = useState<string | null>(null);
   const [languageId, setLanguageId] = useState<LanguageId>(initial.languageId);
   const [enrolledByLanguage, setEnrolledByLanguage] = useState<Partial<Record<LanguageId, string>>>(
     initial.enrolledByLanguage,
@@ -89,13 +109,13 @@ export function LearningProvider({ children }: PropsWithChildren) {
     if (Platform.OS !== 'web') return;
     try {
       globalThis.localStorage?.setItem(
-        STORAGE_KEY,
+        storageKey,
         JSON.stringify({ languageId, enrolledByLanguage, completedLessonIds } satisfies StoredLearning),
       );
     } catch {
       // Session still works without persistence.
     }
-  }, [completedLessonIds, enrolledByLanguage, languageId]);
+  }, [completedLessonIds, enrolledByLanguage, languageId, storageKey]);
 
   const language = getLanguage(languageId);
   const courses = getCoursesForLanguage(languageId);
@@ -151,6 +171,51 @@ export function LearningProvider({ children }: PropsWithChildren) {
     setCompletedLessonIds((current) => (current.includes(lessonId) ? current : [...current, lessonId]));
   }, []);
 
+  const dismissLegacyProgress = useCallback(() => {
+    setLegacyProgressError(null);
+    setLegacyProgressAvailable(false);
+    try {
+      globalThis.localStorage?.setItem(legacyDecisionKey, 'dismissed');
+    } catch {
+      // The current session remains isolated even if the decision cannot persist.
+    }
+  }, [legacyDecisionKey]);
+
+  const importLegacyProgress = useCallback(() => {
+    if (Platform.OS !== 'web') return;
+
+    const legacy = readStored(STORAGE_KEY);
+    const merged = mergeLegacyLearning(
+      { languageId, enrolledByLanguage, completedLessonIds },
+      legacy,
+    );
+    const storage = globalThis.localStorage;
+    if (!storage) {
+      setLegacyProgressError('Progress could not be saved in this browser. Nothing was removed.');
+      return;
+    }
+
+    try {
+      persistLegacyLearningImport(storage, {
+        decisionKey: legacyDecisionKey,
+        destinationKey: storageKey,
+        legacyKey: STORAGE_KEY,
+        merged,
+      });
+    } catch {
+      setLegacyProgressError('Progress could not be saved in this browser. Nothing was removed.');
+      return;
+    }
+
+    setLanguageId(merged.languageId);
+    setEnrolledByLanguage(merged.enrolledByLanguage);
+    setCompletedLessonIds(merged.completedLessonIds);
+    setFocusedModuleId(null);
+    setActiveLessonId(null);
+    setLegacyProgressError(null);
+    setLegacyProgressAvailable(false);
+  }, [completedLessonIds, enrolledByLanguage, languageId, legacyDecisionKey, storageKey]);
+
   const value = useMemo<LearningContextValue>(
     () => ({
       language,
@@ -166,11 +231,15 @@ export function LearningProvider({ children }: PropsWithChildren) {
       streakDays,
       completedModuleIds,
       completedLessonIds,
+      legacyProgressAvailable,
+      legacyProgressError,
       setLanguage,
       startCourse,
       focusModule,
       openLesson,
       completeLesson,
+      dismissLegacyProgress,
+      importLegacyProgress,
     }),
     [
       activeLessonId,
@@ -178,15 +247,19 @@ export function LearningProvider({ children }: PropsWithChildren) {
       completedLessonIds,
       completedModuleIds,
       courses,
+      dismissLegacyProgress,
       enrolledCourse,
       focusedModuleId,
       focusModule,
       language,
       languageId,
+      legacyProgressAvailable,
+      legacyProgressError,
       lessonNow,
       moduleNow,
       openLesson,
       progress,
+      importLegacyProgress,
       setLanguage,
       startCourse,
     ],

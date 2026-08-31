@@ -34,6 +34,62 @@ function resolveProductionApiOrigin(value) {
   return url.origin;
 }
 
+function resolveProductionClerkOrigin(value) {
+  if (!value || value !== value.trim()) {
+    throw new Error('GLIDELINGO_CLERK_ORIGIN must be set to the production Clerk HTTPS origin.');
+  }
+
+  let url;
+
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('GLIDELINGO_CLERK_ORIGIN must be a valid absolute URL.');
+  }
+
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(
+      'GLIDELINGO_CLERK_ORIGIN must be an exact HTTPS origin without credentials or a path.',
+    );
+  }
+
+  return url.origin;
+}
+
+function requirePublicBuildKey(environment, name, pattern) {
+  const value = environment[name];
+  if (!value || value !== value.trim() || !pattern.test(value)) {
+    throw new Error(`${name} must be set to its public production SDK key.`);
+  }
+  return value;
+}
+
+function validatePublicBuildConfiguration(environment) {
+  const clerkPublishableKey = requirePublicBuildKey(
+    environment,
+    'EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY',
+    /^pk_(?:test|live)_[A-Za-z0-9_-]+$/,
+  );
+  const revenueCatWebApiKey = requirePublicBuildKey(
+    environment,
+    'EXPO_PUBLIC_REVENUECAT_WEB_API_KEY',
+    /^rcb_[A-Za-z0-9_-]+$/,
+  );
+
+  if (environment.EXPO_PUBLIC_ENABLE_MOCK_BILLING === 'true') {
+    throw new Error('Mock billing must remain disabled in a desktop release.');
+  }
+
+  return { clerkPublishableKey, revenueCatWebApiKey };
+}
+
 function hasCompleteGroup(environment, names) {
   const presentNames = names.filter((name) => Boolean(environment[name]));
 
@@ -80,10 +136,12 @@ function validateReleaseEnvironment(environment, platform = process.platform) {
   }
 
   const apiOrigin = resolveProductionApiOrigin(environment.EXPO_PUBLIC_API_BASE_URL);
+  const clerkOrigin = resolveProductionClerkOrigin(environment.GLIDELINGO_CLERK_ORIGIN);
+  validatePublicBuildConfiguration(environment);
   validateNotarizationCredentials(environment);
   validateReleaseTag(environment.GLIDELINGO_DESKTOP_RELEASE_TAG);
 
-  return { apiOrigin };
+  return { apiOrigin, clerkOrigin };
 }
 
 function runCommand(command, args, environment) {
@@ -102,7 +160,7 @@ function runCommand(command, args, environment) {
 }
 
 function buildDesktopRelease(environment = process.env) {
-  const { apiOrigin } = validateReleaseEnvironment(environment);
+  const { apiOrigin, clerkOrigin } = validateReleaseEnvironment(environment);
 
   runCommand('npm', ['run', 'desktop:export'], environment);
   runCommand(
@@ -119,6 +177,7 @@ function buildDesktopRelease(environment = process.env) {
       'never',
       '--config.forceCodeSigning=true',
       `--config.extraMetadata.glidelingoApiOrigin=${apiOrigin}`,
+      `--config.extraMetadata.glidelingoClerkOrigin=${clerkOrigin}`,
     ],
     environment,
   );
@@ -136,7 +195,9 @@ if (require.main === module) {
 module.exports = {
   DESKTOP_TAG_PREFIX,
   resolveProductionApiOrigin,
+  resolveProductionClerkOrigin,
   validateNotarizationCredentials,
+  validatePublicBuildConfiguration,
   validateReleaseEnvironment,
   validateReleaseTag,
 };

@@ -17,6 +17,7 @@ from agents import (
 from app.modules.lesson_tutor.context import LessonTutorContext
 from app.modules.lesson_tutor.prompt import PROMPT_VERSION, build_instructions
 from app.modules.lesson_tutor.schemas import TutorHistoryMessage
+from openai import AsyncOpenAI
 
 
 def _dynamic_instructions(
@@ -31,7 +32,8 @@ class OpenAILessonTutorAgent:
 
     def __init__(self, *, api_key: str, model: str) -> None:
         self._model = model
-        self._provider = OpenAIProvider(api_key=api_key, use_responses=True)
+        self._client = AsyncOpenAI(api_key=api_key, max_retries=0, timeout=20)
+        self._provider = OpenAIProvider(openai_client=self._client, use_responses=True)
         self._agent = Agent[LessonTutorContext](
             name="GlideLingo lesson tutor",
             instructions=_dynamic_instructions,
@@ -77,3 +79,8 @@ class OpenAILessonTutorAgent:
         if not isinstance(result.final_output, str):
             raise TypeError("Lesson tutor output was not text")
         return result.final_output
+
+    async def close(self) -> None:
+        """Release the shared provider HTTP client during application shutdown."""
+
+        await self._client.close()

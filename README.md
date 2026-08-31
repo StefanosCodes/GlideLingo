@@ -111,6 +111,14 @@ The committed local defaults work without an environment file. Copy `.env.exampl
 
 Open `/diagnostics` from the internal Prompt Kit screen to see the exact API origin, target platform, API reachability, and PostgreSQL readiness. Android emulators default to `10.0.2.2:8123`; iOS Simulator, web, and Electron development default to `localhost:8123`. A physical phone must receive an explicit reachable value such as `EXPO_PUBLIC_API_BASE_URL=http://192.168.1.20:8123` before Metro starts.
 
+### Page-aware lesson tutor
+
+The lesson tutor is implemented as one FastAPI-hosted OpenAI Agents SDK agent. The backend resolves authored lesson context from a whitelist, exposes only the current and preceding lesson steps, and keeps SDK types behind the OpenAI integration adapter. Conversation history remains in the client for the current lesson sitting only.
+
+Both feature flags are disabled by default. To use the tutor locally, set `EXPO_PUBLIC_LESSON_TUTOR_ENABLED=true`, `GLIDELINGO_LESSON_TUTOR_ENABLED=true`, and `OPENAI_API_KEY` before starting Expo and FastAPI. `GLIDELINGO_OPENAI_MODEL` defaults to `gpt-5.6-terra`. Never place the API key in an `EXPO_PUBLIC_` variable.
+
+Normal verification uses fake adapters and does not require a key. Run `npm run api:test:agent-live` only with the server feature flag and API key explicitly enabled; it executes the stable cases in `backend/evals/lesson_tutor/cases.json` against the configured model.
+
 Stop the project database without deleting its named volume:
 
 ```bash

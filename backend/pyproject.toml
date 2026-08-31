@@ -47,4 +47,5 @@ addopts = "--strict-config --strict-markers"
 testpaths = ["tests"]
 markers = [
   "integration: requires PostgreSQL; GLIDELINGO_DATABASE_URL overrides the local default",
+  "live_agent: requires explicit tutor flags and a live OPENAI_API_KEY",
 ]

@@ -43,6 +43,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
+        if lesson_tutor_agent is not None:
+            await lesson_tutor_agent.close()
         database_engine.dispose()
 
     application = FastAPI(

@@ -34,9 +34,7 @@ class LessonTutorTurnRequest(BaseModel):
     visible_step_index: int
     selected_choice: SelectedChoice | None = None
     message: TutorText
-    history: Annotated[list[TutorHistoryMessage], Field(max_length=8)] = Field(
-        default_factory=list
-    )
+    history: Annotated[list[TutorHistoryMessage], Field(max_length=8)] = Field(default_factory=list)
 
 
 class LessonTutorTurnResponse(BaseModel):

@@ -2,6 +2,12 @@
 
 # dependencies
 node_modules/
+backend/.venv/
+backend/.mypy_cache/
+backend/.pytest_cache/
+backend/.ruff_cache/
+__pycache__/
+*.py[cod]
 
 # Expo
 .expo/

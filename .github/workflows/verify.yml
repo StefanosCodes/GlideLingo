@@ -1,0 +1,63 @@
+name: Verify
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  client:
+    name: Expo and Electron
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run doctor
+      - run: npm run desktop:export
+
+  backend:
+    name: FastAPI and PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: glidelingo
+          POSTGRES_PASSWORD: ci_only
+          POSTGRES_USER: glidelingo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U glidelingo -d glidelingo"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      GLIDELINGO_DATABASE_URL: postgresql+psycopg://glidelingo:ci_only@localhost:5432/glidelingo
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          working-directory: backend
+      - run: npm run setup:backend
+      - run: npm run api:verify
+      - run: npm run api:test:integration
+      - run: npm run db:config

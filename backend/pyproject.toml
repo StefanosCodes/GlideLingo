@@ -1,0 +1,49 @@
+[project]
+name = "glidelingo-api"
+version = "0.1.0"
+description = "GlideLingo FastAPI service"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "fastapi[standard-no-fastapi-cloud-cli]>=0.116,<1",
+  "pydantic-settings>=2.10,<3",
+  "psycopg[binary]>=3.2,<4",
+  "sqlalchemy>=2.0,<3",
+]
+
+[dependency-groups]
+dev = [
+  "httpx2>=2,<3",
+  "mypy>=1.17,<2",
+  "pytest>=8.4,<9",
+  "ruff>=0.12,<1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.fastapi]
+entrypoint = "app.main:app"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "SIM", "UP"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["app", "tests"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers"
+testpaths = ["tests"]
+markers = [
+  "integration: requires PostgreSQL; GLIDELINGO_DATABASE_URL overrides the local default",
+]

@@ -16,8 +16,15 @@ GlideLingo/
 │   │   └── ui/               Design-system primitives
 │   ├── constants/            Theme tokens
 │   ├── hooks/                Shared hooks
+│   ├── api/                  Shared HTTP transport boundary
+│   ├── config/               Public runtime configuration
+│   ├── features/
+│   │   └── system-status/    Internal end-to-end diagnostics
 │   └── types/                Cross-cutting TypeScript declarations
 ├── desktop/                  Electron shell, tests, and builder config
+├── backend/                  FastAPI health/readiness service and tests
+├── infra/                    Local PostgreSQL Compose configuration
+├── .github/workflows/        Pull-request verification
 ├── assets/                   Client images, icons, and fonts
 ├── scripts/                  Diagnostics and project scripts
 ├── .agents/                  Repository-specific agent skills
@@ -66,7 +73,7 @@ GlideLingo/
 │   └── hooks/                        Only genuinely shared hooks
 │
 ├── desktop/                          Thin Electron host
-├── backend/                          Added with the first backend slice
+├── backend/                          Added by the full-stack walking skeleton
 │   ├── pyproject.toml
 │   ├── app/
 │   │   ├── main.py                   Composition root
@@ -75,7 +82,7 @@ GlideLingo/
 │   │   ├── db/                       Engine/session/base configuration
 │   │   ├── modules/                  Cohesive backend product modules
 │   │   └── integrations/             Identity, speech, model, storage adapters
-│   ├── migrations/                   Alembic migrations
+│   ├── migrations/                   Added with the first product schema
 │   └── tests/
 │       ├── unit/
 │       └── integration/

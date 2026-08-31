@@ -1,6 +1,6 @@
 # Local Development and Operations
 
-## Current command contract
+## Command contract
 
 Run every command from the Git root containing `package.json` and `AGENTS.md`.
 
@@ -9,6 +9,13 @@ Current client commands:
 | Goal | Command |
 | --- | --- |
 | Install locked Node dependencies | `npm ci` |
+| Install locked Python dependencies | `npm run setup:backend` |
+| Start local PostgreSQL | `npm run db:up` |
+| Stop PostgreSQL and preserve its data | `npm run db:down` |
+| Follow PostgreSQL logs | `npm run db:logs` |
+| Start FastAPI | `npm run api` |
+| Start database, API, and interactive Expo | `npm run dev` |
+| Start database, API, and Electron | `npm run dev:desktop` |
 | Start interactive Expo/Metro | `npm start` |
 | Start Android | `npm run android` |
 | Start iOS | `npm run ios` |
@@ -17,29 +24,11 @@ Current client commands:
 | Attach Electron to existing Metro | `npm run desktop:window` |
 | Diagnose the environment | `npm run diagnose` |
 | Run fast verification | `npm run verify` |
-| Run complete Expo/Electron verification | `npm run verify:full` |
+| Verify the backend without PostgreSQL | `npm run api:verify` |
+| Run static/full repository verification | `npm run verify:full` |
+| Add real PostgreSQL integration verification | `npm run verify:full-stack` |
 
-These commands exist today. Backend and database commands below are planned and should not be documented as runnable until their implementation lands.
-
-## Planned full-stack command contract
-
-When FastAPI and PostgreSQL are introduced, root npm scripts should remain the human, CI, and Codex entrypoint.
-
-Expected responsibilities:
-
-| Planned goal | Intended command shape |
-| --- | --- |
-| Install Python dependencies | `npm run setup:backend` |
-| Start local PostgreSQL | `npm run db:up` |
-| Stop local PostgreSQL without deleting data | `npm run db:down` |
-| Apply migrations | `npm run db:migrate` |
-| Start FastAPI with development reload | `npm run api` |
-| Start API, database, and interactive Expo | `npm run dev` |
-| Start API, database, and Electron | `npm run dev:desktop` |
-| Verify backend | `npm run api:verify` |
-| Verify the entire repository | `npm run verify:full` |
-
-Exact scripts become authoritative only when present in `package.json`. Documentation must call those scripts rather than duplicating their implementation.
+These root scripts are the source of truth for humans, CI, and coding agents. There is no migration command because this slice creates no product schema.
 
 ## Port ownership
 
@@ -50,7 +39,15 @@ Do not assume common ports are available. Before assigning or stopping a process
 3. Reuse it if it is the correct process.
 4. Choose an explicit project port when another project owns the default.
 
-Do not reserve `8000` or `5432` in documentation before implementation. Select and document GlideLingo's actual API and database ports after checking the developer environment, then keep those values consistent across scripts, examples, health checks, and client configuration.
+GlideLingo deliberately avoids ports already owned by other local projects:
+
+| Service | Default port | Binding |
+| --- | --- | --- |
+| Expo/Metro | `8081` | Existing Expo behavior |
+| FastAPI | `8123` | `0.0.0.0` so physical devices can connect |
+| PostgreSQL | `55433` | `127.0.0.1` only |
+
+Recheck ownership before stopping a listener. `GLIDELINGO_DB_PORT` may override the database host port, and `EXPO_PUBLIC_API_BASE_URL` may override the client API origin.
 
 ## Platform API addresses
 
@@ -72,7 +69,9 @@ Only public configuration may use Expo’s `EXPO_PUBLIC_*` variables. Secrets, s
 
 ## Environment files
 
-When environments are introduced:
+The backend reads the root `.env` file when present, and Docker Compose reads the same file. The committed local defaults require no file. Copy `.env.example` to `.env` only for explicit overrides, and keep `GLIDELINGO_DATABASE_URL`, `GLIDELINGO_DB_PORT`, and `GLIDELINGO_DB_PASSWORD` consistent.
+
+Environment rules:
 
 - Commit `.env.example` with names and safe examples only.
 - Ignore real `.env` files.
@@ -83,12 +82,12 @@ When environments are introduced:
 
 ## Health and readiness
 
-The future API should distinguish:
+The API distinguishes:
 
-- Liveness: the API process is running.
-- Readiness: required dependencies such as PostgreSQL are usable.
+- `GET /health/live`: the API process is running; it never queries PostgreSQL.
+- `GET /health/ready`: PostgreSQL accepts a cheap `SELECT 1`; unavailable dependencies return `503` with a stable, safe error envelope.
 
-Health checks should remain cheap and must not expose secrets or detailed infrastructure errors publicly.
+Every response includes a server-generated `X-Request-ID`. Health checks remain cheap and never expose credentials, SQL, connection hosts, or stack traces.
 
 ## Request correlation
 

@@ -6,7 +6,7 @@ This directory is the independently built, static marketing and macOS download s
 
 The website self-hosts the Satoshi variable display font and composes its typographic lockup with the approved monochrome GlideLingo bird SVG. Satoshi is distributed by Fontshare under the ITF Free Font License preserved at `licenses/Satoshi-ITF-FFL.txt`. Inter remains the body and interface typeface. Production pages make no third-party font requests.
 
-The product-demo frame intentionally uses the current application screenshot and a visible `Video coming soon` state until an approved first-party MP4 or WebM is supplied. It must not be replaced with a third-party embed. The Windows download card is likewise non-interactive until a signed Windows release has its own validated release contract.
+The product-demo frame intentionally uses the current application screenshot and a visible `Video coming soon` state until an approved first-party MP4 or WebM is supplied. It must not be replaced with a third-party embed. The Windows control is download-labeled for a consistent platform presentation but remains non-interactive and marked `Coming soon` until a signed Windows release has its own validated release contract.
 
 ## Local development
 
@@ -18,11 +18,11 @@ npx playwright install chromium webkit
 npm run dev
 ```
 
-Preview builds intentionally show `Mac release coming soon` when release variables are absent.
+Preview builds intentionally show a disabled `Download for Mac` control with a `Coming soon` status when release variables are absent.
 
 ## Release configuration
 
-Cloudflare Pages uses one build command, `npm run build`, for both supported production states. Set `PUBLIC_MAC_DOWNLOAD_STATE=disabled` to publish the explicit `Mac release coming soon` state. Set it to `active` only after a signed and notarized GitHub Release has passed its clean-Mac smoke test.
+Cloudflare Pages uses one build command, `npm run build`, for both supported production states. Set `PUBLIC_MAC_DOWNLOAD_STATE=disabled` to publish the explicit disabled Mac state. Set it to `active` only after a signed and notarized GitHub Release has passed its clean-Mac smoke test.
 
 | Variable | Value |
 | --- | --- |

@@ -190,6 +190,14 @@ a {
   text-decoration: none;
 }
 
+.button-platform-icon {
+  width: 19px;
+  height: 19px;
+  flex: none;
+  margin-right: 9px;
+  fill: currentColor;
+}
+
 .button-primary {
   color: var(--white);
   border-color: var(--black);
@@ -300,7 +308,6 @@ h3 {
   margin-top: 36px;
 }
 
-.availability-note,
 .release-meta {
   margin: 16px 0 0;
   color: var(--ink-faint);
@@ -555,10 +562,15 @@ h3 {
   font-size: 21px;
 }
 
-.platform-card-heading p {
-  margin: 5px 0 0;
+.platform-status {
+  display: block;
+  margin-top: 5px;
   color: rgb(255 255 255 / 64%);
   font-size: 13px;
+}
+
+.platform-status-ready {
+  color: var(--aqua);
 }
 
 .platform-icon {
@@ -578,14 +590,7 @@ h3 {
   height: 24px;
 }
 
-.platform-icon-mac svg {
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.7;
-}
-
+.platform-icon-apple svg,
 .platform-icon-windows svg {
   fill: currentColor;
 }

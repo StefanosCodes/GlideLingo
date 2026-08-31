@@ -31,7 +31,9 @@ assert.match(home, /brand-name/);
 assert.match(home, /data-video-state="awaiting-source"/);
 assert.match(home, /Video coming soon/);
 assert.match(home, /Platform availability/);
-assert.match(home, /Windows coming soon/);
+assert.match(home, /Download for Windows/);
+assert.match(home, /button-platform-icon-apple/);
+assert.doesNotMatch(home, /Apple silicon and Intel|Universal Mac app/);
 assert.doesNotMatch(home, /<script(?:\s|>)/i);
 assert.doesNotMatch(home, /<form(?:\s|>)/i);
 assert.doesNotMatch(home, /document\.cookie|localStorage|sessionStorage/i);
@@ -52,7 +54,7 @@ if (active) {
   assert.ok(home.includes(checksumUrl), 'Active output must contain the configured checksum URL.');
 } else {
   assert.match(home, /data-download-state="unavailable"/);
-  assert.match(home, /Mac release coming soon/);
+  assert.match(home, /Download for Mac/);
   assert.doesNotMatch(home, /releases\/download/);
 }
 

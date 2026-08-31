@@ -31,7 +31,7 @@ test('renders the complete landing page without third-party requests or horizont
 
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Language learning, redesigned.');
   await expect(page.getByRole('heading', { name: 'See the learning rhythm in motion.' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Take GlideLingo with you.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Choose your desktop.' })).toBeVisible();
   await expect(page.locator('.site-header .brand-symbol')).toHaveAttribute('src', '/brand/glidelingo-bird-black.svg');
   await expect(page.locator('.site-header .brand-name')).toHaveText('GlideLingo');
   await expect(page.locator('.site-header').getByText('Download for Mac')).toHaveCount(0);
@@ -39,8 +39,12 @@ test('renders the complete landing page without third-party requests or horizont
   await expect(page.getByLabel('Product demonstration video coming soon')).toBeVisible();
   await expect(page.locator('.download-lockup .brand-name')).toHaveText('GlideLingo');
   await expect(page.locator('.download-section')).toHaveCSS('background-color', 'rgb(11, 16, 32)');
+  await expect(page.locator('.button-platform-icon-apple')).toHaveCount(2);
   await expect(page.locator('[data-download-state="available"]')).toBeVisible();
-  await expect(page.locator('[data-platform-state="coming-soon"]')).toContainText('Windows coming soon');
+  await expect(page.locator('[data-platform-state="coming-soon"]')).toContainText('Download for Windows');
+  await expect(page.locator('[data-platform-state="coming-soon"] .button')).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.locator('body')).not.toContainText('Apple silicon and Intel');
+  await expect(page.locator('body')).not.toContainText('Universal Mac app');
   await expect(page.getByRole('link', { name: 'Download GlideLingo 0.1.0 for Mac' }).last()).toHaveAttribute(
     'href',
     downloadUrl,

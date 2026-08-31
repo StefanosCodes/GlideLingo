@@ -28,6 +28,10 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
   - Evidence-backed emotional behavior design for learning journeys, gamification, retention, and lifecycle messaging.
   - Separates learning outcomes, target behavior, emotional transitions, and business outcomes.
   - Maintains GlideLingo's calm-momentum principles, ethical guardrails, research ledger, and behavior brief format.
+- **Repository Skill (`.agents/skills/pr-integration-orchestrator/SKILL.md`)**:
+  - Reconstructs the live PR, branch, and worktree queue instead of relying on stale chat context.
+  - Builds dependency-safe merge waves, coordinates bounded parallel reviews, and rehearses integration in an isolated worktree.
+  - Separates code, integration, deployment, and feature-enablement readiness and keeps remote merges approval-gated.
 - **Portable Engineering Workflows (`~/.agents/skills/`)**:
   - `$dev-build-feature`: Implement or extend features using the inspect, decide, act, observe, verify loop.
   - `$dev-debug-issue`: Diagnose and fix runtime bugs with evidence, reproducible traces, and root-cause proof.
@@ -60,6 +64,7 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
 - Execute desktop tests: `npm run test:desktop`
 - Build a local macOS app: `npm run desktop:package`
 - Build desktop distribution artifacts: `npm run desktop:dist`
+- Build a signed and notarized universal macOS release: `npm run desktop:release`
 
 `package.json` scripts are the source of truth. Codex actions and documentation must call these scripts rather than duplicating command internals.
 
@@ -68,6 +73,7 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
 - Shared TypeScript/UI changes: run `npm run verify`.
 - Expo dependency or configuration changes: also run `npm run doctor`.
 - Electron runtime or packaging changes: also run `npm run test:desktop`, `npm run desktop:export`, and the relevant development or packaged smoke test.
+- Desktop release changes: also produce a universal artifact and verify its signature, notarization ticket, Gatekeeper acceptance, and x64/arm64 slices. Never weaken `desktop:release` credential or HTTPS checks to make a build pass.
 - Full release verification: run `npm run verify:full`.
 - Backend changes: run `npm run api:verify`.
 - Database readiness or Compose changes: also run `npm run verify:full-stack`.

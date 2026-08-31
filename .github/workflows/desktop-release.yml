@@ -1,0 +1,130 @@
+name: Desktop Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact 40-character commit SHA already reviewed and reachable from main
+        required: true
+        type: string
+      release_tag:
+        description: Existing protected desktop-v<version> tag pointing to commit_sha
+        required: true
+        type: string
+  push:
+    tags:
+      - desktop-v*
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate reviewed release commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      commit_sha: ${{ steps.selection.outputs.commit_sha }}
+      release_tag: ${{ steps.selection.outputs.release_tag }}
+      version: ${{ steps.selection.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+          ref: main
+      - name: Fetch complete main history and protected release tags
+        run: git fetch --force origin main:refs/remotes/origin/main --tags
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Validate release selection before secrets are available
+        id: selection
+        env:
+          GLIDELINGO_EVENT_NAME: ${{ github.event_name }}
+          GLIDELINGO_EVENT_SHA: ${{ github.sha }}
+          GLIDELINGO_REF_NAME: ${{ github.ref_name }}
+          GLIDELINGO_REF_TYPE: ${{ github.ref_type }}
+          GLIDELINGO_SELECTED_COMMIT: ${{ inputs.commit_sha }}
+          GLIDELINGO_SELECTED_TAG: ${{ inputs.release_tag }}
+        run: node desktop/release-workflow.cjs validate-selection
+      - name: Check out the validated release commit
+        env:
+          GLIDELINGO_RELEASE_COMMIT: ${{ steps.selection.outputs.commit_sha }}
+        run: git checkout --detach "$GLIDELINGO_RELEASE_COMMIT"
+      - run: npm ci
+      - run: npm run verify
+
+  sign:
+    name: Sign, notarize, and stage macOS draft
+    needs: validate
+    runs-on: macos-15
+    timeout-minutes: 45
+    environment: desktop-release-signing
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+          ref: ${{ needs.validate.outputs.commit_sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Revalidate release selection after environment approval
+        env:
+          GLIDELINGO_EVENT_NAME: workflow_dispatch
+          GLIDELINGO_SELECTED_COMMIT: ${{ needs.validate.outputs.commit_sha }}
+          GLIDELINGO_SELECTED_TAG: ${{ needs.validate.outputs.release_tag }}
+        run: |
+          git fetch --force origin main:refs/remotes/origin/main --tags
+          node desktop/release-workflow.cjs validate-selection
+      - run: npm ci
+      - name: Build signed and notarized universal app
+        env:
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          EXPO_PUBLIC_API_BASE_URL: ${{ vars.GLIDELINGO_PRODUCTION_API_ORIGIN }}
+          EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.GLIDELINGO_CLERK_PUBLISHABLE_KEY }}
+          EXPO_PUBLIC_REVENUECAT_WEB_API_KEY: ${{ vars.GLIDELINGO_REVENUECAT_WEB_API_KEY }}
+          GLIDELINGO_CLERK_ORIGIN: ${{ vars.GLIDELINGO_PRODUCTION_CLERK_ORIGIN }}
+          GLIDELINGO_DESKTOP_RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
+        run: npm run desktop:release
+      - name: Verify signature, notarization, and architecture
+        run: |
+          codesign --verify --deep --strict --verbose=2 release/mac-universal/GlideLingo.app
+          spctl --assess --type execute --verbose=4 release/mac-universal/GlideLingo.app
+          xcrun stapler validate release/mac-universal/GlideLingo.app
+          ARCHITECTURES="$(lipo -archs release/mac-universal/GlideLingo.app/Contents/MacOS/GlideLingo)"
+          grep -qw x86_64 <<< "$ARCHITECTURES"
+          grep -qw arm64 <<< "$ARCHITECTURES"
+      - name: Create and verify the exact release assets
+        run: |
+          node desktop/release-workflow.cjs write-checksums release
+          node desktop/release-workflow.cjs validate-assets release
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: GlideLingo-macOS-${{ needs.validate.outputs.commit_sha }}
+          path: |
+            release/GlideLingo-${{ needs.validate.outputs.version }}-universal.dmg
+            release/GlideLingo-${{ needs.validate.outputs.version }}-universal.zip
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+      - name: Converge the GitHub release to an exact draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GLIDELINGO_RELEASE_COMMIT: ${{ needs.validate.outputs.commit_sha }}
+          GLIDELINGO_RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
+        run: node desktop/release-workflow.cjs stage-draft release

@@ -14,6 +14,8 @@ const {
   parseAuthCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
+  validateProductionApiOrigin,
+  validateProductionClerkOrigin,
 } = require('./runtime.cjs');
 
 test('authentication popups are restricted to Clerk, Google, and Apple HTTPS origins', () => {
@@ -114,4 +116,71 @@ test('navigation stays in the renderer and only HTTPS links may open externally'
   assert.equal(isSafeExternalUrl('https://docs.expo.dev/'), true);
   assert.equal(isSafeExternalUrl('http://example.com/'), false);
   assert.equal(isSafeExternalUrl('javascript:alert(1)'), false);
+});
+
+test('packaged API access is restricted to one exact HTTPS origin', () => {
+  assert.equal(
+    validateProductionApiOrigin('https://api.glidelingo.com'),
+    'https://api.glidelingo.com',
+  );
+  assert.equal(
+    validateProductionApiOrigin('https://api.glidelingo.com:8443'),
+    'https://api.glidelingo.com:8443',
+  );
+
+  for (const value of [
+    undefined,
+    '',
+    'http://api.glidelingo.com',
+    'https://user@example.com',
+    'https://api.glidelingo.com/v1',
+    'https://api.glidelingo.com?debug=true',
+    ' https://api.glidelingo.com',
+  ]) {
+    assert.throws(() => validateProductionApiOrigin(value));
+  }
+});
+
+test('packaged Clerk access is restricted to one exact HTTPS origin', () => {
+  assert.equal(
+    validateProductionClerkOrigin('https://clerk.glidelingo.com'),
+    'https://clerk.glidelingo.com',
+  );
+  for (const value of [
+    undefined,
+    '',
+    'http://clerk.glidelingo.com',
+    'https://user@clerk.glidelingo.com',
+    'https://clerk.glidelingo.com/path',
+  ]) {
+    assert.throws(() => validateProductionClerkOrigin(value));
+  }
+});
+
+test('packaged CSP permits only the configured API and Clerk origins', () => {
+  const policy = buildContentSecurityPolicy({
+    apiOrigin: 'https://api.glidelingo.com',
+    clerkOrigin: 'https://clerk.glidelingo.com',
+  });
+  const connectDirective = policy
+    .split('; ')
+    .find((directive) => directive.startsWith('connect-src'));
+  assert.match(connectDirective, /https:\/\/api\.glidelingo\.com/);
+  assert.match(connectDirective, /https:\/\/clerk\.glidelingo\.com/);
+  assert.doesNotMatch(policy, new RegExp(PRODUCTION_API_ORIGIN.replaceAll('.', '\\.')));
+  assert.doesNotMatch(policy, new RegExp(PRODUCTION_CLERK_ORIGIN.replaceAll('.', '\\.')));
+  assert.equal(
+    isAllowedAuthWindowUrl(
+      'https://clerk.glidelingo.com/v1/oauth_callback',
+      'https://clerk.glidelingo.com',
+    ),
+    true,
+  );
+  assert.equal(
+    isAllowedAuthWindowUrl(
+      'https://vast-gator-9531.clerk.accounts.dev/v1/oauth_callback',
+      'https://clerk.glidelingo.com',
+    ),
+    false,
+  );
 });

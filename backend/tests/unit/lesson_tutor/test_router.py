@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from pathlib import Path
 from typing import cast
 from uuid import UUID
 
@@ -37,8 +38,14 @@ class FakeAgent:
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    application = create_app(Settings(_env_file=None))
-    application.state.lesson_tutor_service = LessonTutorService(enabled=True, agent=FakeAgent())
+    application = create_app(
+        Settings(_env_file=None),
+        lesson_tutor_service=LessonTutorService(
+            enabled=True,
+            agent=FakeAgent(),
+            content_root=Path(__file__).resolve().parents[4] / "content",
+        ),
+    )
     with TestClient(application) as test_client:
         yield test_client
 

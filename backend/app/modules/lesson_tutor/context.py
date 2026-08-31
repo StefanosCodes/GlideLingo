@@ -5,18 +5,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.errors import LessonContextNotFoundError
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 LESSON_FILES = {
-    "el-letters-1": REPOSITORY_ROOT
-    / "content"
-    / "courses"
-    / "en-el-GR"
-    / "missions"
-    / "el-letters-1.json",
+    "el-letters-1": Path("courses/en-el-GR/missions/el-letters-1.json"),
 }
 
 
@@ -42,6 +36,7 @@ class CheckBeat(BaseModel):
     prompt: str
     choices: list[str]
     answer: str
+    answer_aliases: list[str] = Field(default_factory=list, validation_alias="answerAliases")
     greek: str | None = None
 
 
@@ -69,6 +64,7 @@ class LessonTutorContext:
     visible_step_index: int
     model_visible_context: str
     canonical_answer: str | None
+    answer_disclosure_terms: tuple[str, ...]
     answer_attempted: bool
 
 
@@ -111,15 +107,23 @@ def _describe_beat(
 
 
 def load_lesson_context(
-    *, lesson_id: str, visible_step_index: int, selected_choice: str | None
+    *,
+    content_root: Path,
+    lesson_id: str,
+    visible_step_index: int,
+    selected_choice: str | None,
 ) -> LessonTutorContext:
     """Resolve a whitelisted lesson and expose only steps the learner can see."""
 
-    lesson_path = LESSON_FILES.get(lesson_id)
-    if lesson_path is None:
+    relative_lesson_path = LESSON_FILES.get(lesson_id)
+    if relative_lesson_path is None:
         raise LessonContextNotFoundError
 
-    lesson = AuthoredLesson.model_validate(json.loads(lesson_path.read_text(encoding="utf-8")))
+    lesson_path = content_root.resolve() / relative_lesson_path
+    try:
+        lesson = AuthoredLesson.model_validate(json.loads(lesson_path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError, ValidationError) as error:
+        raise LessonContextNotFoundError from error
     if lesson.lessonId != lesson_id or not 0 <= visible_step_index < len(lesson.beats):
         raise LessonContextNotFoundError
 
@@ -151,5 +155,10 @@ def load_lesson_context(
         visible_step_index=visible_step_index,
         model_visible_context="\n".join(lines),
         canonical_answer=current_beat.answer if isinstance(current_beat, CheckBeat) else None,
+        answer_disclosure_terms=(
+            tuple(dict.fromkeys((current_beat.answer, *current_beat.answer_aliases)))
+            if isinstance(current_beat, CheckBeat)
+            else ()
+        ),
         answer_attempted=validated_choice is not None,
     )

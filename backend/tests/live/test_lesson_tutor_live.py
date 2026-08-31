@@ -25,7 +25,12 @@ def test_live_lesson_tutor_case(case: dict[str, Any]) -> None:
         api_key=settings.openai_api_key.get_secret_value(),
         model=settings.openai_model,
     )
-    service = LessonTutorService(enabled=True, agent=agent)
+    service = LessonTutorService(
+        enabled=True,
+        agent=agent,
+        content_root=settings.lesson_content_root,
+        deadline_seconds=settings.lesson_tutor_deadline_seconds,
+    )
     lesson_id = str(case.get("lesson_id", "el-letters-1"))
     request = LessonTutorTurnRequest(
         conversation_id=uuid4(),

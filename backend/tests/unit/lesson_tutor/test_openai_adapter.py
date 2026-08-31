@@ -33,6 +33,7 @@ def test_adapter_runs_one_non_sensitive_bounded_turn(monkeypatch: MonkeyPatch) -
         visible_step_index=0,
         model_visible_context="Step 1 (current): hear α",
         canonical_answer=None,
+        answer_disclosure_terms=(),
         answer_attempted=False,
     )
 
@@ -60,4 +61,5 @@ def test_adapter_runs_one_non_sensitive_bounded_turn(monkeypatch: MonkeyPatch) -
     assert sdk_agent.model_settings.max_tokens == 400
     assert sdk_agent.model_settings.reasoning is not None
     assert sdk_agent.model_settings.reasoning.effort == "none"
+    assert sdk_agent.model_settings.timeout == 10
     assert sdk_agent.model_settings.store is False

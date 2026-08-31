@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - backend/**
+      - content/**
+      - .dockerignore
       - .github/workflows/deploy-development-api.yml
 
 permissions:
@@ -62,7 +64,7 @@ jobs:
         run: |
           set -euo pipefail
           image_tag="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_REPOSITORY}/${IMAGE_NAME}:${GITHUB_SHA}"
-          docker build --tag "${image_tag}" backend
+          docker build --file backend/Dockerfile --tag "${image_tag}" .
           docker push "${image_tag}"
           digest="$(gcloud artifacts docker images describe "${image_tag}" --format='value(image_summary.digest)')"
           echo "uri=${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_REPOSITORY}/${IMAGE_NAME}@${digest}" >> "${GITHUB_OUTPUT}"

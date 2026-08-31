@@ -36,6 +36,7 @@ def test_lesson_tutor_is_disabled_by_default() -> None:
     settings = Settings(_env_file=None)
 
     assert settings.lesson_tutor_enabled is False
+    assert settings.lesson_tutor_deadline_seconds == 12
     assert settings.openai_model == "gpt-5.6-terra"
     assert settings.openai_api_key is None
 

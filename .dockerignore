@@ -1,0 +1,17 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+.expo
+backend/.mypy_cache
+backend/.pytest_cache
+backend/.ruff_cache
+backend/.venv
+dist
+node_modules
+release
+web-build
+**/__pycache__
+**/*.pyc
+**/*.pyo

@@ -27,7 +27,11 @@ from app.modules.lesson_tutor.router import router as lesson_tutor_router
 from app.modules.lesson_tutor.service import LessonTutorService
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    lesson_tutor_service: LessonTutorService | None = None,
+) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings.log_level)
     database_engine = create_database_engine(settings)
@@ -36,7 +40,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             api_key=settings.openai_api_key.get_secret_value(),
             model=settings.openai_model,
         )
-        if settings.lesson_tutor_enabled and settings.openai_api_key is not None
+        if lesson_tutor_service is None
+        and settings.lesson_tutor_enabled
+        and settings.openai_api_key is not None
         else None
     )
 
@@ -53,9 +59,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.database_probe = create_database_probe(database_engine)
-    application.state.lesson_tutor_service = LessonTutorService(
+    application.state.lesson_tutor_service = lesson_tutor_service or LessonTutorService(
         enabled=settings.lesson_tutor_enabled,
         agent=lesson_tutor_agent,
+        content_root=settings.lesson_content_root,
+        deadline_seconds=settings.lesson_tutor_deadline_seconds,
     )
     application.add_exception_handler(
         DependencyUnavailableError,

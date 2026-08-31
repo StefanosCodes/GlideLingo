@@ -104,14 +104,16 @@
       "type": "check",
       "prompt": "Which letter is the a in father?",
       "choices": ["α", "ε", "ι"],
-      "answer": "α"
+      "answer": "α",
+      "answerAliases": ["alpha", "άλφα"]
     },
     {
       "type": "check",
       "prompt": "What sound does this make?",
       "greek": "να",
       "choices": ["ma", "na", "ne"],
-      "answer": "na"
+      "answer": "na",
+      "answerAliases": ["νά"]
     }
   ]
 }

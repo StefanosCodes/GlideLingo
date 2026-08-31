@@ -1,5 +1,6 @@
 """Typed application configuration loaded from the process environment."""
 
+from pathlib import Path
 from typing import Literal, Self
 from urllib.parse import urlsplit
 
@@ -35,6 +36,8 @@ class Settings(BaseSettings):
     database_statement_timeout_seconds: int = Field(default=3, ge=1, le=30)
     database_pool_recycle_seconds: int = Field(default=1800, ge=30)
     lesson_tutor_enabled: bool = False
+    lesson_tutor_deadline_seconds: float = Field(default=12.0, gt=0, le=14)
+    lesson_content_root: Path = Path("../content")
     openai_model: str = "gpt-5.6-terra"
     openai_api_key: SecretStr | None = Field(
         default=None,

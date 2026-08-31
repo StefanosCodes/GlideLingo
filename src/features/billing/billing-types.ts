@@ -1,6 +1,6 @@
 export const REVENUECAT_ENTITLEMENT_ID = 'pro';
 
-export type BillingMode = 'mock' | 'revenuecat';
+export type BillingMode = 'mock' | 'revenuecat' | 'unavailable';
 
 export type BillingStatus = 'signed-out' | 'loading' | 'free' | 'pro' | 'error';
 

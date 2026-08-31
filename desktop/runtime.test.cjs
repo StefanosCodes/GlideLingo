@@ -3,9 +3,14 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  PRODUCTION_API_ORIGIN,
+  PRODUCTION_CLERK_ORIGIN,
+  buildContentSecurityPolicy,
+  findAuthCallbackUrl,
   isAllowedAuthWindowUrl,
   isAllowedNavigation,
   isSafeExternalUrl,
+  parseAuthCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
 } = require('./runtime.cjs');
@@ -15,8 +20,31 @@ test('authentication popups are restricted to Clerk, Google, and Apple HTTPS ori
   assert.equal(isAllowedAuthWindowUrl('https://accounts.google.com/o/oauth2/v2/auth'), true);
   assert.equal(isAllowedAuthWindowUrl('https://appleid.apple.com/auth/authorize'), true);
   assert.equal(isAllowedAuthWindowUrl('https://clerk.accounts.dev.attacker.example/'), false);
+  assert.equal(isAllowedAuthWindowUrl('https://another-instance.clerk.accounts.dev/'), false);
   assert.equal(isAllowedAuthWindowUrl('http://accounts.google.com/'), false);
   assert.equal(isAllowedAuthWindowUrl('javascript:alert(1)'), false);
+});
+
+test('packaged CSP includes exact API and Clerk origins plus web checkout providers', () => {
+  const policy = buildContentSecurityPolicy();
+
+  assert.match(policy, new RegExp(PRODUCTION_API_ORIGIN.replaceAll('.', '\\.')));
+  assert.match(policy, new RegExp(PRODUCTION_CLERK_ORIGIN.replaceAll('.', '\\.')));
+  assert.match(policy, /https:\/\/js\.stripe\.com/);
+  assert.match(policy, /https:\/\/cdn\.paddle\.com/);
+  assert.doesNotMatch(policy, /\*\.clerk\.accounts\.dev/);
+});
+
+test('OS authentication callbacks require the exact app origin, route, and bounded parameters', () => {
+  const valid = 'glidelingo://app/sign-in?__clerk_status=verified&state=opaque';
+
+  assert.equal(parseAuthCallbackUrl(valid), valid);
+  assert.equal(findAuthCallbackUrl(['/Applications/GlideLingo.app', valid]), valid);
+  assert.equal(parseAuthCallbackUrl('glidelingo://other/sign-in?state=opaque'), null);
+  assert.equal(parseAuthCallbackUrl('glidelingo://app/progress?state=opaque'), null);
+  assert.equal(parseAuthCallbackUrl('https://app/sign-in?state=opaque'), null);
+  assert.equal(parseAuthCallbackUrl('glidelingo://app/sign-in?state=one&state=two'), null);
+  assert.equal(parseAuthCallbackUrl(`glidelingo://app/sign-in?state=${'x'.repeat(3000)}`), null);
 });
 
 test('development renderer URL is restricted to the local Expo server', () => {

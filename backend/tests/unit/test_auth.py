@@ -13,7 +13,7 @@ from jwt import PyJWK
 from jwt.algorithms import RSAAlgorithm
 from jwt.exceptions import PyJWKClientError
 
-from app.auth.clerk import ClerkTokenVerifier
+from app.auth.clerk import ClerkTokenVerifier, InvalidClerkTokenError
 from app.core.config import Settings
 from app.main import create_app
 
@@ -22,6 +22,7 @@ JWKS_URL = f"{ISSUER}/.well-known/jwks.json"
 AUDIENCE = "glidelingo-api"
 KEY_ID = "test-clerk-key"
 USER_ID = "user_test_123"
+AUTHORIZED_PARTY = "https://app.glidelingo.test"
 
 
 @dataclass(frozen=True)
@@ -63,12 +64,14 @@ def client(signing_material: SigningMaterial) -> Iterator[TestClient]:
             clerk_issuer=ISSUER,
             clerk_jwks_url=JWKS_URL,
             clerk_audience=AUDIENCE,
+            clerk_authorized_parties=(AUTHORIZED_PARTY,),
         )
     )
     application.state.clerk_token_verifier = ClerkTokenVerifier(
         issuer=ISSUER,
         jwks_url=JWKS_URL,
         audience=AUDIENCE,
+        authorized_parties=(AUTHORIZED_PARTY,),
         signing_key_client=StaticSigningKeyClient(signing_material.public_jwk),
     )
     with TestClient(application) as test_client:
@@ -84,6 +87,7 @@ def create_token(
     now = datetime.now(UTC)
     claims: dict[str, object] = {
         "aud": AUDIENCE,
+        "azp": AUTHORIZED_PARTY,
         "exp": now + timedelta(minutes=5),
         "iat": now,
         "iss": ISSUER,
@@ -184,6 +188,31 @@ def test_wrong_audience_is_unauthorized(
     assert_unauthorized(response)
 
 
+def test_untrusted_authorized_party_is_unauthorized(
+    client: TestClient,
+    signing_material: SigningMaterial,
+) -> None:
+    token = create_token(
+        signing_material,
+        claim_overrides={"azp": "https://attacker.example"},
+    )
+
+    response = authenticated_get(client, token)
+
+    assert_unauthorized(response)
+
+
+def test_malformed_authorized_party_is_unauthorized(
+    client: TestClient,
+    signing_material: SigningMaterial,
+) -> None:
+    token = create_token(signing_material, claim_overrides={"azp": [AUTHORIZED_PARTY]})
+
+    response = authenticated_get(client, token)
+
+    assert_unauthorized(response)
+
+
 def test_standard_session_token_without_audience_is_accepted(
     signing_material: SigningMaterial,
 ) -> None:
@@ -191,13 +220,29 @@ def test_standard_session_token_without_audience_is_accepted(
         issuer=ISSUER,
         jwks_url=JWKS_URL,
         audience=None,
+        authorized_parties=(AUTHORIZED_PARTY,),
         signing_key_client=StaticSigningKeyClient(signing_material.public_jwk),
     )
-    token = create_token(signing_material, claim_overrides={"aud": None})
+    token = create_token(signing_material, claim_overrides={"aud": None, "azp": None})
 
     # PyJWT omits audience validation when the API has not configured one. The
     # issuer, signature, expiry, and subject remain mandatory.
     assert verifier.verify(token).user_id == USER_ID
+
+
+def test_token_with_authorized_party_fails_closed_when_allowlist_is_empty(
+    signing_material: SigningMaterial,
+) -> None:
+    verifier = ClerkTokenVerifier(
+        issuer=ISSUER,
+        jwks_url=JWKS_URL,
+        audience=AUDIENCE,
+        authorized_parties=(),
+        signing_key_client=StaticSigningKeyClient(signing_material.public_jwk),
+    )
+
+    with pytest.raises(InvalidClerkTokenError):
+        verifier.verify(create_token(signing_material))
 
 
 def test_unconfigured_authentication_fails_closed() -> None:
@@ -237,6 +282,20 @@ def test_browser_preflight_allows_authorization_header(client: TestClient) -> No
 
     assert response.status_code == 200
     assert "Authorization" in response.headers["access-control-allow-headers"]
+
+
+def test_packaged_desktop_preflight_allows_its_exact_origin(client: TestClient) -> None:
+    response = client.options(
+        "/v1/auth/session",
+        headers={
+            "Origin": "glidelingo://app",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "glidelingo://app"
 
 
 def authenticated_get(client: TestClient, token: str) -> Response:

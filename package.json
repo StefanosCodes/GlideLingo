@@ -75,7 +75,7 @@
     "desktop:web:clear": "cross-env BROWSER=none expo start --web --localhost --port 8081 --clear",
     "desktop:window": "wait-on http-get://localhost:8081 && cross-env ELECTRON_RENDERER_URL=http://localhost:8081 electron desktop",
     "desktop:smoke": "cross-env ELECTRON_SMOKE_TEST=1 npm run desktop",
-    "desktop:export": "expo export --platform web",
+    "desktop:export": "cross-env EXPO_PUBLIC_API_BASE_URL=https://glidelingo-api-50843312405.us-west1.run.app expo export --platform web",
     "desktop:package": "npm run desktop:export && electron-builder --projectDir desktop --dir",
     "desktop:dist": "npm run desktop:export && electron-builder --projectDir desktop",
     "audio:estimate": "node --env-file-if-exists=.env scripts/course-audio/cli.mjs estimate",

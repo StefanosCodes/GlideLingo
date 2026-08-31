@@ -4,7 +4,7 @@ import { tokenCache } from '@clerk/expo/token-cache';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider as NavigationThemeProvider } from 'expo-router';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { setApiAccessTokenProvider } from '@/api/auth-token';
@@ -32,7 +32,10 @@ export default function RootLayout() {
   return (
     <AppThemeProvider>
       {publishableKey ? (
-        <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
+        <ClerkProvider
+          allowedRedirectProtocols={['glidelingo:']}
+          publishableKey={publishableKey}
+          tokenCache={tokenCache}>
           <ClerkApp />
         </ClerkProvider>
       ) : (
@@ -44,8 +47,15 @@ export default function RootLayout() {
 
 function ClerkApp() {
   const { getToken, isLoaded, isSignedIn, userId } = useAuth();
+  const getTokenRef = useRef(getToken);
+  useLayoutEffect(() => {
+    getTokenRef.current = getToken;
+  }, [getToken]);
 
-  useEffect(() => setApiAccessTokenProvider(() => getToken()), [getToken]);
+  useEffect(
+    () => setApiAccessTokenProvider(() => getTokenRef.current()),
+    [],
+  );
 
   const signedIn = isLoaded && isSignedIn && Boolean(userId);
 
@@ -85,6 +95,7 @@ function AppNavigation({ signedIn }: { signedIn: boolean }) {
     <NavigationThemeProvider value={navigationTheme}>
       <AnimatedSplashOverlay />
       <Stack screenOptions={{ contentStyle: { backgroundColor: colors.background }, headerShown: false }}>
+        <Stack.Screen name="sso-callback" />
         <Stack.Protected guard={!signedIn}>
           <Stack.Screen name="(auth)" />
         </Stack.Protected>

@@ -15,7 +15,7 @@ import {
   nextLesson,
   streakDays,
 } from '@/constants/catalog';
-import { mergeLegacyLearning } from '@/providers/learning-migration';
+import { mergeLegacyLearning, persistLegacyLearningImport } from '@/providers/learning-migration';
 
 const STORAGE_KEY = 'glidelingo-learning';
 const DEFAULT_LANGUAGE: LanguageId = 'el';
@@ -41,6 +41,7 @@ type LearningContextValue = {
   completedModuleIds: string[];
   completedLessonIds: string[];
   legacyProgressAvailable: boolean;
+  legacyProgressError: string | null;
   setLanguage: (id: LanguageId) => void;
   startCourse: (courseId: string) => boolean;
   focusModule: (moduleId: string | null) => void;
@@ -95,6 +96,7 @@ export function LearningProvider({ children, storageScope }: PropsWithChildren<{
   const [legacyProgressAvailable, setLegacyProgressAvailable] = useState(() =>
     legacyProgressNeedsDecision(legacyDecisionKey),
   );
+  const [legacyProgressError, setLegacyProgressError] = useState<string | null>(null);
   const [languageId, setLanguageId] = useState<LanguageId>(initial.languageId);
   const [enrolledByLanguage, setEnrolledByLanguage] = useState<Partial<Record<LanguageId, string>>>(
     initial.enrolledByLanguage,
@@ -170,6 +172,7 @@ export function LearningProvider({ children, storageScope }: PropsWithChildren<{
   }, []);
 
   const dismissLegacyProgress = useCallback(() => {
+    setLegacyProgressError(null);
     setLegacyProgressAvailable(false);
     try {
       globalThis.localStorage?.setItem(legacyDecisionKey, 'dismissed');
@@ -186,19 +189,32 @@ export function LearningProvider({ children, storageScope }: PropsWithChildren<{
       { languageId, enrolledByLanguage, completedLessonIds },
       legacy,
     );
+    const storage = globalThis.localStorage;
+    if (!storage) {
+      setLegacyProgressError('Progress could not be saved in this browser. Nothing was removed.');
+      return;
+    }
+
+    try {
+      persistLegacyLearningImport(storage, {
+        decisionKey: legacyDecisionKey,
+        destinationKey: storageKey,
+        legacyKey: STORAGE_KEY,
+        merged,
+      });
+    } catch {
+      setLegacyProgressError('Progress could not be saved in this browser. Nothing was removed.');
+      return;
+    }
+
     setLanguageId(merged.languageId);
     setEnrolledByLanguage(merged.enrolledByLanguage);
     setCompletedLessonIds(merged.completedLessonIds);
     setFocusedModuleId(null);
     setActiveLessonId(null);
+    setLegacyProgressError(null);
     setLegacyProgressAvailable(false);
-    try {
-      globalThis.localStorage?.setItem(legacyDecisionKey, 'imported');
-      globalThis.localStorage?.removeItem(STORAGE_KEY);
-    } catch {
-      // State is imported for this session even if browser persistence is unavailable.
-    }
-  }, [completedLessonIds, enrolledByLanguage, languageId, legacyDecisionKey]);
+  }, [completedLessonIds, enrolledByLanguage, languageId, legacyDecisionKey, storageKey]);
 
   const value = useMemo<LearningContextValue>(
     () => ({
@@ -216,6 +232,7 @@ export function LearningProvider({ children, storageScope }: PropsWithChildren<{
       completedModuleIds,
       completedLessonIds,
       legacyProgressAvailable,
+      legacyProgressError,
       setLanguage,
       startCourse,
       focusModule,
@@ -237,6 +254,7 @@ export function LearningProvider({ children, storageScope }: PropsWithChildren<{
       language,
       languageId,
       legacyProgressAvailable,
+      legacyProgressError,
       lessonNow,
       moduleNow,
       openLesson,

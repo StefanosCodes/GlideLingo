@@ -15,6 +15,7 @@ import {
   type BillingSnapshot,
   type BillingStatus,
 } from '@/features/billing/billing-types';
+import { selectBillingMode } from '@/features/billing/billing-config';
 import {
   disconnectRevenueCatIdentity,
   hasRevenueCatApiKey,
@@ -29,7 +30,7 @@ import {
 const MOCK_PACKAGE: BillingPackage = {
   identifier: 'mock_pro',
   title: 'GlideLingo Pro preview',
-  description: 'Preview Pro locally before a RevenueCat Test Store key is configured.',
+  description: 'Preview Pro locally with the explicit development-only mock setting.',
   priceLabel: 'Mock purchase',
 };
 
@@ -57,16 +58,23 @@ type BillingProviderProps = PropsWithChildren<{
 const BillingContext = createContext<BillingContextValue | null>(null);
 
 function modeForEnvironment(): BillingMode {
-  return hasRevenueCatApiKey() ? 'revenuecat' : 'mock';
+  return selectBillingMode({
+    development: __DEV__,
+    hasApiKey: hasRevenueCatApiKey(),
+    mockBillingEnabled: process.env.EXPO_PUBLIC_ENABLE_MOCK_BILLING === 'true',
+  });
 }
 
 function emptyState(userId: string | null, mode = modeForEnvironment()): BillingState {
+  const unavailable = userId !== null && mode === 'unavailable';
   return {
     ownerUserId: userId,
     mode,
-    status: userId ? 'loading' : 'signed-out',
+    status: unavailable ? 'error' : userId ? 'loading' : 'signed-out',
     packages: [],
-    errorMessage: null,
+    errorMessage: unavailable
+      ? 'Subscriptions are unavailable because this build has no RevenueCat key.'
+      : null,
   };
 }
 
@@ -112,6 +120,8 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
       });
       return;
     }
+
+    if (mode === 'unavailable') return;
 
     void (async () => {
       try {
@@ -183,6 +193,10 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
       }));
       return;
     }
+    if (mode === 'unavailable') {
+      setState(emptyState(ownerUserId, mode));
+      return;
+    }
 
     setState((current) => ({ ...current, ownerUserId, mode, status: 'loading', errorMessage: null }));
     try {
@@ -199,8 +213,13 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
       if (!ownerUserId) return;
 
       setState((current) => ({ ...current, ownerUserId, status: 'loading', errorMessage: null }));
-      if (modeForEnvironment() === 'mock') {
+      const mode = modeForEnvironment();
+      if (mode === 'mock') {
         setState((current) => ({ ...current, ownerUserId, status: 'pro', errorMessage: null }));
+        return;
+      }
+      if (mode === 'unavailable') {
+        setState(emptyState(ownerUserId, mode));
         return;
       }
 
@@ -222,8 +241,13 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
     const ownerUserId = userIdRef.current;
     if (!ownerUserId) return;
 
-    if (modeForEnvironment() === 'mock') {
+    const mode = modeForEnvironment();
+    if (mode === 'mock') {
       setState((current) => ({ ...current, ownerUserId, errorMessage: null }));
+      return;
+    }
+    if (mode === 'unavailable') {
+      setState(emptyState(ownerUserId, mode));
       return;
     }
 

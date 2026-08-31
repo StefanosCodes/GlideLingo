@@ -7,9 +7,12 @@ const { app, BrowserWindow, net, protocol, session, shell } = require('electron'
 const {
   APP_HOST,
   APP_SCHEME,
+  buildContentSecurityPolicy,
+  findAuthCallbackUrl,
   isAllowedAuthWindowUrl,
   isAllowedNavigation,
   isSafeExternalUrl,
+  parseAuthCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
 } = require('./runtime.cjs');
@@ -17,19 +20,14 @@ const {
 const DEVELOPMENT_URL = validateDevelopmentUrl(process.env.ELECTRON_RENDERER_URL);
 const PRODUCTION_URL = `${APP_SCHEME}://${APP_HOST}/`;
 const RENDERER_URL = DEVELOPMENT_URL ?? PRODUCTION_URL;
-const CONTENT_SECURITY_POLICY = [
-  "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://*.clerk.accounts.dev",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://*.clerk.com https://*.clerk.accounts.dev https://img.clerk.com",
-  "font-src 'self' data:",
-  "connect-src 'self' https://*.clerk.accounts.dev https://api.clerk.com https://*.revenuecat.com wss://*.clerk.accounts.dev",
-  "media-src 'self' data: blob:",
-  "object-src 'none'",
-  "frame-src https://*.clerk.accounts.dev https://accounts.google.com https://appleid.apple.com",
-  "base-uri 'self'",
-  "form-action 'self' https://*.clerk.accounts.dev https://accounts.google.com https://appleid.apple.com",
-].join('; ');
+const CONTENT_SECURITY_POLICY = buildContentSecurityPolicy();
+let mainWindow = null;
+let pendingAuthCallbackUrl = findAuthCallbackUrl(process.argv);
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -105,6 +103,22 @@ function openExternalUrl(targetUrl) {
   }
 }
 
+function handleAuthCallback(targetUrl) {
+  const callbackUrl = parseAuthCallbackUrl(targetUrl);
+  if (!callbackUrl) return false;
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    pendingAuthCallbackUrl = callbackUrl;
+    return true;
+  }
+
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  void mainWindow.loadURL(callbackUrl);
+  return true;
+}
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1280,
@@ -123,9 +137,17 @@ function createWindow() {
   });
 
   window.once('ready-to-show', () => window.show());
+  mainWindow = window;
+  window.once('closed', () => {
+    if (mainWindow === window) mainWindow = null;
+  });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedAuthWindowUrl(url)) {
+      if (!DEVELOPMENT_URL) {
+        openExternalUrl(url);
+        return { action: 'deny' };
+      }
       return {
         action: 'allow',
         overrideBrowserWindowOptions: {
@@ -189,9 +211,37 @@ function createWindow() {
   }
 
   void window.loadURL(RENDERER_URL);
+
+  if (pendingAuthCallbackUrl) {
+    const callbackUrl = pendingAuthCallbackUrl;
+    pendingAuthCallbackUrl = null;
+    window.webContents.once('did-finish-load', () => handleAuthCallback(callbackUrl));
+  }
 }
 
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleAuthCallback(url);
+});
+
+app.on('second-instance', (_event, argv) => {
+  const callbackUrl = findAuthCallbackUrl(argv);
+  if (callbackUrl) {
+    handleAuthCallback(callbackUrl);
+    return;
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+});
+
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return;
+  if (app.isPackaged) {
+    app.setAsDefaultProtocolClient(APP_SCHEME);
+  }
   if (!DEVELOPMENT_URL) {
     await registerProductionProtocol();
   }

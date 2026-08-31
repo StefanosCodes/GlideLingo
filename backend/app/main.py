@@ -42,6 +42,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             issuer=clerk_configuration[0],
             jwks_url=clerk_configuration[1],
             audience=clerk_configuration[2],
+            authorized_parties=clerk_configuration[3],
         )
         if clerk_configuration is not None
         else None

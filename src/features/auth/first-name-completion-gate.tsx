@@ -1,4 +1,4 @@
-import { useUser } from '@clerk/expo';
+import { useClerk, useUser } from '@clerk/expo';
 import { type PropsWithChildren, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,11 +18,13 @@ import { useTheme } from '@/hooks/use-theme';
 
 import { authErrorMessage } from './auth-error-message';
 import { hasFirstName, normalizedFirstName } from './auth-profile';
+import { signOutFromProfileCompletion } from './profile-completion-session';
 
 const MAX_FIRST_NAME_LENGTH = 64;
 
 export function FirstNameCompletionGate({ children }: PropsWithChildren) {
   const theme = useTheme();
+  const { signOut } = useClerk();
   const { isLoaded, isSignedIn, user } = useUser();
   const [firstName, setFirstName] = useState('');
   const [saving, setSaving] = useState(false);
@@ -58,6 +60,17 @@ export function FirstNameCompletionGate({ children }: PropsWithChildren) {
     } catch (error) {
       setErrorMessage(authErrorMessage(error, 'We could not save your name. Please try again.'));
     } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUseAnotherAccount = async () => {
+    if (saving) return;
+    setSaving(true);
+    setErrorMessage(null);
+    const signOutError = await signOutFromProfileCompletion(() => signOut());
+    if (signOutError) {
+      setErrorMessage(signOutError);
       setSaving(false);
     }
   };
@@ -114,6 +127,14 @@ export function FirstNameCompletionGate({ children }: PropsWithChildren) {
             label={saving ? 'Saving…' : 'Continue'}
             onPress={() => void saveFirstName()}
             testID="save-first-name"
+          />
+          <GlideButton
+            disabled={saving}
+            fullWidth
+            label="Use another account"
+            onPress={() => void handleUseAnotherAccount()}
+            testID="profile-completion-sign-out"
+            variant="tertiary"
           />
           {errorMessage ? (
             <ThemedText accessibilityRole="alert" type="footnote" style={{ color: theme.danger }}>

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { selectRevenueCatApiKey } from '../billing-config.ts';
+import { selectBillingMode, selectRevenueCatApiKey } from '../billing-config.ts';
 
 test('uses the Test Store key only in development', () => {
   assert.equal(
@@ -40,4 +40,26 @@ test('selects a separate public key for each release platform', () => {
 
 test('treats empty values as unconfigured', () => {
   assert.equal(selectRevenueCatApiKey({ development: true, platform: 'web', testKey: '  ', webKey: '' }), undefined);
+});
+
+test('mock billing requires both development and an explicit opt-in', () => {
+  assert.equal(
+    selectBillingMode({ development: true, hasApiKey: false, mockBillingEnabled: true }),
+    'mock',
+  );
+  assert.equal(
+    selectBillingMode({ development: true, hasApiKey: false, mockBillingEnabled: false }),
+    'unavailable',
+  );
+});
+
+test('release billing fails closed when its platform key is missing', () => {
+  assert.equal(
+    selectBillingMode({ development: false, hasApiKey: false, mockBillingEnabled: true }),
+    'unavailable',
+  );
+  assert.equal(
+    selectBillingMode({ development: false, hasApiKey: true, mockBillingEnabled: false }),
+    'revenuecat',
+  );
 });

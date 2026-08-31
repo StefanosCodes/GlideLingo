@@ -26,10 +26,12 @@ EXPO_PUBLIC_REVENUECAT_TEST_API_KEY=
 EXPO_PUBLIC_REVENUECAT_IOS_API_KEY=
 EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY=
 EXPO_PUBLIC_REVENUECAT_WEB_API_KEY=
+EXPO_PUBLIC_ENABLE_MOCK_BILLING=true # development only
 ```
 
-The Test Store key overrides platform keys only in development. Release builds ignore it. Never expose a RevenueCat secret
-API key through `EXPO_PUBLIC_*`.
+The Test Store key overrides platform keys only in development. Mock access requires both a development bundle and the
+explicit `EXPO_PUBLIC_ENABLE_MOCK_BILLING=true` opt-in. A release build with no platform key fails closed and exposes no
+mock package or Pro state. Never expose a RevenueCat secret API key through `EXPO_PUBLIC_*`.
 
 ## RevenueCat dashboard setup
 
@@ -40,13 +42,16 @@ API key through `EXPO_PUBLIC_*`.
 5. Add the Test Store public SDK key locally and restart Metro.
 6. Sign in through Clerk, open `/subscription`, and test success, cancellation, failure, refresh, and sign-out/account switch.
 
-Without a public SDK key, the screen uses an in-memory mock package scoped to the current signed-in account. Real native
+With the explicit development-only mock flag and no public SDK key, the screen uses an in-memory mock package scoped to
+the current signed-in account. Without either a real key or that development opt-in, billing is unavailable. Real native
 purchases require an Expo development build; Expo Go is preview-only for this integration.
 
 ## Platform behavior
 
 - iOS and Android use their separate public SDK keys and native purchase/restore flows.
-- Browser and Electron use the web key. Electron follows the web path because it packages the Expo web bundle.
+- Browser and Electron use the web key. Electron follows the web path because it packages the Expo web bundle. Its CSP
+  includes the RevenueCat API/static endpoints and the Stripe/Paddle script, frame, form, and connection origins used by
+  RevenueCat Web checkout.
 - Web refreshes CustomerInfo rather than invoking the native restore API.
 - Every platform uses the same authenticated Clerk user ID so a single RevenueCat customer receives the same `pro`
   entitlement across devices.

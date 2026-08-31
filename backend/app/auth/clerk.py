@@ -35,11 +35,13 @@ class ClerkTokenVerifier:
         *,
         issuer: str,
         audience: str | None,
+        authorized_parties: tuple[str, ...],
         jwks_url: str,
         signing_key_client: ClerkSigningKeyClient | None = None,
     ) -> None:
         self._issuer = issuer
         self._audience = audience
+        self._authorized_parties = frozenset(authorized_parties)
         self._signing_key_client = signing_key_client or PyJWKClient(
             jwks_url,
             cache_keys=True,
@@ -71,6 +73,13 @@ class ClerkTokenVerifier:
 
         subject = claims.get("sub")
         if not isinstance(subject, str) or not subject.strip():
+            raise InvalidClerkTokenError
+
+        authorized_party = claims.get("azp")
+        if authorized_party is not None and (
+            not isinstance(authorized_party, str)
+            or authorized_party not in self._authorized_parties
+        ):
             raise InvalidClerkTokenError
         return ClerkPrincipal(user_id=subject)
 

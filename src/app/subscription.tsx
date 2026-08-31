@@ -21,7 +21,7 @@ export default function SubscriptionScreen() {
     <ScreenFrame chrome={false} includeTabInset={false} testID="subscription-screen">
       <View style={styles.intro}>
         <ThemedText type="eyebrow" themeColor="textSecondary">
-          GLIDELINGO PRO · {mode === 'mock' ? 'MVP PREVIEW' : 'REVENUECAT'}
+          GLIDELINGO PRO · {mode === 'mock' ? 'MVP PREVIEW' : mode === 'unavailable' ? 'UNAVAILABLE' : 'REVENUECAT'}
         </ThemedText>
         <ThemedText type="display">Keep the full path open.</ThemedText>
         <ThemedText type="body" themeColor="textSecondary" style={styles.copy}>
@@ -41,8 +41,10 @@ export default function SubscriptionScreen() {
         <ThemedText type="title2">{loading ? 'Checking…' : isPro ? 'Pro is active' : 'Free plan'}</ThemedText>
         <ThemedText type="footnote" themeColor="textSecondary">
           {mode === 'mock'
-            ? 'No RevenueCat key is configured, so this preview only changes in-memory access for the signed-in account.'
-            : 'Access is derived from RevenueCat’s active “pro” entitlement for this signed-in account.'}
+            ? 'Mock billing was explicitly enabled for development, so access changes only in memory for this account.'
+            : mode === 'unavailable'
+              ? 'This build has no platform RevenueCat key. Purchases stay disabled rather than granting preview access.'
+              : 'Access is derived from RevenueCat’s active “pro” entitlement for this signed-in account.'}
         </ThemedText>
       </GlideSurface>
 
@@ -55,7 +57,7 @@ export default function SubscriptionScreen() {
         ))}
       </View>
 
-      {!isPro && status !== 'signed-out' ? (
+      {!isPro && status !== 'signed-out' && mode !== 'unavailable' ? (
         <View style={styles.plans}>
           {packages.map((item) => (
             <GlideSurface key={item.identifier} padding="roomy" style={styles.card}>
@@ -101,7 +103,7 @@ export default function SubscriptionScreen() {
       ) : null}
 
       <View style={styles.actions}>
-        {mode === 'mock' && isPro ? (
+        {mode === 'unavailable' ? null : mode === 'mock' && isPro ? (
           <GlideButton label="Reset mock access" onPress={resetMockAccess} variant="secondary" />
         ) : (
           <GlideButton
@@ -111,7 +113,9 @@ export default function SubscriptionScreen() {
             variant="secondary"
           />
         )}
-        {status === 'error' ? <GlideButton label="Try again" onPress={() => void refresh()} variant="secondary" /> : null}
+        {status === 'error' && mode !== 'unavailable' ? (
+          <GlideButton label="Try again" onPress={() => void refresh()} variant="secondary" />
+        ) : null}
         <GlideButton label="Back" onPress={() => router.back()} variant="tertiary" />
       </View>
     </ScreenFrame>

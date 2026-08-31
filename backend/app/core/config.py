@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DEFAULT_DATABASE_URL = (
     "postgresql+psycopg://glidelingo:glidelingo_dev_only@127.0.0.1:55433/glidelingo"
 )
+DESKTOP_APP_ORIGIN = "glidelingo://app"
 
 
 class Settings(BaseSettings):
@@ -26,6 +27,7 @@ class Settings(BaseSettings):
     cors_origins: tuple[str, ...] = (
         "http://localhost:8081",
         "http://127.0.0.1:8081",
+        DESKTOP_APP_ORIGIN,
     )
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     database_pool_size: int = Field(default=5, ge=1, le=20)
@@ -37,10 +39,13 @@ class Settings(BaseSettings):
     clerk_issuer: str | None = None
     clerk_jwks_url: str | None = None
     clerk_audience: str | None = None
+    clerk_authorized_parties: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def validate_cors_origins(self) -> Self:
         for origin in self.cors_origins:
+            if origin == DESKTOP_APP_ORIGIN:
+                continue
             parsed = urlsplit(origin)
             if (
                 parsed.scheme not in {"http", "https"}
@@ -61,15 +66,33 @@ class Settings(BaseSettings):
     def validate_clerk_configuration(self) -> Self:
         required_values = (self.clerk_issuer, self.clerk_jwks_url)
         if all(value is None for value in required_values):
-            if self.clerk_audience is not None:
+            if self.clerk_audience is not None or self.clerk_authorized_parties:
                 raise ValueError(
-                    "Clerk issuer and JWKS URL are required when an audience is configured"
+                    "Clerk issuer and JWKS URL are required when token restrictions are configured"
                 )
             return self
         if any(value is None or not value.strip() for value in required_values):
             raise ValueError("Clerk issuer and JWKS URL must be configured together")
         if self.clerk_audience is not None and not self.clerk_audience.strip():
             raise ValueError("Clerk audience cannot be blank")
+
+        for authorized_party in self.clerk_authorized_parties:
+            if authorized_party == DESKTOP_APP_ORIGIN:
+                continue
+            parsed_party = urlsplit(authorized_party)
+            if (
+                parsed_party.scheme not in {"http", "https"}
+                or not parsed_party.netloc
+                or parsed_party.username is not None
+                or parsed_party.password is not None
+                or parsed_party.path not in {"", "/"}
+                or parsed_party.query
+                or parsed_party.fragment
+            ):
+                raise ValueError(
+                    "Clerk authorized parties must be HTTP(S) origins or the exact packaged "
+                    "desktop origin without credentials, paths, queries, or fragments"
+                )
 
         assert self.clerk_issuer is not None
         assert self.clerk_jwks_url is not None
@@ -96,7 +119,9 @@ class Settings(BaseSettings):
         return [origin.rstrip("/") for origin in self.cors_origins]
 
     @property
-    def clerk_configuration(self) -> tuple[str, str, str | None] | None:
+    def clerk_configuration(
+        self,
+    ) -> tuple[str, str, str | None, tuple[str, ...]] | None:
         """Return the complete Clerk verifier configuration when enabled."""
 
         if self.clerk_issuer is None or self.clerk_jwks_url is None:
@@ -105,4 +130,5 @@ class Settings(BaseSettings):
             self.clerk_issuer.rstrip("/"),
             self.clerk_jwks_url,
             self.clerk_audience.strip() if self.clerk_audience is not None else None,
+            tuple(origin.rstrip("/") for origin in self.clerk_authorized_parties),
         )

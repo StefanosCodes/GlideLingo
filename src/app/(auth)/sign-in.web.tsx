@@ -7,6 +7,8 @@ import { useTheme } from '@/hooks/use-theme';
 
 export default function SignInRoute() {
   const theme = useTheme();
+  const isElectron =
+    typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('electron');
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]} testID="auth-sign-in">
@@ -18,12 +20,12 @@ export default function SignInRoute() {
           Keep your language moving.
         </ThemedText>
         <ThemedText type="body" themeColor="textSecondary" style={styles.centeredCopy}>
-          Continue with Google, Apple, email, or phone. We only ask for the details needed to keep your learning path.
+          Continue with Apple, email, or phone. We only ask for the details needed to keep your learning path.
         </ThemedText>
       </View>
       <SignIn
         fallbackRedirectUrl="/"
-        oauthFlow="popup"
+        oauthFlow={isElectron ? 'redirect' : 'popup'}
         routing="hash"
         signUpFallbackRedirectUrl="/"
         withSignUp

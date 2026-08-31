@@ -27,3 +27,17 @@ test('stale effect cleanup cannot clear a newer account token provider', async (
   cleanupSecond();
   assert.deepEqual(await getApiAuthorizationHeader(), {});
 });
+
+test('one stable provider reads the current account during an immediate account switch', async () => {
+  let currentAccountToken = async () => 'first-user';
+  const cleanup = setApiAccessTokenProvider(() => currentAccountToken());
+
+  assert.deepEqual(await getApiAuthorizationHeader(), { Authorization: 'Bearer first-user' });
+
+  currentAccountToken = async () => 'second-user';
+  assert.deepEqual(await getApiAuthorizationHeader(), { Authorization: 'Bearer second-user' });
+
+  currentAccountToken = async () => null;
+  assert.deepEqual(await getApiAuthorizationHeader(), {});
+  cleanup();
+});

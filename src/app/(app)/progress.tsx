@@ -27,6 +27,7 @@ export default function ProgressScreen() {
     progress,
     completedLessonIds,
     legacyProgressAvailable,
+    legacyProgressError,
     dismissLegacyProgress,
     importLegacyProgress,
   } = useLearning();
@@ -98,6 +99,11 @@ export default function ProgressScreen() {
             <GlideButton label="Import progress" onPress={importLegacyProgress} size="regular" />
             <GlideButton label="Not mine" onPress={dismissLegacyProgress} size="regular" variant="tertiary" />
           </View>
+          {legacyProgressError ? (
+            <ThemedText accessibilityRole="alert" type="footnote" style={{ color: theme.danger }}>
+              {legacyProgressError}
+            </ThemedText>
+          ) : null}
         </GlideSurface>
       ) : null}
 

@@ -39,7 +39,14 @@ Create one Pages project with Git integration:
 - Preview deployments: enabled for pull requests
 - Production custom domain: `glidelingo.com`
 
-Attach `www.glidelingo.com` to the Pages project as well. The committed `_redirects` rule sends it permanently to the apex domain. The committed `_headers` file applies the site security policy.
+Attach `www.glidelingo.com` to the Pages project as well, then create a Cloudflare zone-level redirect because Pages `_redirects` files do not support redirects between hostnames:
+
+- Match expression: `(http.host eq "www.glidelingo.com")`
+- Dynamic target: `concat("https://glidelingo.com", http.request.uri.path)`
+- Status code: `301`
+- Preserve query string: enabled
+
+Use either Cloudflare's **Redirect from WWW to root** Single Redirect template or the equivalent Bulk Redirect configuration. Keep both hostnames proxied so the redirect rule can run. Verify the live redirect after activation; this setting lives in Cloudflare and is not represented by a Pages `_redirects` file. The committed `_headers` file applies the site security policy.
 
 Do not configure production release variables until the exact DMG has been signed, notarized, downloaded on a clean Mac, checksum-verified, installed, launched, and exercised through lesson completion and restart persistence.
 

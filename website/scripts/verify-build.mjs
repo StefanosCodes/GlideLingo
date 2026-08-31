@@ -11,16 +11,14 @@ await Promise.all([
   access(new URL('index.html', root)),
   access(new URL('404.html', root)),
   access(new URL('_headers', root)),
-  access(new URL('_redirects', root)),
   access(new URL('robots.txt', root)),
   access(new URL('sitemap-index.xml', root)),
 ]);
 
-const [home, notFound, headers, redirects, robots] = await Promise.all([
+const [home, notFound, headers, robots] = await Promise.all([
   read('index.html'),
   read('404.html'),
   read('_headers'),
-  read('_redirects'),
   read('robots.txt'),
 ]);
 
@@ -36,7 +34,6 @@ assert.match(notFound, /This page flew off course/);
 assert.match(headers, /Content-Security-Policy:/);
 assert.match(headers, /script-src 'none'/);
 assert.match(headers, /Permissions-Policy:/);
-assert.match(redirects, /^https:\/\/www\.glidelingo\.com\/\* https:\/\/glidelingo\.com\/:splat 301/m);
 assert.match(robots, /Sitemap: https:\/\/glidelingo\.com\/sitemap-index\.xml/);
 
 if (active) {

@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-31T09:43:26.350Z",
+  "clips": {
+    "el-kalimera": {
+      "lessonId": "el-letters-1",
+      "locale": "el-GR",
+      "voice": "el-GR-Chirp3-HD-Aoede",
+      "sourceTextHash": "cef1037ad8ebe0c8b5d0adcb50ae7cf6cac333207aaee89d2f16a71244f8b250",
+      "outputFilename": "el-kalimera.mp3",
+      "encoding": "MP3"
+    },
+    "el-letter-alpha": {
+      "lessonId": "el-letters-1",
+      "locale": "el-GR",
+      "voice": "el-GR-Chirp3-HD-Aoede",
+      "sourceTextHash": "122ce171ae4a30eb46e596c3d1152ec67c2bf9b28893ecea69cffd6bb12265d7",
+      "outputFilename": "el-letter-alpha.mp3",
+      "encoding": "MP3"
+    },
+    "el-letter-epsilon": {
+      "lessonId": "el-letters-1",
+      "locale": "el-GR",
+      "voice": "el-GR-Chirp3-HD-Aoede",
+      "sourceTextHash": "566c0e8c22ed44027cb852752b93231d686228d4710b3e6bfefcda23c907c6e4",
+      "outputFilename": "el-letter-epsilon.mp3",
+      "encoding": "MP3"
+    },
+    "el-letter-iota": {
+      "lessonId": "el-letters-1",
+      "locale": "el-GR",
+      "voice": "el-GR-Chirp3-HD-Aoede",
+      "sourceTextHash": "298105d30c8136d1a8e6e7ab887f54c3c0ba9eb10e6ed348a11eb2f79233505f",
+      "outputFilename": "el-letter-iota.mp3",
+      "encoding": "MP3"
+    },
+    "el-nero": {
+      "lessonId": "el-letters-1",
+      "locale": "el-GR",
+      "voice": "el-GR-Chirp3-HD-Aoede",
+      "sourceTextHash": "f4aad53622120d5b7a5bad2713b4c3411a59805180ba1f825649e426564039bd",
+      "outputFilename": "el-nero.mp3",
+      "encoding": "MP3"
+    },
+    "el-vowels-kalimera": {
+      "lessonId": "el-letters-1",
+      "locale": "el-GR",
+      "voice": "el-GR-Chirp3-HD-Aoede",
+      "sourceTextHash": "53617d6c3ce33e290adb7f7c64a88b44af35de66b8986468ee3609b4858b28d2",
+      "outputFilename": "el-vowels-kalimera.mp3",
+      "encoding": "MP3"
+    }
+  }
+}

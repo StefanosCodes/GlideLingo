@@ -32,7 +32,7 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     justifyContent: 'flex-end',
     overflow: 'visible',
-    zIndex: 20,
+    zIndex: 100,
   },
   streak: {
     alignItems: 'center',

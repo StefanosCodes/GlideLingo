@@ -14,6 +14,7 @@ const {
 } = require('./runtime.cjs');
 
 const DEVELOPMENT_URL = validateDevelopmentUrl(process.env.ELECTRON_RENDERER_URL);
+const AUDIO_SMOKE_TEST = process.env.ELECTRON_AUDIO_SMOKE_TEST === '1';
 const PRODUCTION_URL = `${APP_SCHEME}://${APP_HOST}/`;
 const RENDERER_URL = DEVELOPMENT_URL ?? PRODUCTION_URL;
 const CONTENT_SECURITY_POLICY = [
@@ -44,6 +45,10 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 app.enableSandbox();
+
+if (AUDIO_SMOKE_TEST) {
+  app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+}
 
 async function registerProductionProtocol() {
   const distDirectory = app.isPackaged
@@ -163,6 +168,67 @@ function createWindow() {
     window.webContents.once('did-fail-load', (_event, code, description) => {
       console.error(`[desktop-smoke] load failed (${code}): ${description}`);
       app.exit(1);
+    });
+  } else if (AUDIO_SMOKE_TEST) {
+    let learningStatePrepared = false;
+
+    window.webContents.on('did-finish-load', () => {
+      if (!learningStatePrepared) {
+        learningStatePrepared = true;
+        void window.webContents
+          .executeJavaScript(
+            `localStorage.setItem('glidelingo-learning', JSON.stringify({
+              languageId: 'el',
+              enrolledByLanguage: { el: 'el-from-zero' },
+              completedModuleIds: []
+            }))`,
+          )
+          .then(() => window.reload());
+        return;
+      }
+
+      setTimeout(async () => {
+        try {
+          const playbackResult = await window.webContents.executeJavaScript(`(async () => {
+            const lessonButton = document.querySelector('[data-testid="start-lesson"]');
+            const initialLabel = lessonButton?.getAttribute('aria-label') ?? lessonButton?.textContent ?? null;
+            lessonButton?.click();
+            let button;
+            for (let attempt = 0; attempt < 30; attempt += 1) {
+              button = Array.from(document.querySelectorAll('[aria-label]')).find(
+                (element) => element.getAttribute('aria-label') === 'Play pronunciation: καλημέρα',
+              );
+              if (button) break;
+              await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            button?.click();
+            const pronunciationStates = [];
+            for (const delay of [10, 50, 100, 250, 750]) {
+              await new Promise((resolve) => setTimeout(resolve, delay));
+              pronunciationStates.push(button?.textContent ?? null);
+            }
+            return {
+              initialLabel,
+              pronunciationFound: Boolean(button),
+              pronunciationText: button?.textContent ?? null,
+              pronunciationStates,
+              playing: pronunciationStates.some((state) => state?.includes('Playing')),
+            };
+          })()`);
+
+          if (!playbackResult.playing) {
+            console.error('[desktop-audio-smoke] pronunciation did not enter the playing state', playbackResult);
+            app.exit(1);
+            return;
+          }
+
+          console.log(`[desktop-audio-smoke] bundled Greek audio played from ${window.webContents.getURL()}`);
+          app.quit();
+        } catch (error) {
+          console.error('[desktop-audio-smoke] playback verification failed:', error);
+          app.exit(1);
+        }
+      }, 1000);
     });
   }
 

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "clips": [
+    {
+      "id": "el-letter-alpha",
+      "lessonId": "el-letters-1",
+      "profile": "el-GR-primary",
+      "text": "Άλφα. Α, όπως στη λέξη μαμά."
+    },
+    {
+      "id": "el-letter-epsilon",
+      "lessonId": "el-letters-1",
+      "profile": "el-GR-primary",
+      "text": "Έψιλον. Ε, όπως στη λέξη ένα."
+    },
+    {
+      "id": "el-letter-iota",
+      "lessonId": "el-letters-1",
+      "profile": "el-GR-primary",
+      "text": "Γιώτα. Ι, όπως στη λέξη ήλιος."
+    },
+    {
+      "id": "el-kalimera",
+      "lessonId": "el-letters-1",
+      "profile": "el-GR-primary",
+      "text": "Καλημέρα."
+    },
+    {
+      "id": "el-nero",
+      "lessonId": "el-letters-1",
+      "profile": "el-GR-primary",
+      "text": "Νερό."
+    },
+    {
+      "id": "el-vowels-kalimera",
+      "lessonId": "el-letters-1",
+      "profile": "el-GR-primary",
+      "text": "Άλφα. Έψιλον. Γιώτα. Καλημέρα."
+    }
+  ]
+}

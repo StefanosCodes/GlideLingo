@@ -11,7 +11,7 @@ import { useLearning } from '@/providers/learning-provider';
 
 export default function PathScreen() {
   const router = useRouter();
-  const { language, courses, enrolledCourse } = useLearning();
+  const { language, courses, enrolledCourse, openLesson } = useLearning();
 
   if (Platform.OS === 'web') {
     return <Redirect href="/" />;
@@ -72,7 +72,13 @@ export default function PathScreen() {
           {enrolledCourse.summary}
         </ThemedText>
       </View>
-      <ModuleTree density="page" />
+      <ModuleTree
+        density="page"
+        onSelectLesson={(lessonId) => {
+          openLesson(lessonId);
+          router.push('/');
+        }}
+      />
     </ScreenFrame>
   );
 }

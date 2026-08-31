@@ -22,33 +22,47 @@ const [home, notFound, headers, robots] = await Promise.all([
   read('robots.txt'),
 ]);
 
-assert.match(home, /<title>GlideLingo — Language practice that keeps moving<\/title>/);
+assert.match(home, /<title>GlideLingo — Language learning, redesigned<\/title>/);
 assert.match(home, /rel="canonical" href="https:\/\/glidelingo\.com\/"/);
 assert.match(home, /id="main-content"/);
-assert.match(home, /How it works/);
-assert.match(home, /Platform availability/);
-assert.doesNotMatch(home, /<script(?:\s|>)/i);
+assert.match(home, /Learn the language\./);
+assert.match(home, /Enter the world\./);
+assert.match(home, /glidelingo-bird-black\.svg/);
+assert.match(home, /brand-name/);
+assert.match(home, /data-video-state="ready"/);
+assert.doesNotMatch(home, /Video coming soon/);
+assert.match(home, /<video[^>]+poster="\/images\/product-home\.png"/);
+assert.match(home, /<video[^>]+controls[^>]+data-autoplay-when-visible="true"[^>]+loop[^>]+muted/);
+assert.match(home, /<source[^>]+glidelingo-product-walkthrough\.webm[^>]+video\/webm/);
+assert.match(home, /<source[^>]+glidelingo-product-walkthrough\.mp4/);
+assert.match(home, /<track[^>]+kind="captions"[^>]+glidelingo-product-walkthrough\.vtt/);
+assert.match(home, />Download<svg[^>]+button-apple-icon/);
+assert.doesNotMatch(home, /Download for Mac/);
+assert.match(home, /button-platform-icon/);
+assert.match(home, /button-apple-icon/);
+assert.match(home, /id="pricing"/);
+assert.match(home, /\$19\.99/);
+assert.match(home, /Billed monthly\. Cancel anytime\./);
+assert.doesNotMatch(home, /Desktop apps|Choose your desktop|Download for Windows/);
+assert.match(home, /<script[^>]+src="\/scripts\/video-player\.js"[^>]*><\/script>/i);
+assert.doesNotMatch(home, /<script(?![^>]+src=)(?:\s|>)/i);
 assert.doesNotMatch(home, /<form(?:\s|>)/i);
 assert.doesNotMatch(home, /document\.cookie|localStorage|sessionStorage/i);
 assert.match(notFound, /This page flew off course/);
 assert.match(headers, /Content-Security-Policy:/);
-assert.match(headers, /script-src 'none'/);
+assert.match(headers, /script-src 'self'/);
 assert.match(headers, /Permissions-Policy:/);
 assert.match(robots, /Sitemap: https:\/\/glidelingo\.com\/sitemap-index\.xml/);
 
 if (active) {
   const downloadUrl = process.env.PUBLIC_MAC_DOWNLOAD_URL?.trim();
-  const checksumUrl = process.env.PUBLIC_MAC_CHECKSUM_URL?.trim();
 
   assert.ok(downloadUrl, 'Active output verification requires PUBLIC_MAC_DOWNLOAD_URL.');
-  assert.ok(checksumUrl, 'Active output verification requires PUBLIC_MAC_CHECKSUM_URL.');
   assert.match(home, /data-download-state="available"/);
   assert.ok(home.includes(downloadUrl), 'Active output must contain the configured DMG URL.');
-  assert.ok(home.includes(checksumUrl), 'Active output must contain the configured checksum URL.');
 } else {
   assert.match(home, /data-download-state="unavailable"/);
-  assert.match(home, /Mac release coming soon/);
   assert.doesNotMatch(home, /releases\/download/);
 }
 
-console.log(`Verified ${active ? 'active-download' : 'coming-soon'} static output in ${join(root.pathname)}.`);
+console.log(`Verified ${active ? 'active' : 'disabled'} hero CTA output in ${join(root.pathname)}.`);

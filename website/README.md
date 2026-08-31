@@ -1,6 +1,12 @@
 # GlideLingo website
 
-This directory is the independently built, static marketing and macOS download site for GlideLingo. It does not share dependencies, runtime state, authentication, or deployment with the Expo, Electron, or FastAPI applications in the repository.
+This directory is the independently built, static marketing site for GlideLingo. It does not share dependencies, runtime state, authentication, or deployment with the Expo, Electron, or FastAPI applications in the repository.
+
+## Brand assets
+
+The website self-hosts the Satoshi variable display font and composes its typographic lockup with the approved monochrome GlideLingo bird SVG. Satoshi is distributed by Fontshare under the ITF Free Font License preserved at `licenses/Satoshi-ITF-FFL.txt`. Inter remains the body and interface typeface. Production pages make no third-party font requests.
+
+The How-it-works section is a native, 16:9 video player that plays a muted, looping first-party walkthrough when it enters the viewport and uses the current application screenshot as its poster. It pauses offscreen and respects `prefers-reduced-motion`. Replace `public/videos/glidelingo-product-walkthrough.mp4`, its WebM companion, and the English caption file at `public/videos/glidelingo-product-walkthrough.vtt` together when the final screen recording is ready; no page code needs to change. If any asset is absent, the page safely displays `Video coming soon` without requesting missing media. It must not be replaced with a third-party embed. The landing page has no desktop-apps section; it retains only the Mac hero CTA.
 
 ## Local development
 
@@ -12,21 +18,9 @@ npx playwright install chromium webkit
 npm run dev
 ```
 
-Preview builds intentionally show `Mac release coming soon` when release variables are absent.
+## Mac hero CTA
 
-## Release configuration
-
-Cloudflare Pages uses one build command, `npm run build`, for both supported production states. Set `PUBLIC_MAC_DOWNLOAD_STATE=disabled` to publish the explicit `Mac release coming soon` state. Set it to `active` only after a signed and notarized GitHub Release has passed its clean-Mac smoke test.
-
-| Variable | Value |
-| --- | --- |
-| `PUBLIC_MAC_DOWNLOAD_STATE` | Required on `main`: exactly `disabled` or `active` |
-| `PUBLIC_MAC_DOWNLOAD_URL` | For `active`: exact HTTPS URL of `GlideLingo-{version}-universal.dmg` in the `desktop-v{version}` GitHub Release |
-| `PUBLIC_MAC_CHECKSUM_URL` | For `active`: exact HTTPS URL of `SHA256SUMS.txt` in that same GitHub Release |
-| `PUBLIC_MAC_VERSION` | Semantic version displayed on the page, such as `0.1.0` |
-| `PUBLIC_MAC_RELEASE_DATE` | UTC calendar date in `YYYY-MM-DD` form |
-
-The build fails closed when the production state is absent or invalid, release metadata is partial, or the version, release tag, DMG filename, and checksum manifest do not identify the same release. A complete valid release configuration may remain present while the state is `disabled`; this is the rollback path and the generated site contains no release links. Pull-request previews with no state or metadata remain safely non-downloadable. Values are public metadata and must never contain credentials.
+The Apple `Download for Mac` button always remains visible. Without release metadata it is safely disabled. Set `PUBLIC_MAC_DOWNLOAD_STATE=active` together with `PUBLIC_MAC_DOWNLOAD_URL`, `PUBLIC_MAC_CHECKSUM_URL`, `PUBLIC_MAC_VERSION`, and `PUBLIC_MAC_RELEASE_DATE` only after the signed and notarized release is ready. The existing release resolver validates that all metadata identifies the same GitHub Release before emitting the DMG link.
 
 ## Cloudflare Pages
 
@@ -56,8 +50,6 @@ curl --silent --show-error --dump-header - --output /dev/null 'https://www.glide
 
 The response must be `301` with `Location: https://glidelingo.com/redirect-check?source=cloudflare`. The committed `_headers` file applies the site security policy.
 
-Do not configure production release variables until the exact DMG has been signed, notarized, downloaded on a clean Mac, checksum-verified, installed, launched, and exercised through lesson completion and restart persistence.
-
 ## Verification
 
 ```sh
@@ -68,11 +60,4 @@ npm run test:e2e
 npm run build:fixture:rollback
 ```
 
-The disabled fixture proves the documented production build works before launch. `npm run test:e2e` uses the same `npm run build` entry point with fixed, non-live release fixture URLs and verifies active-download rendering in Chromium at mobile, tablet, and desktop widths plus WebKit at desktop width. The rollback fixture rebuilds the same valid active metadata with only the state changed to `disabled`, then verifies that no release link is emitted. These checks never download the fixture assets.
-
-## Visual evidence
-
-The committed captures show the safe `Coming soon` preview state used before a notarized release is configured:
-
-- [Desktop landing page](docs/landing-preview-desktop.png)
-- [Mobile landing page](docs/landing-preview-mobile.png)
+The production-state fixtures verify both the linked and safely disabled hero CTA. The browser suite covers Chromium at mobile, tablet, and desktop widths plus WebKit at desktop width. These checks never download fixture assets.

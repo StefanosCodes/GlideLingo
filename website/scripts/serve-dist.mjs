@@ -3,8 +3,9 @@ import { readFile } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const host = '127.0.0.1';
-const port = 4322;
+import { resolvePlaywrightServerConfig } from './playwright-server-config.mjs';
+
+const { host, port } = resolvePlaywrightServerConfig();
 const distRoot = resolve(fileURLToPath(new URL('../dist/', import.meta.url)));
 /** @type {Record<string, string>} */
 const contentTypes = {

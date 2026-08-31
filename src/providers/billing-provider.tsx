@@ -138,6 +138,7 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
   const [state, setState] = useState<BillingState>(() => emptyState(userId));
   const userIdRef = useRef(userId);
   const identityGenerationRef = useRef(0);
+  const entitlementRequestSequenceRef = useRef(0);
   userIdRef.current = userId;
 
   const ownsCurrentIdentity = useCallback(
@@ -146,12 +147,83 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
     [],
   );
 
+  const beginEntitlementRequest = useCallback(
+    () => ++entitlementRequestSequenceRef.current,
+    [],
+  );
+
+  const ownsLatestEntitlementRequest = useCallback(
+    (ownerUserId: string, generation: number, requestSequence: number) =>
+      ownsCurrentIdentity(ownerUserId, generation) &&
+      entitlementRequestSequenceRef.current === requestSequence,
+    [ownsCurrentIdentity],
+  );
+
+  const applyConfirmedEntitlement = useCallback(
+    (
+      ownerUserId: string,
+      generation: number,
+      requestSequence: number,
+      entitlement: ServerProEntitlement,
+    ) => {
+      if (!ownsLatestEntitlementRequest(ownerUserId, generation, requestSequence)) return;
+      setState((current) => {
+        if (
+          current.ownerUserId !== ownerUserId ||
+          !ownsLatestEntitlementRequest(ownerUserId, generation, requestSequence)
+        ) return current;
+
+        const active = serverEntitlementIsActive(entitlement);
+        const settlesPurchase = current.purchaseState.status === 'syncing';
+        const syncMessage = settlesPurchase && !active ? syncUnavailableMessage(entitlement) : null;
+        return {
+          ...current,
+          status: settlesPurchase && !active ? 'error' : billingStatusForServer(entitlement),
+          purchaseState: settlesPurchase
+            ? {
+                ...current.purchaseState,
+                status: active ? 'success' : 'sync-unavailable',
+                message: active ? 'Pro tutor assistance is active.' : syncMessage,
+              }
+            : current.purchaseState,
+          errorMessage: syncMessage ?? serverStatusMessage(entitlement),
+        };
+      });
+    },
+    [ownsLatestEntitlementRequest],
+  );
+
+  const applyEntitlementFailure = useCallback(
+    (ownerUserId: string, generation: number, requestSequence: number, error: unknown) => {
+      if (!ownsLatestEntitlementRequest(ownerUserId, generation, requestSequence)) return;
+      setState((current) => {
+        if (
+          current.ownerUserId !== ownerUserId ||
+          !ownsLatestEntitlementRequest(ownerUserId, generation, requestSequence)
+        ) return current;
+
+        const settlesPurchase = current.purchaseState.status === 'syncing';
+        const message = settlesPurchase ? syncUnavailableMessage() : errorText(error);
+        return {
+          ...current,
+          status: 'error',
+          purchaseState: settlesPurchase
+            ? { ...current.purchaseState, status: 'sync-unavailable', message }
+            : current.purchaseState,
+          errorMessage: message,
+        };
+      });
+    },
+    [ownsLatestEntitlementRequest],
+  );
+
   useEffect(() => {
     const generation = ++identityGenerationRef.current;
     const ownerUserId = userId;
     const mode = modeForEnvironment();
     let active = true;
     let unsubscribe: (() => boolean) | undefined;
+    let initialEntitlementRequestSequence: number | null = null;
 
     setState(emptyState(ownerUserId, mode));
 
@@ -182,18 +254,28 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
       try {
         const snapshot = await loadRevenueCatSnapshot(ownerUserId);
         if (!active || !ownsCurrentIdentity(ownerUserId, generation)) return;
+        const requestSequence = beginEntitlementRequest();
+        initialEntitlementRequestSequence = requestSequence;
         const serverEntitlement = await loadServerProEntitlement();
-        if (!active || !ownsCurrentIdentity(ownerUserId, generation)) return;
-        setState({
-          ownerUserId,
-          mode: 'revenuecat',
-          status: billingStatusForServer(serverEntitlement),
-          packages: snapshot.packages,
-          managementUrl: snapshot.managementUrl,
-          purchaseState: IDLE_PURCHASE,
-          managementState: IDLE_MANAGEMENT,
-          errorMessage: serverStatusMessage(serverEntitlement),
-        });
+        if (
+          !active ||
+          !ownsLatestEntitlementRequest(ownerUserId, generation, requestSequence)
+        ) return;
+        setState((current) =>
+          active &&
+          ownsLatestEntitlementRequest(ownerUserId, generation, requestSequence)
+            ? {
+                ownerUserId,
+                mode: 'revenuecat',
+                status: billingStatusForServer(serverEntitlement),
+                packages: snapshot.packages,
+                managementUrl: snapshot.managementUrl,
+                purchaseState: IDLE_PURCHASE,
+                managementState: IDLE_MANAGEMENT,
+                errorMessage: serverStatusMessage(serverEntitlement),
+              }
+            : current,
+        );
 
         unsubscribe = subscribeToRevenueCat((customerInfo) => {
           if (!active || !ownsCurrentIdentity(ownerUserId, generation)) return;
@@ -202,31 +284,24 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
             ownerUserId,
             managementUrl: revenueCatCustomerManagementUrl(customerInfo),
           }));
+          const requestSequence = beginEntitlementRequest();
           void reconcileServerProEntitlement()
             .then((entitlement) => {
-              if (!active || !ownsCurrentIdentity(ownerUserId, generation)) return;
-              setState((current) =>
-                current.ownerUserId === ownerUserId
-                  ? {
-                      ...current,
-                      status: billingStatusForServer(entitlement),
-                      errorMessage: serverStatusMessage(entitlement),
-                    }
-                  : current,
-              );
+              if (!active) return;
+              applyConfirmedEntitlement(ownerUserId, generation, requestSequence, entitlement);
             })
             .catch((error) => {
-              if (!active || !ownsCurrentIdentity(ownerUserId, generation)) return;
-              setState((current) =>
-                current.ownerUserId === ownerUserId
-                  ? { ...current, status: 'error', errorMessage: errorText(error) }
-                  : current,
-              );
+              if (!active) return;
+              applyEntitlementFailure(ownerUserId, generation, requestSequence, error);
             });
         });
 
       } catch (error) {
         if (!active || !ownsCurrentIdentity(ownerUserId, generation)) return;
+        if (
+          initialEntitlementRequestSequence !== null &&
+          !ownsLatestEntitlementRequest(ownerUserId, generation, initialEntitlementRequestSequence)
+        ) return;
         setState({
           ownerUserId,
           mode: 'revenuecat',
@@ -247,7 +322,14 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
         // A following identity connection remains serialized behind this cleanup.
       });
     };
-  }, [ownsCurrentIdentity, userId]);
+  }, [
+    applyConfirmedEntitlement,
+    applyEntitlementFailure,
+    beginEntitlementRequest,
+    ownsCurrentIdentity,
+    ownsLatestEntitlementRequest,
+    userId,
+  ]);
 
   const applyClientMetadata = useCallback((ownerUserId: string, generation: number, snapshot: BillingSnapshot) => {
     if (!ownsCurrentIdentity(ownerUserId, generation)) return;
@@ -263,22 +345,6 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
         : current,
     );
   }, [ownsCurrentIdentity]);
-
-  const applyConfirmedEntitlement = useCallback(
-    (ownerUserId: string, generation: number, entitlement: ServerProEntitlement) => {
-      if (!ownsCurrentIdentity(ownerUserId, generation)) return;
-      setState((current) =>
-        current.ownerUserId === ownerUserId
-          ? {
-              ...current,
-              status: billingStatusForServer(entitlement),
-              errorMessage: serverStatusMessage(entitlement),
-            }
-          : current,
-      );
-    },
-    [ownsCurrentIdentity],
-  );
 
   const refresh = useCallback(async () => {
     const ownerUserId = userIdRef.current;
@@ -312,17 +378,29 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
       managementState: IDLE_MANAGEMENT,
       errorMessage: null,
     }));
+    let entitlementRequestSequence: number | null = null;
     try {
       const snapshot = await loadRevenueCatSnapshot(ownerUserId);
       if (!ownsCurrentIdentity(ownerUserId, generation)) return;
       applyClientMetadata(ownerUserId, generation, snapshot);
+      entitlementRequestSequence = beginEntitlementRequest();
       const entitlement = await reconcileServerProEntitlement();
-      applyConfirmedEntitlement(ownerUserId, generation, entitlement);
+      applyConfirmedEntitlement(ownerUserId, generation, entitlementRequestSequence, entitlement);
     } catch (error) {
+      if (entitlementRequestSequence !== null) {
+        applyEntitlementFailure(ownerUserId, generation, entitlementRequestSequence, error);
+        return;
+      }
       if (!ownsCurrentIdentity(ownerUserId, generation)) return;
       setState((current) => ({ ...current, ownerUserId, status: 'error', errorMessage: errorText(error) }));
     }
-  }, [applyClientMetadata, applyConfirmedEntitlement, ownsCurrentIdentity]);
+  }, [
+    applyClientMetadata,
+    applyConfirmedEntitlement,
+    applyEntitlementFailure,
+    beginEntitlementRequest,
+    ownsCurrentIdentity,
+  ]);
 
   const purchase = useCallback(
     async (identifier: string) => {
@@ -372,37 +450,12 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
               }
             : current,
         );
+        const entitlementRequestSequence = beginEntitlementRequest();
         try {
           const entitlement = await reconcileServerProEntitlement();
-          if (!ownsCurrentIdentity(ownerUserId, generation)) return;
-          applyConfirmedEntitlement(ownerUserId, generation, entitlement);
-          const active = serverEntitlementIsActive(entitlement);
-          setState((current) =>
-            current.ownerUserId === ownerUserId && ownsCurrentIdentity(ownerUserId, generation)
-              ? {
-                  ...current,
-                  purchaseState: {
-                    packageIdentifier: identifier,
-                    status: active ? 'success' : 'sync-unavailable',
-                    message: active ? 'Pro tutor assistance is active.' : syncUnavailableMessage(entitlement),
-                  },
-                  ...(active ? {} : { status: 'error' as const, errorMessage: syncUnavailableMessage(entitlement) }),
-                }
-              : current,
-          );
-        } catch {
-          if (!ownsCurrentIdentity(ownerUserId, generation)) return;
-          const message = syncUnavailableMessage();
-          setState((current) =>
-            current.ownerUserId === ownerUserId
-              ? {
-                  ...current,
-                  status: 'error',
-                  purchaseState: { packageIdentifier: identifier, status: 'sync-unavailable', message },
-                  errorMessage: message,
-                }
-              : current,
-          );
+          applyConfirmedEntitlement(ownerUserId, generation, entitlementRequestSequence, entitlement);
+        } catch (error) {
+          applyEntitlementFailure(ownerUserId, generation, entitlementRequestSequence, error);
         }
       } catch (error) {
         if (!ownsCurrentIdentity(ownerUserId, generation)) return;
@@ -418,7 +471,13 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
         );
       }
     },
-    [applyClientMetadata, applyConfirmedEntitlement, ownsCurrentIdentity],
+    [
+      applyClientMetadata,
+      applyConfirmedEntitlement,
+      applyEntitlementFailure,
+      beginEntitlementRequest,
+      ownsCurrentIdentity,
+    ],
   );
 
   const restore = useCallback(async () => {
@@ -437,16 +496,29 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
     }
 
     setState((current) => ({ ...current, ownerUserId, status: 'loading', errorMessage: null }));
+    let entitlementRequestSequence: number | null = null;
     try {
       const snapshot = await restoreRevenueCatPurchases(ownerUserId);
       if (!ownsCurrentIdentity(ownerUserId, generation)) return;
       applyClientMetadata(ownerUserId, generation, snapshot);
-      applyConfirmedEntitlement(ownerUserId, generation, await reconcileServerProEntitlement());
+      entitlementRequestSequence = beginEntitlementRequest();
+      const entitlement = await reconcileServerProEntitlement();
+      applyConfirmedEntitlement(ownerUserId, generation, entitlementRequestSequence, entitlement);
     } catch (error) {
+      if (entitlementRequestSequence !== null) {
+        applyEntitlementFailure(ownerUserId, generation, entitlementRequestSequence, error);
+        return;
+      }
       if (!ownsCurrentIdentity(ownerUserId, generation)) return;
       setState((current) => ({ ...current, ownerUserId, status: 'error', errorMessage: errorText(error) }));
     }
-  }, [applyClientMetadata, applyConfirmedEntitlement, ownsCurrentIdentity]);
+  }, [
+    applyClientMetadata,
+    applyConfirmedEntitlement,
+    applyEntitlementFailure,
+    beginEntitlementRequest,
+    ownsCurrentIdentity,
+  ]);
 
   const manage = useCallback(async () => {
     const ownerUserId = userIdRef.current;

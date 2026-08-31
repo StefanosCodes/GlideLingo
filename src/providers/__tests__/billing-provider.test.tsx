@@ -252,6 +252,45 @@ test('successful checkout exposes success only after the refreshed entitlement i
   });
 });
 
+test('an older listener reconciliation cannot overwrite a newer successful purchase reconciliation', async () => {
+  let resolveListenerReconciliation: ((entitlement: ServerProEntitlement) => void) | undefined;
+  mockPurchaseRevenueCatPackage.mockResolvedValue(proSnapshot);
+  mockReconcileServerProEntitlement
+    .mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveListenerReconciliation = resolve;
+      }),
+    )
+    .mockResolvedValueOnce(activeServerEntitlement);
+  await render(
+    <BillingProvider userId="user_a">
+      <Probe />
+    </BillingProvider>,
+  );
+  await waitFor(() => expect(billing().status).toBe('free'));
+
+  const listener = mockSubscribeToRevenueCat.mock.calls.at(-1)?.[0];
+  if (!listener) throw new Error('RevenueCat listener was not registered.');
+  await act(async () => {
+    listener({ managementURL: null } as never);
+    await Promise.resolve();
+  });
+  expect(mockReconcileServerProEntitlement).toHaveBeenCalledTimes(1);
+
+  await act(async () => billing().purchase('$rc_monthly'));
+  expect(billing().status).toBe('pro');
+  expect(billing().purchaseState.status).toBe('success');
+
+  await act(async () => {
+    resolveListenerReconciliation?.(inactiveServerEntitlement);
+    await Promise.resolve();
+  });
+
+  expect(billing().status).toBe('pro');
+  expect(billing().isPro).toBe(true);
+  expect(billing().purchaseState.status).toBe('success');
+});
+
 test('checkout completion without a Pro entitlement remains fail closed', async () => {
   mockPurchaseRevenueCatPackage.mockResolvedValue(proSnapshot);
   mockReconcileServerProEntitlement.mockResolvedValue(unavailableServerEntitlement);

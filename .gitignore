@@ -45,6 +45,15 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# Terraform local state and working directories
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+
 example
 
 # generated native folders

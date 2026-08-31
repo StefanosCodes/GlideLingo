@@ -21,7 +21,7 @@ export default function TodayScreen() {
     nextLesson,
     focusedModuleId,
     activeLessonId,
-    completedModuleIds,
+    completedLessonIds,
     progress,
     courses,
     setLanguage,
@@ -83,7 +83,7 @@ export default function TodayScreen() {
   }
 
   if (activeLessonId) {
-    return <LessonLectureView lessonId={activeLessonId} onClose={() => openLesson(null)} />;
+    return <LessonLectureView key={activeLessonId} lessonId={activeLessonId} onClose={() => openLesson(null)} />;
   }
 
   const lesson = nextLesson?.lesson;
@@ -92,7 +92,7 @@ export default function TodayScreen() {
 
   if (focused) {
     const index = enrolledCourse.modules.findIndex((item) => item.id === focused.id);
-    const status = moduleStatus(enrolledCourse, focused.id, completedModuleIds);
+    const status = moduleStatus(enrolledCourse, focused.id, completedLessonIds);
     const previous = index > 0 ? enrolledCourse.modules[index - 1] : null;
 
     return (
@@ -111,7 +111,7 @@ export default function TodayScreen() {
           {focused.lessons.map((item, lessonIndex) => (
             <ListRow
               key={item.id}
-              detail={`${item.durationMin} min`}
+              detail={completedLessonIds.includes(item.id) ? 'Done' : `${item.durationMin} min`}
               label={item.title}
               last={lessonIndex === focused.lessons.length - 1}
               onPress={() => openLesson(item.id)}

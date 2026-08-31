@@ -180,7 +180,7 @@ function createWindow() {
             `localStorage.setItem('glidelingo-learning', JSON.stringify({
               languageId: 'el',
               enrolledByLanguage: { el: 'el-from-zero' },
-              completedModuleIds: []
+              completedLessonIds: []
             }))`,
           )
           .then(() => window.reload());
@@ -196,7 +196,7 @@ function createWindow() {
             let button;
             for (let attempt = 0; attempt < 30; attempt += 1) {
               button = Array.from(document.querySelectorAll('[aria-label]')).find(
-                (element) => element.getAttribute('aria-label') === 'Play pronunciation: καλημέρα',
+                (element) => (element.getAttribute('aria-label') ?? '').startsWith('Play pronunciation:'),
               );
               if (button) break;
               await new Promise((resolve) => setTimeout(resolve, 100));

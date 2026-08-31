@@ -5,6 +5,7 @@ import {
   type Course,
   type Language,
   type LanguageId,
+  completedModuleIdsFor,
   courseProgress,
   currentModule,
   getCourse,
@@ -21,7 +22,7 @@ const DEFAULT_LANGUAGE: LanguageId = 'el';
 type StoredLearning = {
   languageId: LanguageId;
   enrolledByLanguage: Partial<Record<LanguageId, string>>;
-  completedModuleIds: string[];
+  completedLessonIds: string[];
 };
 
 type LearningContextValue = {
@@ -37,10 +38,12 @@ type LearningContextValue = {
   progress: number;
   streakDays: number;
   completedModuleIds: string[];
+  completedLessonIds: string[];
   setLanguage: (id: LanguageId) => void;
   startCourse: (courseId: string) => boolean;
   focusModule: (moduleId: string | null) => void;
   openLesson: (lessonId: string | null) => void;
+  completeLesson: (lessonId: string) => void;
 };
 
 const LearningContext = createContext<LearningContextValue | null>(null);
@@ -53,7 +56,7 @@ function readStored(): StoredLearning {
   const fallback: StoredLearning = {
     languageId: DEFAULT_LANGUAGE,
     enrolledByLanguage: {},
-    completedModuleIds: [],
+    completedLessonIds: [],
   };
 
   if (Platform.OS !== 'web') return fallback;
@@ -61,11 +64,11 @@ function readStored(): StoredLearning {
   try {
     const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
     if (!raw) return fallback;
-    const parsed = JSON.parse(raw) as Partial<StoredLearning>;
+    const parsed = JSON.parse(raw) as Partial<StoredLearning> & { completedModuleIds?: string[] };
     return {
       languageId: parsed.languageId && isLanguageId(parsed.languageId) ? parsed.languageId : DEFAULT_LANGUAGE,
       enrolledByLanguage: parsed.enrolledByLanguage ?? {},
-      completedModuleIds: Array.isArray(parsed.completedModuleIds) ? parsed.completedModuleIds : [],
+      completedLessonIds: Array.isArray(parsed.completedLessonIds) ? parsed.completedLessonIds : [],
     };
   } catch {
     return fallback;
@@ -78,7 +81,7 @@ export function LearningProvider({ children }: PropsWithChildren) {
   const [enrolledByLanguage, setEnrolledByLanguage] = useState<Partial<Record<LanguageId, string>>>(
     initial.enrolledByLanguage,
   );
-  const [completedModuleIds, setCompletedModuleIds] = useState<string[]>(initial.completedModuleIds);
+  const [completedLessonIds, setCompletedLessonIds] = useState<string[]>(initial.completedLessonIds);
   const [focusedModuleId, setFocusedModuleId] = useState<string | null>(null);
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
 
@@ -87,19 +90,23 @@ export function LearningProvider({ children }: PropsWithChildren) {
     try {
       globalThis.localStorage?.setItem(
         STORAGE_KEY,
-        JSON.stringify({ languageId, enrolledByLanguage, completedModuleIds } satisfies StoredLearning),
+        JSON.stringify({ languageId, enrolledByLanguage, completedLessonIds } satisfies StoredLearning),
       );
     } catch {
       // Session still works without persistence.
     }
-  }, [completedModuleIds, enrolledByLanguage, languageId]);
+  }, [completedLessonIds, enrolledByLanguage, languageId]);
 
   const language = getLanguage(languageId);
   const courses = getCoursesForLanguage(languageId);
   const enrolledCourse = getCourse(enrolledByLanguage[languageId] ?? '') ?? null;
-  const moduleNow = enrolledCourse ? currentModule(enrolledCourse, completedModuleIds) : null;
-  const lessonNow = enrolledCourse ? nextLesson(enrolledCourse, completedModuleIds) : null;
-  const progress = enrolledCourse ? courseProgress(enrolledCourse, completedModuleIds) : 0;
+  const moduleNow = enrolledCourse ? currentModule(enrolledCourse, completedLessonIds) : null;
+  const lessonNow = enrolledCourse ? nextLesson(enrolledCourse, completedLessonIds) : null;
+  const progress = enrolledCourse ? courseProgress(enrolledCourse, completedLessonIds) : 0;
+  const completedModuleIds = useMemo(
+    () => (enrolledCourse ? completedModuleIdsFor(enrolledCourse, completedLessonIds) : []),
+    [completedLessonIds, enrolledCourse],
+  );
 
   const setLanguage = useCallback((id: LanguageId) => {
     setActiveLessonId(null);
@@ -130,13 +137,19 @@ export function LearningProvider({ children }: PropsWithChildren) {
       const course = getCourse(courseId);
       if (!course || course.languageId !== languageId || !language.available) return false;
       setEnrolledByLanguage((current) => ({ ...current, [languageId]: course.id }));
-      setCompletedModuleIds((current) => current.filter((id) => !course.modules.some((module) => module.id === id)));
+      setCompletedLessonIds((current) =>
+        current.filter((id) => !course.modules.some((module) => module.lessons.some((lesson) => lesson.id === id))),
+      );
       setFocusedModuleId(null);
       setActiveLessonId(null);
       return true;
     },
     [language.available, languageId],
   );
+
+  const completeLesson = useCallback((lessonId: string) => {
+    setCompletedLessonIds((current) => (current.includes(lessonId) ? current : [...current, lessonId]));
+  }, []);
 
   const value = useMemo<LearningContextValue>(
     () => ({
@@ -152,13 +165,17 @@ export function LearningProvider({ children }: PropsWithChildren) {
       progress,
       streakDays,
       completedModuleIds,
+      completedLessonIds,
       setLanguage,
       startCourse,
       focusModule,
       openLesson,
+      completeLesson,
     }),
     [
       activeLessonId,
+      completeLesson,
+      completedLessonIds,
       completedModuleIds,
       courses,
       enrolledCourse,

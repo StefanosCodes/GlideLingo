@@ -16,6 +16,12 @@ The long-term direction, folder ownership, feature-development pattern, local op
 
 This slice proves development connectivity. A packaged Electron release still needs an exact production HTTPS API origin and matching restrictive Content Security Policy before it can call the deployed API; that belongs to the release-foundation slice.
 
+## Learning system reference
+
+The language-independent course standard, reusable course outline, progress and gamification rules, and learning-system execution plan live in [`docs/learning/README.md`](docs/learning/README.md).
+
+These documents define the intended curriculum and learner-evidence contract. Greek is the first implementation case, not a universal course template, and the documents do not claim that the future mastery, review, or authoring systems already exist.
+
 ## Command center
 
 Run commands from this directory—the one containing `package.json`:

@@ -21,11 +21,24 @@ export type LessonBlock =
   | { type: 'listen'; label: string; audioId: AudioClipId }
   | { type: 'check'; prompt: string; choices: string[]; answer: string };
 
+export type SittingBeat =
+  | { type: 'hear'; greek: string; gloss: string; audioId: AudioClipId }
+  | { type: 'notice'; text: string }
+  | {
+      type: 'check';
+      prompt: string;
+      choices: string[];
+      answer: string;
+      greek?: string;
+      audioId?: AudioClipId;
+    };
+
 export type Lesson = {
   id: string;
   title: string;
   durationMin: number;
   blocks?: LessonBlock[];
+  beats?: SittingBeat[];
 };
 
 export type CourseModule = {
@@ -74,6 +87,7 @@ export const courses: Course[] = [
             title: 'The sound of Greek',
             durationMin: 8,
             blocks: elLettersOne.blocks as LessonBlock[],
+            beats: elLettersOne.beats as SittingBeat[],
           },
           { id: 'el-letters-2', title: 'The alphabet', durationMin: 10 },
           { id: 'el-letters-3', title: 'First words', durationMin: 8 },
@@ -219,26 +233,47 @@ export function findLesson(lessonId: string) {
   return null;
 }
 
-export function courseProgress(course: Course, completedModuleIds: string[]) {
-  const done = course.modules.filter((module) => completedModuleIds.includes(module.id)).length;
-  return course.modules.length === 0 ? 0 : done / course.modules.length;
+export function isLessonComplete(lessonId: string, completedLessonIds: string[]) {
+  return completedLessonIds.includes(lessonId);
 }
 
-export function currentModule(course: Course, completedModuleIds: string[]) {
-  return course.modules.find((module) => !completedModuleIds.includes(module.id)) ?? null;
+export function isModuleComplete(module: CourseModule, completedLessonIds: string[]) {
+  return module.lessons.length > 0 && module.lessons.every((lesson) => completedLessonIds.includes(lesson.id));
 }
 
-export function nextLesson(course: Course, completedModuleIds: string[]) {
-  const module = currentModule(course, completedModuleIds);
-  if (!module) return null;
-  return { module, lesson: module.lessons[0] ?? null };
+export function completedModuleIdsFor(course: Course, completedLessonIds: string[]) {
+  return course.modules.filter((module) => isModuleComplete(module, completedLessonIds)).map((module) => module.id);
+}
+
+export function courseProgress(course: Course, completedLessonIds: string[]) {
+  const total = course.modules.reduce((count, module) => count + module.lessons.length, 0);
+  if (total === 0) return 0;
+  const done = course.modules.reduce(
+    (count, module) => count + module.lessons.filter((lesson) => completedLessonIds.includes(lesson.id)).length,
+    0,
+  );
+  return done / total;
+}
+
+export function currentModule(course: Course, completedLessonIds: string[]) {
+  return course.modules.find((module) => !isModuleComplete(module, completedLessonIds)) ?? null;
+}
+
+export function nextLesson(course: Course, completedLessonIds: string[]) {
+  for (const module of course.modules) {
+    const lesson = module.lessons.find((item) => !completedLessonIds.includes(item.id));
+    if (lesson) return { module, lesson };
+  }
+  return null;
 }
 
 export type ModuleStatus = 'complete' | 'current' | 'upcoming';
 
-export function moduleStatus(course: Course, moduleId: string, completedModuleIds: string[]): ModuleStatus {
-  if (completedModuleIds.includes(moduleId)) return 'complete';
-  const current = currentModule(course, completedModuleIds);
+export function moduleStatus(course: Course, moduleId: string, completedLessonIds: string[]): ModuleStatus {
+  const module = getModule(course, moduleId);
+  if (!module) return 'upcoming';
+  if (isModuleComplete(module, completedLessonIds)) return 'complete';
+  const current = currentModule(course, completedLessonIds);
   if (current?.id === moduleId) return 'current';
   return 'upcoming';
 }

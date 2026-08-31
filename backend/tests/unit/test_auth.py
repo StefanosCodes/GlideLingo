@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from httpx2 import Response
 from jwt import PyJWK
 from jwt.algorithms import RSAAlgorithm
-from jwt.exceptions import PyJWKClientError
+from jwt.exceptions import PyJWKClientConnectionError, PyJWKClientError
 
 from app.auth.clerk import ClerkTokenVerifier, InvalidClerkTokenError
 from app.core.config import Settings
@@ -40,6 +40,11 @@ class StaticSigningKeyClient:
         if header.get("kid") != KEY_ID:
             raise PyJWKClientError("Unknown signing key")
         return self._signing_key
+
+
+class UnavailableSigningKeyClient:
+    def get_signing_key_from_jwt(self, _token: str) -> PyJWK:
+        raise PyJWKClientConnectionError("JWKS unavailable")
 
 
 @pytest.fixture(scope="module")
@@ -253,7 +258,27 @@ def test_unconfigured_authentication_fails_closed() -> None:
         )
 
     assert response.status_code == 503
-    assert response.json() == {"detail": "Authentication is unavailable."}
+    assert response.json()["error"]["code"] == "authentication_unavailable"
+
+
+def test_jwks_connection_failure_is_operationally_unavailable() -> None:
+    application = create_app(Settings(_env_file=None))
+    application.state.clerk_token_verifier = ClerkTokenVerifier(
+        issuer=ISSUER,
+        jwks_url=JWKS_URL,
+        audience=AUDIENCE,
+        authorized_parties=(AUTHORIZED_PARTY,),
+        signing_key_client=UnavailableSigningKeyClient(),
+    )
+
+    with TestClient(application) as unavailable_client:
+        response = unavailable_client.get(
+            "/v1/auth/session",
+            headers={"Authorization": "Bearer syntactically-valid-enough"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "authentication_unavailable"
 
 
 def test_openapi_documents_clerk_bearer_security(client: TestClient) -> None:

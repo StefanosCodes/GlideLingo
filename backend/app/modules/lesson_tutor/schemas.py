@@ -42,3 +42,11 @@ class LessonTutorTurnResponse(BaseModel):
 
     reply: str
     prompt_version: Literal["lesson-tutor-v1"]
+
+
+IdempotencyKey = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=16, max_length=100, pattern=r"^[A-Za-z0-9._:-]+$"
+    ),
+]

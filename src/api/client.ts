@@ -62,6 +62,7 @@ type GetJsonOptions<T> = {
 
 type PostJsonOptions<T> = GetJsonOptions<T> & {
   body: unknown;
+  idempotencyKey?: string;
 };
 
 export function getApiClientRuntimeDetails(): ApiClientRuntimeDetails {
@@ -87,21 +88,24 @@ export async function getJson<T>({
 
 export async function postJson<T>({
   body,
+  idempotencyKey,
   parse,
   path,
   signal,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }: PostJsonOptions<T>): Promise<ApiJsonResponse<T>> {
-  return requestJson({ body, method: 'POST', parse, path, signal, timeoutMs });
+  return requestJson({ body, idempotencyKey, method: 'POST', parse, path, signal, timeoutMs });
 }
 
 type RequestJsonOptions<T> = GetJsonOptions<T> & {
   body?: unknown;
+  idempotencyKey?: string;
   method: 'GET' | 'POST';
 };
 
 async function requestJson<T>({
   body,
+  idempotencyKey,
   method,
   parse,
   path,
@@ -132,12 +136,13 @@ async function requestJson<T>({
   }, timeoutMs);
 
   try {
-    const authorizationHeader = await getApiAuthorizationHeader();
+    const authorizationHeader = await raceWithAbort(getApiAuthorizationHeader(), controller.signal);
     const response = await fetch(requestUrl, {
       body: body === undefined ? undefined : JSON.stringify(body),
       headers: {
         Accept: 'application/json',
         ...authorizationHeader,
+        ...(idempotencyKey === undefined ? {} : { 'Idempotency-Key': idempotencyKey }),
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
       method,
@@ -188,6 +193,24 @@ async function requestJson<T>({
     clearTimeout(timeoutHandle);
     signal?.removeEventListener('abort', handleExternalAbort);
   }
+}
+
+function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error('Request aborted.'));
+  return new Promise<T>((resolve, reject) => {
+    const handleAbort = () => reject(new Error('Request aborted.'));
+    signal.addEventListener('abort', handleAbort, { once: true });
+    operation.then(
+      (value) => {
+        signal.removeEventListener('abort', handleAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', handleAbort);
+        reject(error instanceof Error ? error : new Error('Authorization failed.'));
+      },
+    );
+  });
 }
 
 function resolveConfigurationForRequest(): ApiRuntimeConfiguration {

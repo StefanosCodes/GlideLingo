@@ -73,7 +73,7 @@ export function useLessonTutor(
   useEffect(() => cancel, [cancel]);
 
   const runTurn = useCallback(
-    async (userMessage: TutorMessage) => {
+    async (userMessage: TutorMessage, idempotencyKey: string) => {
       const requestState = stateRef.current;
       const generation = requestGeneration.current;
       const controller = new AbortController();
@@ -86,6 +86,7 @@ export function useLessonTutor(
             history: historyBefore(requestState.messages, userMessage.id),
             message: userMessage.content,
           },
+          idempotencyKey,
           controller.signal,
         );
         if (controller.signal.aborted || requestGeneration.current !== generation) return;
@@ -102,7 +103,11 @@ export function useLessonTutor(
         ) {
           return;
         }
-        dispatch({ type: 'fail', messageId: userMessage.id });
+        dispatch({
+          type: 'fail',
+          messageId: userMessage.id,
+          retryable: !(error instanceof LessonTutorRequestError) || error.retryable,
+        });
       } finally {
         if (activeRequest.current === controller) activeRequest.current = null;
       }
@@ -117,14 +122,14 @@ export function useLessonTutor(
       const message: TutorMessage = { id: createId('user'), role: 'user', content: trimmed };
       dispatch({ type: 'send', message });
       stateRef.current = lessonTutorReducer(stateRef.current, { type: 'send', message });
-      void runTurn(message);
+      void runTurn(message, message.id);
       return true;
     },
     [runTurn],
   );
 
   const retry = useCallback(() => {
-    if (!stateRef.current.error || stateRef.current.status === 'working') return;
+    if (stateRef.current.error !== 'retryable' || stateRef.current.status === 'working') return;
     const message = [...stateRef.current.messages].reverse().find((item) => item.role === 'user');
     if (!message) return;
     dispatch({ type: 'retry', messageId: message.id });
@@ -132,7 +137,9 @@ export function useLessonTutor(
       type: 'retry',
       messageId: message.id,
     });
-    void runTurn(message);
+    // Reuse the operation key so a lost completed response replays and an ambiguous outcome
+    // fails closed instead of invoking the provider twice.
+    void runTurn(message, message.id);
   }, [runTurn]);
 
   return { cancel, retry, send, state };

@@ -12,18 +12,24 @@ The repository currently contains:
 - One Electron shell that packages the Expo web output as a macOS desktop app.
 - Shared TypeScript UI, routes, design tokens, and platform-specific component files.
 - Canonical npm commands, environment diagnostics, and Electron verification.
-- A minimal FastAPI service with process liveness and PostgreSQL readiness.
+- A public FastAPI service with liveness/readiness, verified Clerk sessions, and a dormant
+  authenticated lesson-tutor gateway.
+- An IAM-private lesson-tutor FastAPI service that alone owns authored context and the OpenAI SDK.
 - A loopback-only local PostgreSQL service managed by Docker Compose.
 - A centralized client API boundary and internal system-diagnostics feature.
+- An operator-run PostgreSQL tutor guard migration for idempotency and bounded turn admission.
 - Pull-request verification for both the client and backend boundaries.
 
 The repository does **not** currently contain:
 
-- Product API modules, database tables, migrations, or persisted learner data.
-- Authentication or authorization.
+- General product tables or persisted learner progress on the server.
+- Server-owned RevenueCat entitlement authorization or its webhook state.
 - A generated API client.
 - Background workers, Redis, or object storage.
-- Mobile-store or signed/notarized desktop release automation.
+- A separate production GCP project and enabled tutor rollout.
+
+All tutor flags default off. The guard migration is not run by application startup, and the tutor
+must remain disabled until the activation gates in `infra/gcp/README.md` are complete.
 
 ## Settled direction
 

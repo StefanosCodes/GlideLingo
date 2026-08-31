@@ -1,6 +1,5 @@
 """Typed application configuration loaded from the process environment."""
 
-from pathlib import Path
 from typing import Literal, Self
 from urllib.parse import urlsplit
 
@@ -38,13 +37,22 @@ class Settings(BaseSettings):
     database_statement_timeout_seconds: int = Field(default=3, ge=1, le=30)
     database_pool_recycle_seconds: int = Field(default=1800, ge=30)
     lesson_tutor_enabled: bool = False
-    lesson_tutor_deadline_seconds: float = Field(default=12.0, gt=0, le=14)
-    lesson_content_root: Path = Path("../content")
-    openai_model: str = "gpt-5.6-terra"
-    openai_api_key: SecretStr | None = Field(
+    lesson_tutor_service_url: str | None = None
+    lesson_tutor_service_audience: str | None = None
+    lesson_tutor_service_timeout_seconds: float = Field(default=6.0, gt=0, le=6)
+    lesson_tutor_operation_deadline_seconds: float = Field(default=11.0, gt=0, le=11)
+    lesson_tutor_pseudonym_key: SecretStr | None = Field(
         default=None,
-        validation_alias=AliasChoices("OPENAI_API_KEY", "GLIDELINGO_OPENAI_API_KEY"),
+        validation_alias=AliasChoices(
+            "GLIDELINGO_LESSON_TUTOR_PSEUDONYM_KEY",
+            "LESSON_TUTOR_PSEUDONYM_KEY",
+        ),
     )
+    lesson_tutor_burst_limit: int = Field(default=4, ge=1, le=20)
+    lesson_tutor_burst_window_seconds: int = Field(default=60, ge=10, le=600)
+    lesson_tutor_concurrency_limit: int = Field(default=1, ge=1, le=3)
+    lesson_tutor_daily_limit: int = Field(default=50, ge=1, le=1000)
+    lesson_tutor_global_daily_turn_limit: int = Field(default=2000, ge=1, le=100000)
     clerk_issuer: str | None = None
     clerk_jwks_url: str | None = None
     clerk_audience: str | None = None
@@ -73,10 +81,47 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_lesson_tutor_configuration(self) -> Self:
-        if self.lesson_tutor_enabled and (
-            self.openai_api_key is None or not self.openai_api_key.get_secret_value().strip()
+        for name, value in (
+            ("lesson tutor service URL", self.lesson_tutor_service_url),
+            ("lesson tutor service audience", self.lesson_tutor_service_audience),
         ):
-            raise ValueError("OPENAI_API_KEY is required when the lesson tutor is enabled")
+            if value is None:
+                continue
+            parsed = urlsplit(value)
+            if (
+                parsed.scheme != "https"
+                or not parsed.netloc
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path not in {"", "/"}
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError(f"The {name} must be an HTTPS origin")
+        if not self.lesson_tutor_enabled:
+            return self
+        if self.database_pool_timeout_seconds > 1 or self.database_statement_timeout_seconds > 2:
+            raise ValueError(
+                "Tutor activation requires database pool timeout <= 1s and statement timeout <= 2s"
+            )
+        if self.lesson_tutor_service_url is None or self.lesson_tutor_service_audience is None:
+            raise ValueError("Tutor service URL and audience are required when enabled")
+        if self.lesson_tutor_service_url.rstrip("/") != self.lesson_tutor_service_audience.rstrip(
+            "/"
+        ):
+            raise ValueError("Tutor service URL and audience must match exactly")
+        if (
+            self.lesson_tutor_pseudonym_key is None
+            or len(self.lesson_tutor_pseudonym_key.get_secret_value().encode()) < 32
+        ):
+            raise ValueError("A tutor pseudonym key of at least 32 bytes is required when enabled")
+        if self.clerk_configuration is None:
+            raise ValueError("Clerk authentication must be configured when the tutor is enabled")
+        if (
+            self.lesson_tutor_service_timeout_seconds
+            >= self.lesson_tutor_operation_deadline_seconds
+        ):
+            raise ValueError("Tutor service timeout must be shorter than the operation deadline")
         return self
 
     @model_validator(mode="after")

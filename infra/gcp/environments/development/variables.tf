@@ -63,6 +63,18 @@ variable "clerk_jwks_url" {
   }
 }
 
+variable "clerk_audience" {
+  description = "Optional exact Clerk JWT audience used by the development API."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.clerk_audience == null || length(trimspace(var.clerk_audience)) > 0
+    error_message = "Clerk audience cannot be blank."
+  }
+}
+
 variable "clerk_authorized_parties" {
   description = "Exact authorized-party origins accepted when a Clerk token contains azp."
   type        = list(string)
@@ -75,8 +87,46 @@ variable "clerk_authorized_parties" {
   validation {
     condition = length(var.clerk_authorized_parties) > 0 && alltrue([
       for party in var.clerk_authorized_parties :
-      party == "glidelingo://app" || can(regex("^https?://[^/?#]+$", party))
+      party == "glidelingo://app" || (
+        can(regex("^https?://[^/?#]+$", party)) && !strcontains(party, "@")
+      )
     ])
-    error_message = "Clerk authorized parties must contain exact HTTP(S) origins or glidelingo://app."
+    error_message = "Clerk authorized parties must contain credential-free exact HTTP(S) origins or glidelingo://app."
+  }
+}
+
+variable "lesson_tutor_enabled" {
+  description = "Enable the public gateway only after every documented activation gate is satisfied."
+  type        = bool
+  default     = false
+}
+
+variable "private_lesson_tutor_enabled" {
+  description = "Enable the private runtime only after all documented security and operational gates pass."
+  type        = bool
+  default     = false
+}
+
+variable "lesson_tutor_pseudonym_secret_version" {
+  description = "Existing development pseudonym-key secret version; null mounts no secret."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.lesson_tutor_pseudonym_secret_version == null || can(regex("^[1-9][0-9]*$", var.lesson_tutor_pseudonym_secret_version))
+    error_message = "The pseudonym-key secret version must be an immutable positive version number."
+  }
+}
+
+variable "lesson_tutor_openai_secret_version" {
+  description = "Existing development OpenAI-key secret version; null mounts no secret."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.lesson_tutor_openai_secret_version == null || can(regex("^[1-9][0-9]*$", var.lesson_tutor_openai_secret_version))
+    error_message = "The OpenAI-key secret version must be an immutable positive version number."
   }
 }

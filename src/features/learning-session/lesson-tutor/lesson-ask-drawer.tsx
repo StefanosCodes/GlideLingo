@@ -78,11 +78,18 @@ export function LessonAskDrawer({
         {state.error ? (
           <View accessibilityLiveRegion="polite" style={styles.error}>
             <ThemedText type="footnote" themeColor="textSecondary">
-              The tutor isn’t available right now. Your lesson is still here.
+              {state.error === 'retryable'
+                ? 'The tutor didn’t return an answer. Retry safely checks the same request and won’t send it twice.'
+                : 'We couldn’t safely retry that turn. Ask again as a new question.'}
             </ThemedText>
-            <Pressable accessibilityLabel="Retry tutor message" accessibilityRole="button" onPress={onRetry}>
-              <ThemedText type="footnote">Retry</ThemedText>
-            </Pressable>
+            {state.error === 'retryable' ? (
+              <Pressable
+                accessibilityLabel="Retry tutor message"
+                accessibilityRole="button"
+                onPress={onRetry}>
+                <ThemedText type="footnote">Retry</ThemedText>
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
       </ScrollView>

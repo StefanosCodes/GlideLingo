@@ -13,10 +13,13 @@ logger = logging.getLogger("glidelingo.request")
 
 type ErrorCode = Literal[
     "dependency_unavailable",
+    "authentication_unavailable",
     "internal_error",
     "lesson_context_not_found",
     "lesson_tutor_unavailable",
     "lesson_tutor_timeout",
+    "lesson_tutor_conflict",
+    "lesson_tutor_limited",
 ]
 
 
@@ -34,6 +37,10 @@ class DependencyUnavailableError(Exception):
     """A required dependency cannot currently serve requests."""
 
 
+class AuthenticationUnavailableError(Exception):
+    """Server-side authentication is not configured or operational."""
+
+
 class LessonContextNotFoundError(Exception):
     """The requested authored lesson context is unavailable."""
 
@@ -42,8 +49,20 @@ class LessonTutorUnavailableError(Exception):
     """The tutor is disabled or its provider cannot serve the request."""
 
 
+class LessonTutorNotSentError(LessonTutorUnavailableError):
+    """The private request definitively did not leave the public API."""
+
+
 class LessonTutorTimeoutError(Exception):
     """The tutor exceeded its bounded request deadline."""
+
+
+class LessonTutorConflictError(Exception):
+    """An idempotency key conflicts or has an ambiguous prior outcome."""
+
+
+class LessonTutorLimitedError(Exception):
+    """A per-actor or global tutor safety limit rejected the request."""
 
 
 def error_response(
@@ -62,6 +81,15 @@ async def dependency_unavailable_handler(request: Request, _error: Exception) ->
         status_code=503,
         code="dependency_unavailable",
         message="A required dependency is unavailable.",
+        request_id=request.state.request_id,
+    )
+
+
+async def authentication_unavailable_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=503,
+        code="authentication_unavailable",
+        message="Authentication is unavailable.",
         request_id=request.state.request_id,
     )
 
@@ -89,6 +117,24 @@ async def lesson_tutor_timeout_handler(request: Request, _error: Exception) -> J
         status_code=504,
         code="lesson_tutor_timeout",
         message="The lesson tutor took too long to respond.",
+        request_id=request.state.request_id,
+    )
+
+
+async def lesson_tutor_conflict_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=409,
+        code="lesson_tutor_conflict",
+        message="This tutor turn conflicts with an earlier request.",
+        request_id=request.state.request_id,
+    )
+
+
+async def lesson_tutor_limited_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=429,
+        code="lesson_tutor_limited",
+        message="The lesson tutor limit has been reached. Try again later.",
         request_id=request.state.request_id,
     )
 

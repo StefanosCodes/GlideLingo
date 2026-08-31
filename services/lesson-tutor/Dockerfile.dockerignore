@@ -1,0 +1,13 @@
+*
+!content/
+!content/**
+!services/
+!services/lesson-tutor/
+!services/lesson-tutor/Dockerfile
+!services/lesson-tutor/pyproject.toml
+!services/lesson-tutor/uv.lock
+!services/lesson-tutor/app/
+!services/lesson-tutor/app/**
+**/__pycache__/
+**/*.pyc
+**/*.pyo

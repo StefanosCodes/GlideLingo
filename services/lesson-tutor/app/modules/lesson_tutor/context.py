@@ -1,4 +1,4 @@
-"""Canonical authored lesson lookup and model-visibility rules."""
+"""Trusted authored lesson lookup and model-visibility rules."""
 
 import json
 from dataclasses import dataclass
@@ -9,14 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.errors import LessonContextNotFoundError
 
-LESSON_FILES = {
-    "el-letters-1": Path("courses/en-el-GR/missions/el-letters-1.json"),
-}
+LESSON_FILES = {"el-letters-1": Path("courses/en-el-GR/missions/el-letters-1.json")}
 
 
 class HearBeat(BaseModel):
     model_config = ConfigDict(extra="ignore")
-
     type: Literal["hear"]
     greek: str
     gloss: str
@@ -24,14 +21,12 @@ class HearBeat(BaseModel):
 
 class NoticeBeat(BaseModel):
     model_config = ConfigDict(extra="ignore")
-
     type: Literal["notice"]
     text: str
 
 
 class CheckBeat(BaseModel):
     model_config = ConfigDict(extra="ignore")
-
     type: Literal["check"]
     prompt: str
     choices: list[str]
@@ -45,7 +40,6 @@ Beat = Annotated[HearBeat | NoticeBeat | CheckBeat, Field(discriminator="type")]
 
 class AuthoredLesson(BaseModel):
     model_config = ConfigDict(extra="ignore")
-
     lessonId: str
     lessonTitle: str
     moduleTitle: str
@@ -55,8 +49,6 @@ class AuthoredLesson(BaseModel):
 
 @dataclass(frozen=True)
 class LessonTutorContext:
-    """Trusted runtime context supplied to the tutor agent."""
-
     lesson_id: str
     lesson_title: str
     module_title: str
@@ -69,11 +61,7 @@ class LessonTutorContext:
 
 
 def _describe_beat(
-    beat: Beat,
-    *,
-    step_index: int,
-    current: bool,
-    selected_choice: str | None,
+    beat: Beat, *, step_index: int, current: bool, selected_choice: str | None
 ) -> list[str]:
     lines = [f"Step {step_index + 1} ({'current' if current else 'previous'}):"]
     if isinstance(beat, HearBeat):
@@ -107,31 +95,25 @@ def _describe_beat(
 
 
 def load_lesson_context(
-    *,
-    content_root: Path,
-    lesson_id: str,
-    visible_step_index: int,
-    selected_choice: str | None,
+    *, content_root: Path, lesson_id: str, visible_step_index: int, selected_choice: str | None
 ) -> LessonTutorContext:
-    """Resolve a whitelisted lesson and expose only steps the learner can see."""
-
-    relative_lesson_path = LESSON_FILES.get(lesson_id)
-    if relative_lesson_path is None:
+    relative_path = LESSON_FILES.get(lesson_id)
+    if relative_path is None:
         raise LessonContextNotFoundError
-
-    lesson_path = content_root.resolve() / relative_lesson_path
     try:
-        lesson = AuthoredLesson.model_validate(json.loads(lesson_path.read_text(encoding="utf-8")))
+        lesson = AuthoredLesson.model_validate(
+            json.loads((content_root.resolve() / relative_path).read_text(encoding="utf-8"))
+        )
     except (OSError, json.JSONDecodeError, ValidationError) as error:
         raise LessonContextNotFoundError from error
     if lesson.lessonId != lesson_id or not 0 <= visible_step_index < len(lesson.beats):
         raise LessonContextNotFoundError
-
     current_beat = lesson.beats[visible_step_index]
-    validated_choice = None
-    if isinstance(current_beat, CheckBeat) and selected_choice in current_beat.choices:
-        validated_choice = selected_choice
-
+    validated_choice = (
+        selected_choice
+        if isinstance(current_beat, CheckBeat) and selected_choice in current_beat.choices
+        else None
+    )
     lines = [
         f"Lesson: {lesson.lessonTitle}",
         f"Module: {lesson.moduleTitle}",
@@ -146,7 +128,6 @@ def load_lesson_context(
                 selected_choice=validated_choice if index == visible_step_index else None,
             )
         )
-
     return LessonTutorContext(
         lesson_id=lesson_id,
         lesson_title=lesson.lessonTitle,

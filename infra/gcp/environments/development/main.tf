@@ -82,6 +82,15 @@ resource "google_service_account" "api_runtime" {
   depends_on = [google_project_service.required]
 }
 
+resource "google_service_account" "tutor_runtime" {
+  project      = var.project_id
+  account_id   = "glidelingo-tutor-runtime"
+  display_name = "GlideLingo private tutor runtime"
+  description  = "Least-privilege identity for the IAM-private development tutor"
+
+  depends_on = [google_project_service.required]
+}
+
 resource "google_project_iam_member" "api_cloud_sql_client" {
   project = var.project_id
   role    = "roles/cloudsql.client"
@@ -194,6 +203,48 @@ resource "google_secret_manager_secret_iam_member" "api_database_url" {
   member    = "serviceAccount:${google_service_account.api_runtime.email}"
 }
 
+resource "google_secret_manager_secret" "tutor_pseudonym_key" {
+  project   = var.project_id
+  secret_id = "glidelingo-tutor-pseudonym-key"
+  labels    = local.labels
+
+  replication {
+    user_managed {
+      replicas { location = var.region }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_secret_manager_secret" "tutor_openai_key" {
+  project   = var.project_id
+  secret_id = "glidelingo-tutor-openai-key"
+  labels    = local.labels
+
+  replication {
+    user_managed {
+      replicas { location = var.region }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_secret_manager_secret_iam_binding" "api_pseudonym_key" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.tutor_pseudonym_key.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  members   = ["serviceAccount:${google_service_account.api_runtime.email}"]
+}
+
+resource "google_secret_manager_secret_iam_binding" "tutor_openai_key" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.tutor_openai_key.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  members   = ["serviceAccount:${google_service_account.tutor_runtime.email}"]
+}
+
 resource "google_cloud_run_v2_service" "api" {
   project             = var.project_id
   name                = "glidelingo-api"
@@ -239,13 +290,31 @@ resource "google_cloud_run_v2_service" "api" {
       }
 
       env {
-        name  = "GLIDELINGO_DATABASE_POOL_SIZE"
-        value = "3"
+        name  = "GLIDELINGO_LESSON_TUTOR_ENABLED"
+        value = tostring(var.lesson_tutor_enabled)
       }
 
       env {
-        name  = "GLIDELINGO_DATABASE_MAX_OVERFLOW"
-        value = "0"
+        name  = "GLIDELINGO_LESSON_TUTOR_SERVICE_URL"
+        value = google_cloud_run_v2_service.tutor.uri
+      }
+
+      env {
+        name  = "GLIDELINGO_LESSON_TUTOR_SERVICE_AUDIENCE"
+        value = google_cloud_run_v2_service.tutor.uri
+      }
+
+      dynamic "env" {
+        for_each = var.lesson_tutor_pseudonym_secret_version == null ? [] : [var.lesson_tutor_pseudonym_secret_version]
+        content {
+          name = "GLIDELINGO_LESSON_TUTOR_PSEUDONYM_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.tutor_pseudonym_key.secret_id
+              version = env.value
+            }
+          }
+        }
       }
 
       env {
@@ -258,9 +327,37 @@ resource "google_cloud_run_v2_service" "api" {
         value = var.clerk_jwks_url
       }
 
+      dynamic "env" {
+        for_each = var.clerk_audience == null ? [] : [var.clerk_audience]
+        content {
+          name  = "GLIDELINGO_CLERK_AUDIENCE"
+          value = env.value
+        }
+      }
+
       env {
         name  = "GLIDELINGO_CLERK_AUTHORIZED_PARTIES"
         value = jsonencode(var.clerk_authorized_parties)
+      }
+
+      env {
+        name  = "GLIDELINGO_DATABASE_POOL_SIZE"
+        value = "3"
+      }
+
+      env {
+        name  = "GLIDELINGO_DATABASE_MAX_OVERFLOW"
+        value = "0"
+      }
+
+      env {
+        name  = "GLIDELINGO_DATABASE_POOL_TIMEOUT_SECONDS"
+        value = "1"
+      }
+
+      env {
+        name  = "GLIDELINGO_DATABASE_STATEMENT_TIMEOUT_SECONDS"
+        value = "2"
       }
 
       volume_mounts {
@@ -303,13 +400,133 @@ resource "google_cloud_run_v2_service" "api" {
 
   depends_on = [
     google_project_iam_member.api_cloud_sql_client,
+    google_secret_manager_secret_iam_binding.api_pseudonym_key,
     google_secret_manager_secret_iam_member.api_database_url,
     google_secret_manager_secret_version.database_url,
   ]
 
   lifecycle {
     ignore_changes = [template[0].containers[0].image]
+
+    precondition {
+      condition = !var.lesson_tutor_enabled || (
+        var.private_lesson_tutor_enabled &&
+        var.lesson_tutor_pseudonym_secret_version != null &&
+        length(var.clerk_issuer) > 0 &&
+        length(var.clerk_jwks_url) > 0
+      )
+      error_message = "The public tutor gateway requires the private service, pseudonym key, and complete Clerk configuration."
+    }
   }
+}
+
+resource "google_cloud_run_v2_service" "tutor" {
+  project              = var.project_id
+  name                 = "glidelingo-lesson-tutor"
+  location             = var.region
+  deletion_protection  = false
+  ingress              = "INGRESS_TRAFFIC_ALL"
+  invoker_iam_disabled = false
+  labels               = local.labels
+
+  template {
+    service_account                  = google_service_account.tutor_runtime.email
+    timeout                          = "6s"
+    max_instance_request_concurrency = 4
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+
+    containers {
+      image = var.bootstrap_image
+
+      ports {
+        container_port = 8080
+      }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      env {
+        name  = "GLIDELINGO_TUTOR_ENABLED"
+        value = tostring(var.private_lesson_tutor_enabled)
+      }
+
+      env {
+        name  = "OPENAI_AGENTS_DONT_LOG_MODEL_DATA"
+        value = "1"
+      }
+
+      env {
+        name  = "OPENAI_AGENTS_DONT_LOG_TOOL_DATA"
+        value = "1"
+      }
+
+      dynamic "env" {
+        for_each = var.lesson_tutor_openai_secret_version == null ? [] : [var.lesson_tutor_openai_secret_version]
+        content {
+          name = "OPENAI_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.tutor_openai_key.secret_id
+              version = env.value
+            }
+          }
+        }
+      }
+
+      startup_probe {
+        timeout_seconds   = 3
+        period_seconds    = 5
+        failure_threshold = 12
+        http_get {
+          path = "/health/live"
+          port = 8080
+        }
+      }
+
+      liveness_probe {
+        initial_delay_seconds = 10
+        timeout_seconds       = 3
+        period_seconds        = 30
+        failure_threshold     = 3
+        http_get {
+          path = "/health/live"
+          port = 8080
+        }
+      }
+    }
+  }
+
+  depends_on = [
+    google_secret_manager_secret_iam_binding.tutor_openai_key,
+    google_service_account.tutor_runtime,
+  ]
+
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
+
+    precondition {
+      condition     = !var.private_lesson_tutor_enabled || var.lesson_tutor_openai_secret_version != null
+      error_message = "The private tutor cannot be enabled without an explicit OpenAI secret version."
+    }
+  }
+}
+
+resource "google_cloud_run_v2_service_iam_binding" "tutor_invoker" {
+  project  = var.project_id
+  location = google_cloud_run_v2_service.tutor.location
+  name     = google_cloud_run_v2_service.tutor.name
+  role     = "roles/run.invoker"
+  members  = ["serviceAccount:${google_service_account.api_runtime.email}"]
 }
 
 resource "google_cloud_run_v2_service_iam_member" "public_api" {
@@ -373,14 +590,37 @@ resource "google_artifact_registry_repository_iam_member" "github_writer" {
   member     = "serviceAccount:${google_service_account.github_deployer.email}"
 }
 
-resource "google_project_iam_member" "github_run_developer" {
+resource "google_project_iam_custom_role" "github_run_deployer" {
+  project     = var.project_id
+  role_id     = "glidelingoCloudRunDeployer"
+  title       = "GlideLingo Cloud Run deployer"
+  description = "Update and inspect existing Cloud Run services without invoke permission"
+  permissions = [
+    "run.operations.get",
+    "run.revisions.get",
+    "run.revisions.list",
+    "run.routes.get",
+    "run.routes.list",
+    "run.services.get",
+    "run.services.list",
+    "run.services.update",
+  ]
+}
+
+resource "google_project_iam_member" "github_run_deployer" {
   project = var.project_id
-  role    = "roles/run.developer"
+  role    = google_project_iam_custom_role.github_run_deployer.id
   member  = "serviceAccount:${google_service_account.github_deployer.email}"
 }
 
 resource "google_service_account_iam_member" "github_uses_runtime" {
   service_account_id = google_service_account.api_runtime.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.github_deployer.email}"
+}
+
+resource "google_service_account_iam_member" "github_uses_tutor_runtime" {
+  service_account_id = google_service_account.tutor_runtime.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.github_deployer.email}"
 }

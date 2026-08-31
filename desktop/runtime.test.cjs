@@ -3,11 +3,21 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  isAllowedAuthWindowUrl,
   isAllowedNavigation,
   isSafeExternalUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
 } = require('./runtime.cjs');
+
+test('authentication popups are restricted to Clerk, Google, and Apple HTTPS origins', () => {
+  assert.equal(isAllowedAuthWindowUrl('https://vast-gator-9531.clerk.accounts.dev/v1/oauth_callback'), true);
+  assert.equal(isAllowedAuthWindowUrl('https://accounts.google.com/o/oauth2/v2/auth'), true);
+  assert.equal(isAllowedAuthWindowUrl('https://appleid.apple.com/auth/authorize'), true);
+  assert.equal(isAllowedAuthWindowUrl('https://clerk.accounts.dev.attacker.example/'), false);
+  assert.equal(isAllowedAuthWindowUrl('http://accounts.google.com/'), false);
+  assert.equal(isAllowedAuthWindowUrl('javascript:alert(1)'), false);
+});
 
 test('development renderer URL is restricted to the local Expo server', () => {
   assert.equal(validateDevelopmentUrl('http://127.0.0.1:8081'), 'http://127.0.0.1:8081/');

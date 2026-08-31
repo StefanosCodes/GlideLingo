@@ -1,9 +1,12 @@
+import { useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { ScreenFrame } from '@/components/screen-frame';
 import { ThemedText } from '@/components/themed-text';
+import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { Spacing } from '@/constants/theme';
+import { AccountSummary } from '@/features/auth/account-summary';
 import { useTheme } from '@/hooks/use-theme';
 import { useLearning } from '@/providers/learning-provider';
 
@@ -15,8 +18,18 @@ const skillProfile = [
 ] as const;
 
 export default function ProgressScreen() {
+  const router = useRouter();
   const theme = useTheme();
-  const { language, enrolledCourse, currentModule, progress, completedLessonIds } = useLearning();
+  const {
+    language,
+    enrolledCourse,
+    currentModule,
+    progress,
+    completedLessonIds,
+    legacyProgressAvailable,
+    dismissLegacyProgress,
+    importLegacyProgress,
+  } = useLearning();
   const percent = Math.round(progress * 100);
   const introduced = completedLessonIds.length > 0;
 
@@ -69,6 +82,25 @@ export default function ProgressScreen() {
         ))}
       </GlideSurface>
 
+      {legacyProgressAvailable ? (
+        <GlideSurface padding="roomy" style={styles.membership} variant="tinted">
+          <View style={styles.membershipCopy}>
+            <ThemedText type="eyebrow" themeColor="textSecondary">
+              EXISTING PROGRESS FOUND
+            </ThemedText>
+            <ThemedText type="title3">Bring this browser’s earlier progress into your account?</ThemedText>
+            <ThemedText type="footnote" themeColor="textSecondary">
+              Import only if this progress is yours. Earlier lessons will be combined with this account without replacing
+              newer progress, then removed from the older shared browser storage.
+            </ThemedText>
+          </View>
+          <View style={styles.legacyActions}>
+            <GlideButton label="Import progress" onPress={importLegacyProgress} size="regular" />
+            <GlideButton label="Not mine" onPress={dismissLegacyProgress} size="regular" variant="tertiary" />
+          </View>
+        </GlideSurface>
+      ) : null}
+
       {enrolledCourse ? (
         <View style={[styles.milestone, { borderTopColor: theme.separator }]}>
           <ThemedText type="title3">{percent}%</ThemedText>
@@ -77,6 +109,21 @@ export default function ProgressScreen() {
           </ThemedText>
         </View>
       ) : null}
+
+      <GlideSurface padding="roomy" style={styles.membership}>
+        <View style={styles.membershipCopy}>
+          <ThemedText type="eyebrow" themeColor="textSecondary">
+            MEMBERSHIP
+          </ThemedText>
+          <ThemedText type="title3">GlideLingo Pro</ThemedText>
+          <ThemedText type="footnote" themeColor="textSecondary">
+            View your access, choose a plan, or restore a purchase.
+          </ThemedText>
+        </View>
+        <GlideButton label="Manage Pro" onPress={() => router.push('/subscription')} variant="secondary" />
+      </GlideSurface>
+
+      <AccountSummary />
     </ScreenFrame>
   );
 }
@@ -94,4 +141,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.twoHalf,
   },
   milestone: { borderTopWidth: StyleSheet.hairlineWidth, gap: Spacing.half, paddingTop: Spacing.four },
+  membership: { gap: Spacing.three },
+  membershipCopy: { gap: Spacing.one },
+  legacyActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
 });

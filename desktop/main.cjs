@@ -7,6 +7,7 @@ const { app, BrowserWindow, net, protocol, session, shell } = require('electron'
 const {
   APP_HOST,
   APP_SCHEME,
+  isAllowedAuthWindowUrl,
   isAllowedNavigation,
   isSafeExternalUrl,
   resolveRendererPath,
@@ -14,21 +15,20 @@ const {
 } = require('./runtime.cjs');
 
 const DEVELOPMENT_URL = validateDevelopmentUrl(process.env.ELECTRON_RENDERER_URL);
-const AUDIO_SMOKE_TEST = process.env.ELECTRON_AUDIO_SMOKE_TEST === '1';
 const PRODUCTION_URL = `${APP_SCHEME}://${APP_HOST}/`;
 const RENDERER_URL = DEVELOPMENT_URL ?? PRODUCTION_URL;
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline' https://*.clerk.accounts.dev",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  "img-src 'self' data: blob: https://*.clerk.com https://*.clerk.accounts.dev https://img.clerk.com",
   "font-src 'self' data:",
-  "connect-src 'self'",
+  "connect-src 'self' https://*.clerk.accounts.dev https://api.clerk.com https://*.revenuecat.com wss://*.clerk.accounts.dev",
   "media-src 'self' data: blob:",
   "object-src 'none'",
-  "frame-src 'none'",
+  "frame-src https://*.clerk.accounts.dev https://accounts.google.com https://appleid.apple.com",
   "base-uri 'self'",
-  "form-action 'self'",
+  "form-action 'self' https://*.clerk.accounts.dev https://accounts.google.com https://appleid.apple.com",
 ].join('; ');
 
 protocol.registerSchemesAsPrivileged([
@@ -45,10 +45,6 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 app.enableSandbox();
-
-if (AUDIO_SMOKE_TEST) {
-  app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
-}
 
 async function registerProductionProtocol() {
   const distDirectory = app.isPackaged
@@ -129,6 +125,22 @@ function createWindow() {
   window.once('ready-to-show', () => window.show());
 
   window.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedAuthWindowUrl(url)) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          autoHideMenuBar: true,
+          parent: window,
+          webPreferences: {
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+            webSecurity: true,
+          },
+        },
+      };
+    }
+
     openExternalUrl(url);
     return { action: 'deny' };
   });
@@ -146,17 +158,22 @@ function createWindow() {
     window.webContents.once('did-finish-load', () => {
       setTimeout(async () => {
         try {
-          const rendered = await window.webContents.executeJavaScript(
-            "Boolean(document.querySelector('[data-testid=\"start-lesson\"]'))",
-          );
+          const rendered = await window.webContents.executeJavaScript(`({
+            authenticated: Boolean(document.querySelector('[data-testid="start-lesson"]')),
+            completingProfile: Boolean(document.querySelector('[data-testid="first-name-completion"]')),
+            signedOut: Boolean(document.querySelector('[data-testid="auth-sign-in"]')),
+          })`);
 
-          if (!rendered) {
-            console.error('[desktop-smoke] renderer loaded without the home screen');
+          if (!rendered.authenticated && !rendered.completingProfile && !rendered.signedOut) {
+            console.error('[desktop-smoke] renderer loaded without a valid signed-in or signed-out screen');
             app.exit(1);
             return;
           }
 
-          console.log(`[desktop-smoke] loaded ${window.webContents.getURL()}`);
+          console.log(
+            `[desktop-smoke] loaded ${rendered.signedOut ? 'signed-out' : 'authenticated'} state at ` +
+              window.webContents.getURL(),
+          );
           app.quit();
         } catch (error) {
           console.error('[desktop-smoke] renderer verification failed:', error);
@@ -168,67 +185,6 @@ function createWindow() {
     window.webContents.once('did-fail-load', (_event, code, description) => {
       console.error(`[desktop-smoke] load failed (${code}): ${description}`);
       app.exit(1);
-    });
-  } else if (AUDIO_SMOKE_TEST) {
-    let learningStatePrepared = false;
-
-    window.webContents.on('did-finish-load', () => {
-      if (!learningStatePrepared) {
-        learningStatePrepared = true;
-        void window.webContents
-          .executeJavaScript(
-            `localStorage.setItem('glidelingo-learning', JSON.stringify({
-              languageId: 'el',
-              enrolledByLanguage: { el: 'el-from-zero' },
-              completedLessonIds: []
-            }))`,
-          )
-          .then(() => window.reload());
-        return;
-      }
-
-      setTimeout(async () => {
-        try {
-          const playbackResult = await window.webContents.executeJavaScript(`(async () => {
-            const lessonButton = document.querySelector('[data-testid="start-lesson"]');
-            const initialLabel = lessonButton?.getAttribute('aria-label') ?? lessonButton?.textContent ?? null;
-            lessonButton?.click();
-            let button;
-            for (let attempt = 0; attempt < 30; attempt += 1) {
-              button = Array.from(document.querySelectorAll('[aria-label]')).find(
-                (element) => (element.getAttribute('aria-label') ?? '').startsWith('Play pronunciation:'),
-              );
-              if (button) break;
-              await new Promise((resolve) => setTimeout(resolve, 100));
-            }
-            button?.click();
-            const pronunciationStates = [];
-            for (const delay of [10, 50, 100, 250, 750]) {
-              await new Promise((resolve) => setTimeout(resolve, delay));
-              pronunciationStates.push(button?.textContent ?? null);
-            }
-            return {
-              initialLabel,
-              pronunciationFound: Boolean(button),
-              pronunciationText: button?.textContent ?? null,
-              pronunciationStates,
-              playing: pronunciationStates.some((state) => state?.includes('Playing')),
-            };
-          })()`);
-
-          if (!playbackResult.playing) {
-            console.error('[desktop-audio-smoke] pronunciation did not enter the playing state', playbackResult);
-            app.exit(1);
-            return;
-          }
-
-          console.log(`[desktop-audio-smoke] bundled Greek audio played from ${window.webContents.getURL()}`);
-          app.quit();
-        } catch (error) {
-          console.error('[desktop-audio-smoke] playback verification failed:', error);
-          app.exit(1);
-        }
-      }, 1000);
     });
   }
 

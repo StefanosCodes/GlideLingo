@@ -112,9 +112,25 @@ function isSafeExternalUrl(targetUrl) {
   }
 }
 
+function isAllowedAuthWindowUrl(targetUrl) {
+  try {
+    const url = new URL(targetUrl);
+    if (url.protocol !== 'https:' || url.username || url.password) return false;
+
+    return (
+      url.hostname === 'accounts.google.com' ||
+      url.hostname === 'appleid.apple.com' ||
+      url.hostname.endsWith('.clerk.accounts.dev')
+    );
+  } catch {
+    return false;
+  }
+}
+
 module.exports = {
   APP_HOST,
   APP_SCHEME,
+  isAllowedAuthWindowUrl,
   isAllowedNavigation,
   isSafeExternalUrl,
   resolveRendererPath,

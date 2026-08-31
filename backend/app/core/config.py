@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="GLIDELINGO_",
-        env_file=("../.env", ".env"),
+        env_file=("../.env", "../.env.local", ".env", ".env.local"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     database_connect_timeout_seconds: int = Field(default=3, ge=1, le=30)
     database_statement_timeout_seconds: int = Field(default=3, ge=1, le=30)
     database_pool_recycle_seconds: int = Field(default=1800, ge=30)
+    clerk_issuer: str | None = None
+    clerk_jwks_url: str | None = None
+    clerk_audience: str | None = None
 
     @model_validator(mode="after")
     def validate_cors_origins(self) -> Self:
@@ -54,8 +57,52 @@ class Settings(BaseSettings):
                 )
         return self
 
+    @model_validator(mode="after")
+    def validate_clerk_configuration(self) -> Self:
+        required_values = (self.clerk_issuer, self.clerk_jwks_url)
+        if all(value is None for value in required_values):
+            if self.clerk_audience is not None:
+                raise ValueError(
+                    "Clerk issuer and JWKS URL are required when an audience is configured"
+                )
+            return self
+        if any(value is None or not value.strip() for value in required_values):
+            raise ValueError("Clerk issuer and JWKS URL must be configured together")
+        if self.clerk_audience is not None and not self.clerk_audience.strip():
+            raise ValueError("Clerk audience cannot be blank")
+
+        assert self.clerk_issuer is not None
+        assert self.clerk_jwks_url is not None
+        for name, value in (
+            ("Clerk issuer", self.clerk_issuer),
+            ("Clerk JWKS URL", self.clerk_jwks_url),
+        ):
+            parsed = urlsplit(value)
+            if (
+                parsed.scheme != "https"
+                or not parsed.netloc
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError(f"{name} must be an HTTPS URL without credentials or query data")
+        return self
+
     @property
     def normalized_cors_origins(self) -> list[str]:
         """Return origins in the exact format expected by CORS middleware."""
 
         return [origin.rstrip("/") for origin in self.cors_origins]
+
+    @property
+    def clerk_configuration(self) -> tuple[str, str, str | None] | None:
+        """Return the complete Clerk verifier configuration when enabled."""
+
+        if self.clerk_issuer is None or self.clerk_jwks_url is None:
+            return None
+        return (
+            self.clerk_issuer.rstrip("/"),
+            self.clerk_jwks_url,
+            self.clerk_audience.strip() if self.clerk_audience is not None else None,
+        )

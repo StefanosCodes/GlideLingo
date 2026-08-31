@@ -1,0 +1,155 @@
+"""Canonical authored lesson lookup and model-visibility rules."""
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.core.errors import LessonContextNotFoundError
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+LESSON_FILES = {
+    "el-letters-1": REPOSITORY_ROOT
+    / "content"
+    / "courses"
+    / "en-el-GR"
+    / "missions"
+    / "el-letters-1.json",
+}
+
+
+class HearBeat(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    type: Literal["hear"]
+    greek: str
+    gloss: str
+
+
+class NoticeBeat(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    type: Literal["notice"]
+    text: str
+
+
+class CheckBeat(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    type: Literal["check"]
+    prompt: str
+    choices: list[str]
+    answer: str
+    greek: str | None = None
+
+
+Beat = Annotated[HearBeat | NoticeBeat | CheckBeat, Field(discriminator="type")]
+
+
+class AuthoredLesson(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    lessonId: str
+    lessonTitle: str
+    moduleTitle: str
+    objective: str
+    beats: list[Beat]
+
+
+@dataclass(frozen=True)
+class LessonTutorContext:
+    """Trusted runtime context supplied to the tutor agent."""
+
+    lesson_id: str
+    lesson_title: str
+    module_title: str
+    objective: str
+    visible_step_index: int
+    model_visible_context: str
+    canonical_answer: str | None
+    answer_attempted: bool
+
+
+def _describe_beat(
+    beat: Beat,
+    *,
+    step_index: int,
+    current: bool,
+    selected_choice: str | None,
+) -> list[str]:
+    lines = [f"Step {step_index + 1} ({'current' if current else 'previous'}):"]
+    if isinstance(beat, HearBeat):
+        lines.extend((f"- Activity: hear {beat.greek}", f"- Learner-facing gloss: {beat.gloss}"))
+    elif isinstance(beat, NoticeBeat):
+        lines.extend(("- Activity: notice", f"- Learner-facing text: {beat.text}"))
+    else:
+        lines.extend(
+            (
+                "- Activity: check",
+                f"- Prompt: {beat.prompt}",
+                f"- Choices: {', '.join(beat.choices)}",
+            )
+        )
+        if beat.greek:
+            lines.append(f"- Greek shown: {beat.greek}")
+        if not current:
+            lines.append(f"- Correct answer already encountered: {beat.answer}")
+        elif selected_choice is not None:
+            lines.extend(
+                (
+                    f"- Learner selected: {selected_choice}",
+                    "- Attempt result: "
+                    f"{'correct' if selected_choice == beat.answer else 'incorrect'}",
+                    f"- Correct answer: {beat.answer}",
+                )
+            )
+        else:
+            lines.append("- Attempt state: not attempted; give hints and do not state the answer")
+    return lines
+
+
+def load_lesson_context(
+    *, lesson_id: str, visible_step_index: int, selected_choice: str | None
+) -> LessonTutorContext:
+    """Resolve a whitelisted lesson and expose only steps the learner can see."""
+
+    lesson_path = LESSON_FILES.get(lesson_id)
+    if lesson_path is None:
+        raise LessonContextNotFoundError
+
+    lesson = AuthoredLesson.model_validate(json.loads(lesson_path.read_text(encoding="utf-8")))
+    if lesson.lessonId != lesson_id or not 0 <= visible_step_index < len(lesson.beats):
+        raise LessonContextNotFoundError
+
+    current_beat = lesson.beats[visible_step_index]
+    validated_choice = None
+    if isinstance(current_beat, CheckBeat) and selected_choice in current_beat.choices:
+        validated_choice = selected_choice
+
+    lines = [
+        f"Lesson: {lesson.lessonTitle}",
+        f"Module: {lesson.moduleTitle}",
+        f"Objective: {lesson.objective}",
+    ]
+    for index, beat in enumerate(lesson.beats[: visible_step_index + 1]):
+        lines.extend(
+            _describe_beat(
+                beat,
+                step_index=index,
+                current=index == visible_step_index,
+                selected_choice=validated_choice if index == visible_step_index else None,
+            )
+        )
+
+    return LessonTutorContext(
+        lesson_id=lesson_id,
+        lesson_title=lesson.lessonTitle,
+        module_title=lesson.moduleTitle,
+        objective=lesson.objective,
+        visible_step_index=visible_step_index,
+        model_visible_context="\n".join(lines),
+        canonical_answer=current_beat.answer if isinstance(current_beat, CheckBeat) else None,
+        answer_attempted=validated_choice is not None,
+    )

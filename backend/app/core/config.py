@@ -3,7 +3,7 @@
 from typing import Literal, Self
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_DATABASE_URL = (
@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     database_connect_timeout_seconds: int = Field(default=3, ge=1, le=30)
     database_statement_timeout_seconds: int = Field(default=3, ge=1, le=30)
     database_pool_recycle_seconds: int = Field(default=1800, ge=30)
+    lesson_tutor_enabled: bool = False
+    openai_model: str = "gpt-5.6-terra"
+    openai_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OPENAI_API_KEY", "GLIDELINGO_OPENAI_API_KEY"),
+    )
 
     @model_validator(mode="after")
     def validate_cors_origins(self) -> Self:
@@ -52,6 +58,14 @@ class Settings(BaseSettings):
                     "CORS origins must be HTTP(S) origins without credentials, paths, queries, "
                     "or fragments"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def validate_lesson_tutor_configuration(self) -> Self:
+        if self.lesson_tutor_enabled and (
+            self.openai_api_key is None or not self.openai_api_key.get_secret_value().strip()
+        ):
+            raise ValueError("OPENAI_API_KEY is required when the lesson tutor is enabled")
         return self
 
     @property

@@ -6,7 +6,15 @@ export type BillingStatus = 'signed-out' | 'loading' | 'free' | 'pro' | 'error';
 
 export type BillingInterval = 'monthly' | 'annual' | 'other';
 
-export type BillingPurchaseStatus = 'idle' | 'loading' | 'success' | 'cancelled' | 'declined' | 'error';
+export type BillingPurchaseStatus =
+  | 'idle'
+  | 'loading'
+  | 'syncing'
+  | 'success'
+  | 'cancelled'
+  | 'declined'
+  | 'sync-unavailable'
+  | 'error';
 
 export type BillingManagementStatus = 'idle' | 'loading' | 'opened' | 'unavailable' | 'error';
 

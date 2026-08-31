@@ -32,8 +32,8 @@ test('failure keeps the sent message and retry does not duplicate it', () => {
   });
   const failed = lessonTutorReducer(working, {
     type: 'fail',
+    error: 'retryable',
     messageId: userMessage.id,
-    retryable: true,
   });
   const retried = lessonTutorReducer(failed, { type: 'retry', messageId: userMessage.id });
 
@@ -41,6 +41,22 @@ test('failure keeps the sent message and retry does not duplicate it', () => {
   expect(retried.messages).toEqual([userMessage]);
   expect(retried.pendingUserMessageId).toBe(userMessage.id);
   expect(retried.status).toBe('working');
+});
+
+test('verified inactive access becomes a subscription requirement without a retry loop', () => {
+  const working = lessonTutorReducer(initialLessonTutorState('conversation-1'), {
+    type: 'send',
+    message: userMessage,
+  });
+  const requiresPro = lessonTutorReducer(working, {
+    type: 'fail',
+    error: 'requires-pro',
+    messageId: userMessage.id,
+  });
+
+  expect(requiresPro.error).toBe('requires-pro');
+  expect(requiresPro.status).toBe('idle');
+  expect(requiresPro.messages).toEqual([userMessage]);
 });
 
 test('stale completion after a lesson reset is ignored', () => {

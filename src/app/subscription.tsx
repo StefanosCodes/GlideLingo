@@ -39,9 +39,16 @@ export default function SubscriptionScreen() {
     resetMockAccess,
   } = useBilling();
   const loading = status === 'loading';
-  const purchaseLoading = purchaseState.status === 'loading';
+  const purchaseLoading = purchaseState.status === 'loading' || purchaseState.status === 'syncing';
   const managementLoading = managementState.status === 'loading';
   const actionBusy = loading || purchaseLoading || managementLoading;
+  const accessLabel = loading
+    ? 'Checking…'
+    : status === 'error'
+      ? 'Access verification unavailable'
+      : isPro
+        ? 'Pro is active'
+        : 'Free plan';
 
   return (
     <ScreenFrame chrome={false} includeTabInset={false} testID="subscription-screen">
@@ -64,13 +71,13 @@ export default function SubscriptionScreen() {
         <ThemedText type="eyebrow" themeColor="textSecondary">
           CURRENT ACCESS
         </ThemedText>
-        <ThemedText type="title2">{loading ? 'Checking…' : isPro ? 'Pro is active' : 'Free plan'}</ThemedText>
+        <ThemedText type="title2">{accessLabel}</ThemedText>
         <ThemedText type="footnote" themeColor="textSecondary">
           {mode === 'mock'
             ? 'Mock billing was explicitly enabled for development, so access changes only in memory for this account.'
             : mode === 'unavailable'
               ? 'This build has no platform RevenueCat key. Purchases stay disabled rather than granting preview access.'
-              : 'Access is derived from RevenueCat’s active “pro” entitlement for this signed-in account.'}
+              : 'Tutor access is enabled only after the GlideLingo server verifies RevenueCat’s active “pro” entitlement for this signed-in account.'}
         </ThemedText>
       </GlideSurface>
 
@@ -83,7 +90,7 @@ export default function SubscriptionScreen() {
         ))}
       </View>
 
-      {!isPro && status !== 'signed-out' && mode !== 'unavailable' ? (
+      {status === 'free' && mode !== 'unavailable' ? (
         <View style={styles.plans}>
           {packages.map((item) => (
             <GlideSurface key={item.identifier} padding="roomy" style={styles.card}>
@@ -101,7 +108,9 @@ export default function SubscriptionScreen() {
                 fullWidth
                 label={
                   purchaseLoading && purchaseState.packageIdentifier === item.identifier
-                    ? 'Opening secure checkout…'
+                    ? purchaseState.status === 'syncing'
+                      ? 'Confirming Pro access…'
+                      : 'Opening secure checkout…'
                     : mode === 'mock'
                       ? `Simulate ${planName(item.interval, item.title)}`
                       : `Choose ${planName(item.interval, item.title)}`
@@ -111,7 +120,7 @@ export default function SubscriptionScreen() {
               />
             </GlideSurface>
           ))}
-          {!loading && status !== 'error' && packages.length === 0 ? (
+          {packages.length === 0 ? (
             <GlideSurface padding="roomy" style={styles.card}>
               <ThemedText type="title3">No subscription offering is available.</ThemedText>
               <ThemedText type="footnote" themeColor="textSecondary">
@@ -125,18 +134,34 @@ export default function SubscriptionScreen() {
 
       {purchaseState.status !== 'idle' && purchaseState.status !== 'loading' ? (
         <GlideSurface
-          accessibilityRole={purchaseState.status === 'declined' || purchaseState.status === 'error' ? 'alert' : undefined}
+          accessibilityRole={
+            purchaseState.status === 'declined' ||
+            purchaseState.status === 'error' ||
+            purchaseState.status === 'sync-unavailable'
+              ? 'alert'
+              : undefined
+          }
           padding="regular"
           variant={purchaseState.status === 'success' ? 'success' : 'tinted'}>
           <ThemedText
             type="headline"
-            style={purchaseState.status === 'declined' || purchaseState.status === 'error' ? { color: theme.danger } : undefined}>
+            style={
+              purchaseState.status === 'declined' ||
+              purchaseState.status === 'error' ||
+              purchaseState.status === 'sync-unavailable'
+                ? { color: theme.danger }
+                : undefined
+            }>
             {purchaseState.status === 'success'
               ? 'Purchase confirmed'
+              : purchaseState.status === 'syncing'
+                ? 'Purchase complete · confirming access'
               : purchaseState.status === 'cancelled'
                 ? 'Checkout cancelled'
                 : purchaseState.status === 'declined'
                   ? 'Payment not accepted'
+                  : purchaseState.status === 'sync-unavailable'
+                    ? 'Purchase complete · access not confirmed'
                   : 'Purchase not confirmed'}
           </ThemedText>
           <ThemedText type="footnote" themeColor="textSecondary">

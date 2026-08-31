@@ -4,9 +4,11 @@ export type TutorMessage = {
   content: string;
 };
 
+export type LessonTutorError = 'retryable' | 'terminal' | 'requires-pro' | 'billing-unavailable';
+
 export type LessonTutorState = {
   conversationId: string;
-  error: 'retryable' | 'terminal' | null;
+  error: LessonTutorError | null;
   messages: TutorMessage[];
   pendingUserMessageId: string | null;
   status: 'idle' | 'working';
@@ -16,7 +18,7 @@ export type LessonTutorAction =
   | { type: 'send'; message: TutorMessage }
   | { type: 'retry'; messageId: string }
   | { type: 'succeed'; messageId: string; reply: TutorMessage }
-  | { type: 'fail'; messageId: string; retryable: boolean }
+  | { type: 'fail'; error: LessonTutorError; messageId: string }
   | { type: 'reset'; conversationId: string };
 
 export function initialLessonTutorState(conversationId: string): LessonTutorState {
@@ -66,7 +68,7 @@ export function lessonTutorReducer(
       if (state.pendingUserMessageId !== action.messageId) return state;
       return {
         ...state,
-        error: action.retryable ? 'retryable' : 'terminal',
+        error: action.error,
         pendingUserMessageId: null,
         status: 'idle',
       };

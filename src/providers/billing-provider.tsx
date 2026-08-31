@@ -26,10 +26,15 @@ import {
   openRevenueCatCustomerManagement,
   purchaseRevenueCatPackage,
   restoreRevenueCatPurchases,
-  revenueCatCustomerHasPro,
   revenueCatCustomerManagementUrl,
   subscribeToRevenueCat,
 } from '@/features/billing/revenuecat-client';
+import {
+  loadServerProEntitlement,
+  reconcileServerProEntitlement,
+  serverEntitlementIsActive,
+  type ServerProEntitlement,
+} from '@/features/billing/server-entitlement-client';
 
 const MOCK_PACKAGES: BillingPackage[] = [
   {
@@ -111,6 +116,24 @@ function errorText(error: unknown) {
   return error instanceof Error ? error.message : 'Subscription access could not be updated. Please try again.';
 }
 
+function billingStatusForServer(entitlement: ServerProEntitlement): BillingStatus {
+  if (serverEntitlementIsActive(entitlement)) return 'pro';
+  return entitlement.state === 'inactive' ? 'free' : 'error';
+}
+
+function serverStatusMessage(entitlement: ServerProEntitlement) {
+  return entitlement.state === 'stale' || entitlement.state === 'unavailable'
+    ? 'Pro access could not be verified by the server. Refresh access before using tutor assistance.'
+    : null;
+}
+
+function syncUnavailableMessage(entitlement?: ServerProEntitlement) {
+  if (entitlement?.state === 'inactive') {
+    return 'Checkout completed, but the server has not confirmed Pro yet. Refresh access in a moment.';
+  }
+  return 'Checkout completed, but Pro access could not be confirmed by the server. Your purchase was not lost; refresh access before using tutor assistance.';
+}
+
 export function BillingProvider({ children, userId }: BillingProviderProps) {
   const [state, setState] = useState<BillingState>(() => emptyState(userId));
   const userIdRef = useRef(userId);
@@ -159,15 +182,17 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
       try {
         const snapshot = await loadRevenueCatSnapshot(ownerUserId);
         if (!active || !ownsCurrentIdentity(ownerUserId, generation)) return;
+        const serverEntitlement = await loadServerProEntitlement();
+        if (!active || !ownsCurrentIdentity(ownerUserId, generation)) return;
         setState({
           ownerUserId,
           mode: 'revenuecat',
-          status: snapshot.isPro ? 'pro' : 'free',
+          status: billingStatusForServer(serverEntitlement),
           packages: snapshot.packages,
           managementUrl: snapshot.managementUrl,
           purchaseState: IDLE_PURCHASE,
           managementState: IDLE_MANAGEMENT,
-          errorMessage: null,
+          errorMessage: serverStatusMessage(serverEntitlement),
         });
 
         unsubscribe = subscribeToRevenueCat((customerInfo) => {
@@ -175,10 +200,29 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
           setState((current) => ({
             ...current,
             ownerUserId,
-            status: revenueCatCustomerHasPro(customerInfo) ? 'pro' : 'free',
             managementUrl: revenueCatCustomerManagementUrl(customerInfo),
-            errorMessage: null,
           }));
+          void reconcileServerProEntitlement()
+            .then((entitlement) => {
+              if (!active || !ownsCurrentIdentity(ownerUserId, generation)) return;
+              setState((current) =>
+                current.ownerUserId === ownerUserId
+                  ? {
+                      ...current,
+                      status: billingStatusForServer(entitlement),
+                      errorMessage: serverStatusMessage(entitlement),
+                    }
+                  : current,
+              );
+            })
+            .catch((error) => {
+              if (!active || !ownsCurrentIdentity(ownerUserId, generation)) return;
+              setState((current) =>
+                current.ownerUserId === ownerUserId
+                  ? { ...current, status: 'error', errorMessage: errorText(error) }
+                  : current,
+              );
+            });
         });
 
       } catch (error) {
@@ -205,26 +249,41 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
     };
   }, [ownsCurrentIdentity, userId]);
 
-  const applySnapshot = useCallback((ownerUserId: string, snapshot: BillingSnapshot) => {
-    if (userIdRef.current !== ownerUserId) return;
+  const applyClientMetadata = useCallback((ownerUserId: string, generation: number, snapshot: BillingSnapshot) => {
+    if (!ownsCurrentIdentity(ownerUserId, generation)) return;
     setState((current) =>
       current.ownerUserId === ownerUserId
         ? {
             ...current,
             ownerUserId,
             mode: 'revenuecat',
-            status: snapshot.isPro ? 'pro' : 'free',
             packages: snapshot.packages,
             managementUrl: snapshot.managementUrl,
-            errorMessage: null,
           }
         : current,
     );
-  }, []);
+  }, [ownsCurrentIdentity]);
+
+  const applyConfirmedEntitlement = useCallback(
+    (ownerUserId: string, generation: number, entitlement: ServerProEntitlement) => {
+      if (!ownsCurrentIdentity(ownerUserId, generation)) return;
+      setState((current) =>
+        current.ownerUserId === ownerUserId
+          ? {
+              ...current,
+              status: billingStatusForServer(entitlement),
+              errorMessage: serverStatusMessage(entitlement),
+            }
+          : current,
+      );
+    },
+    [ownsCurrentIdentity],
+  );
 
   const refresh = useCallback(async () => {
     const ownerUserId = userIdRef.current;
     if (!ownerUserId) return;
+    const generation = identityGenerationRef.current;
 
     const mode = modeForEnvironment();
     if (mode === 'mock') {
@@ -254,17 +313,22 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
       errorMessage: null,
     }));
     try {
-      applySnapshot(ownerUserId, await loadRevenueCatSnapshot(ownerUserId));
+      const snapshot = await loadRevenueCatSnapshot(ownerUserId);
+      if (!ownsCurrentIdentity(ownerUserId, generation)) return;
+      applyClientMetadata(ownerUserId, generation, snapshot);
+      const entitlement = await reconcileServerProEntitlement();
+      applyConfirmedEntitlement(ownerUserId, generation, entitlement);
     } catch (error) {
-      if (userIdRef.current !== ownerUserId) return;
+      if (!ownsCurrentIdentity(ownerUserId, generation)) return;
       setState((current) => ({ ...current, ownerUserId, status: 'error', errorMessage: errorText(error) }));
     }
-  }, [applySnapshot]);
+  }, [applyClientMetadata, applyConfirmedEntitlement, ownsCurrentIdentity]);
 
   const purchase = useCallback(
     async (identifier: string) => {
       const ownerUserId = userIdRef.current;
       if (!ownerUserId) return;
+      const generation = identityGenerationRef.current;
 
       setState((current) => ({
         ...current,
@@ -294,27 +358,57 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
 
       try {
         const snapshot = await purchaseRevenueCatPackage(ownerUserId, identifier);
-        if (userIdRef.current !== ownerUserId) return;
-        applySnapshot(ownerUserId, snapshot);
+        if (!ownsCurrentIdentity(ownerUserId, generation)) return;
+        applyClientMetadata(ownerUserId, generation, snapshot);
         setState((current) =>
-          current.ownerUserId === ownerUserId && userIdRef.current === ownerUserId
+          current.ownerUserId === ownerUserId && ownsCurrentIdentity(ownerUserId, generation)
             ? {
                 ...current,
                 purchaseState: {
                   packageIdentifier: identifier,
-                  status: snapshot.isPro ? 'success' : 'error',
-                  message: snapshot.isPro
-                    ? 'Pro tutor assistance is active.'
-                    : 'Checkout finished, but Pro is not active yet. Refresh access before trying again.',
+                  status: 'syncing',
+                  message: 'Checkout completed. Confirming Pro access with the GlideLingo server…',
                 },
               }
             : current,
         );
+        try {
+          const entitlement = await reconcileServerProEntitlement();
+          if (!ownsCurrentIdentity(ownerUserId, generation)) return;
+          applyConfirmedEntitlement(ownerUserId, generation, entitlement);
+          const active = serverEntitlementIsActive(entitlement);
+          setState((current) =>
+            current.ownerUserId === ownerUserId && ownsCurrentIdentity(ownerUserId, generation)
+              ? {
+                  ...current,
+                  purchaseState: {
+                    packageIdentifier: identifier,
+                    status: active ? 'success' : 'sync-unavailable',
+                    message: active ? 'Pro tutor assistance is active.' : syncUnavailableMessage(entitlement),
+                  },
+                  ...(active ? {} : { status: 'error' as const, errorMessage: syncUnavailableMessage(entitlement) }),
+                }
+              : current,
+          );
+        } catch {
+          if (!ownsCurrentIdentity(ownerUserId, generation)) return;
+          const message = syncUnavailableMessage();
+          setState((current) =>
+            current.ownerUserId === ownerUserId
+              ? {
+                  ...current,
+                  status: 'error',
+                  purchaseState: { packageIdentifier: identifier, status: 'sync-unavailable', message },
+                  errorMessage: message,
+                }
+              : current,
+          );
+        }
       } catch (error) {
-        if (userIdRef.current !== ownerUserId) return;
+        if (!ownsCurrentIdentity(ownerUserId, generation)) return;
         const failure = classifyPurchaseFailure(error);
         setState((current) =>
-          current.ownerUserId === ownerUserId && userIdRef.current === ownerUserId
+          current.ownerUserId === ownerUserId && ownsCurrentIdentity(ownerUserId, generation)
             ? {
                 ...current,
                 ownerUserId,
@@ -324,12 +418,13 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
         );
       }
     },
-    [applySnapshot],
+    [applyClientMetadata, applyConfirmedEntitlement, ownsCurrentIdentity],
   );
 
   const restore = useCallback(async () => {
     const ownerUserId = userIdRef.current;
     if (!ownerUserId) return;
+    const generation = identityGenerationRef.current;
 
     const mode = modeForEnvironment();
     if (mode === 'mock') {
@@ -343,16 +438,20 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
 
     setState((current) => ({ ...current, ownerUserId, status: 'loading', errorMessage: null }));
     try {
-      applySnapshot(ownerUserId, await restoreRevenueCatPurchases(ownerUserId));
+      const snapshot = await restoreRevenueCatPurchases(ownerUserId);
+      if (!ownsCurrentIdentity(ownerUserId, generation)) return;
+      applyClientMetadata(ownerUserId, generation, snapshot);
+      applyConfirmedEntitlement(ownerUserId, generation, await reconcileServerProEntitlement());
     } catch (error) {
-      if (userIdRef.current !== ownerUserId) return;
+      if (!ownsCurrentIdentity(ownerUserId, generation)) return;
       setState((current) => ({ ...current, ownerUserId, status: 'error', errorMessage: errorText(error) }));
     }
-  }, [applySnapshot]);
+  }, [applyClientMetadata, applyConfirmedEntitlement, ownsCurrentIdentity]);
 
   const manage = useCallback(async () => {
     const ownerUserId = userIdRef.current;
     if (!ownerUserId) return;
+    const generation = identityGenerationRef.current;
 
     const mode = modeForEnvironment();
     if (mode !== 'revenuecat') {
@@ -375,10 +474,10 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
 
     try {
       const result = await openRevenueCatCustomerManagement(ownerUserId);
-      if (userIdRef.current !== ownerUserId) return;
-      applySnapshot(ownerUserId, result.snapshot);
+      if (!ownsCurrentIdentity(ownerUserId, generation)) return;
+      applyClientMetadata(ownerUserId, generation, result.snapshot);
       setState((current) =>
-        current.ownerUserId === ownerUserId && userIdRef.current === ownerUserId
+        current.ownerUserId === ownerUserId && ownsCurrentIdentity(ownerUserId, generation)
           ? {
               ...current,
               managementState: result.opened
@@ -391,9 +490,9 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
           : current,
       );
     } catch {
-      if (userIdRef.current !== ownerUserId) return;
+      if (!ownsCurrentIdentity(ownerUserId, generation)) return;
       setState((current) =>
-        current.ownerUserId === ownerUserId && userIdRef.current === ownerUserId
+        current.ownerUserId === ownerUserId && ownsCurrentIdentity(ownerUserId, generation)
           ? {
               ...current,
               managementState: {
@@ -404,7 +503,7 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
           : current,
       );
     }
-  }, [applySnapshot]);
+  }, [applyClientMetadata, ownsCurrentIdentity]);
 
   const resetMockAccess = useCallback(() => {
     const ownerUserId = userIdRef.current;

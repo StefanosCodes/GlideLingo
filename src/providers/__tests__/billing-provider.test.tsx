@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { Text } from 'react-native';
 
 import type { BillingSnapshot } from '@/features/billing/billing-types';
+import type { ServerProEntitlement } from '@/features/billing/server-entitlement-client';
 import { BillingProvider, useBilling } from '@/providers/billing-provider';
 
 jest.mock('@/features/billing/revenuecat-client', () => ({
@@ -18,6 +19,14 @@ jest.mock('@/features/billing/revenuecat-client', () => ({
   subscribeToRevenueCat: jest.fn(() => () => true),
 }));
 
+jest.mock('@/features/billing/server-entitlement-client', () => ({
+  loadServerProEntitlement: jest.fn(),
+  reconcileServerProEntitlement: jest.fn(),
+  serverEntitlementIsActive: jest.fn(
+    (entitlement: ServerProEntitlement) => entitlement.state === 'active' && entitlement.isPro,
+  ),
+}));
+
 const mockedRevenueCatClient = jest.requireMock<typeof import('@/features/billing/revenuecat-client')>(
   '@/features/billing/revenuecat-client',
 );
@@ -28,6 +37,11 @@ const mockOpenRevenueCatCustomerManagement = jest.mocked(mockedRevenueCatClient.
 const mockPurchaseRevenueCatPackage = jest.mocked(mockedRevenueCatClient.purchaseRevenueCatPackage);
 const mockRestoreRevenueCatPurchases = jest.mocked(mockedRevenueCatClient.restoreRevenueCatPurchases);
 const mockSubscribeToRevenueCat = jest.mocked(mockedRevenueCatClient.subscribeToRevenueCat);
+const mockedServerEntitlementClient = jest.requireMock<
+  typeof import('@/features/billing/server-entitlement-client')
+>('@/features/billing/server-entitlement-client');
+const mockLoadServerProEntitlement = jest.mocked(mockedServerEntitlementClient.loadServerProEntitlement);
+const mockReconcileServerProEntitlement = jest.mocked(mockedServerEntitlementClient.reconcileServerProEntitlement);
 
 const packages = [
   {
@@ -51,6 +65,24 @@ const proSnapshot: BillingSnapshot = {
   isPro: true,
   packages,
   managementUrl: 'https://billing.example.com/portal',
+};
+const inactiveServerEntitlement: ServerProEntitlement = {
+  entitlementId: 'pro',
+  state: 'inactive',
+  isPro: false,
+  environment: 'SANDBOX',
+  expiresAt: null,
+  verifiedAt: '2026-08-31T12:00:00Z',
+};
+const activeServerEntitlement: ServerProEntitlement = {
+  ...inactiveServerEntitlement,
+  state: 'active',
+  isPro: true,
+  expiresAt: '2026-09-30T12:00:00Z',
+};
+const unavailableServerEntitlement: ServerProEntitlement = {
+  ...inactiveServerEntitlement,
+  state: 'unavailable',
 };
 
 const mockObserveBilling = jest.fn<(value: ReturnType<typeof useBilling>) => void>();
@@ -76,7 +108,23 @@ beforeEach(() => {
   mockPurchaseRevenueCatPackage.mockReset();
   mockRestoreRevenueCatPurchases.mockReset().mockResolvedValue(freeSnapshot);
   mockSubscribeToRevenueCat.mockClear();
+  mockLoadServerProEntitlement.mockReset().mockResolvedValue(inactiveServerEntitlement);
+  mockReconcileServerProEntitlement.mockReset().mockResolvedValue(inactiveServerEntitlement);
   delete process.env.EXPO_PUBLIC_ENABLE_MOCK_BILLING;
+});
+
+test('RevenueCat client entitlement alone never grants server-gated Pro access', async () => {
+  mockLoadRevenueCatSnapshot.mockResolvedValue(proSnapshot);
+  mockLoadServerProEntitlement.mockResolvedValue(inactiveServerEntitlement);
+  await render(
+    <BillingProvider userId="user_a">
+      <Probe />
+    </BillingProvider>,
+  );
+
+  await waitFor(() => expect(billing().status).toBe('free'));
+  expect(billing().isPro).toBe(false);
+  expect(billing().managementUrl).toBe('https://billing.example.com/portal');
 });
 
 test('a stale account load cannot paint Pro access after switching Clerk users', async () => {
@@ -169,6 +217,12 @@ test('checkout cancellation and decline stay distinct without erasing known acce
 
 test('successful checkout exposes success only after the refreshed entitlement is Pro', async () => {
   mockPurchaseRevenueCatPackage.mockResolvedValue(proSnapshot);
+  let resolveReconciliation: ((entitlement: ServerProEntitlement) => void) | undefined;
+  mockReconcileServerProEntitlement.mockImplementation(
+    () => new Promise((resolve) => {
+      resolveReconciliation = resolve;
+    }),
+  );
   await render(
     <BillingProvider userId="user_a">
       <Probe />
@@ -176,7 +230,20 @@ test('successful checkout exposes success only after the refreshed entitlement i
   );
   await waitFor(() => expect(billing().status).toBe('free'));
 
-  await act(async () => billing().purchase('$rc_monthly'));
+  let pendingPurchase: Promise<void> | undefined;
+  await act(async () => {
+    pendingPurchase = billing().purchase('$rc_monthly');
+    await Promise.resolve();
+  });
+  await waitFor(() => expect(billing().purchaseState.status).toBe('syncing'));
+
+  expect(billing().status).toBe('free');
+  expect(billing().isPro).toBe(false);
+
+  await act(async () => {
+    resolveReconciliation?.(activeServerEntitlement);
+    await pendingPurchase;
+  });
 
   expect(billing().status).toBe('pro');
   expect(billing().purchaseState).toMatchObject({
@@ -186,7 +253,8 @@ test('successful checkout exposes success only after the refreshed entitlement i
 });
 
 test('checkout completion without a Pro entitlement remains fail closed', async () => {
-  mockPurchaseRevenueCatPackage.mockResolvedValue(freeSnapshot);
+  mockPurchaseRevenueCatPackage.mockResolvedValue(proSnapshot);
+  mockReconcileServerProEntitlement.mockResolvedValue(unavailableServerEntitlement);
   await render(
     <BillingProvider userId="user_a">
       <Probe />
@@ -196,12 +264,14 @@ test('checkout completion without a Pro entitlement remains fail closed', async 
 
   await act(async () => billing().purchase('$rc_monthly'));
 
-  expect(billing().status).toBe('free');
-  expect(billing().purchaseState.status).toBe('error');
+  expect(billing().status).toBe('error');
+  expect(billing().isPro).toBe(false);
+  expect(billing().purchaseState.status).toBe('sync-unavailable');
 });
 
 test('manual refresh reconciles entitlement and management portal state', async () => {
   mockLoadRevenueCatSnapshot.mockResolvedValueOnce(freeSnapshot).mockResolvedValueOnce(proSnapshot);
+  mockReconcileServerProEntitlement.mockResolvedValue(activeServerEntitlement);
   await render(
     <BillingProvider userId="user_a">
       <Probe />
@@ -218,6 +288,7 @@ test('manual refresh reconciles entitlement and management portal state', async 
 test('customer management reports an unavailable portal without losing Pro', async () => {
   const proWithoutPortal = { ...proSnapshot, managementUrl: null };
   mockLoadRevenueCatSnapshot.mockResolvedValue(proWithoutPortal);
+  mockLoadServerProEntitlement.mockResolvedValue(activeServerEntitlement);
   mockOpenRevenueCatCustomerManagement.mockResolvedValue({ opened: false, snapshot: proWithoutPortal });
   await render(
     <BillingProvider userId="user_a">
@@ -234,6 +305,7 @@ test('customer management reports an unavailable portal without losing Pro', asy
 
 test('customer management records that the RevenueCat portal was opened', async () => {
   mockLoadRevenueCatSnapshot.mockResolvedValue(proSnapshot);
+  mockLoadServerProEntitlement.mockResolvedValue(activeServerEntitlement);
   mockOpenRevenueCatCustomerManagement.mockResolvedValue({ opened: true, snapshot: proSnapshot });
   await render(
     <BillingProvider userId="user_a">

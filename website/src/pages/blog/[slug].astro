@@ -1,0 +1,76 @@
+---
+import { getCollection, render, type CollectionEntry } from 'astro:content';
+
+import SiteFooter from '../../components/SiteFooter.astro';
+import SiteHeader from '../../components/SiteHeader.astro';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+export async function getStaticPaths() {
+  const posts = await getCollection('blog', ({ data }) => !data.draft);
+
+  return posts.map((post) => ({
+    params: { slug: post.id },
+    props: { post },
+  }));
+}
+
+interface Props {
+  post: CollectionEntry<'blog'>;
+}
+
+const { post } = Astro.props;
+const { Content } = await render(post);
+const formatDate = (date: Date) =>
+  new Intl.DateTimeFormat('en-US', {
+    day: 'numeric',
+    month: 'long',
+    timeZone: 'UTC',
+    year: 'numeric',
+  }).format(date);
+const canonicalPath = `/blog/${post.id}/`;
+---
+
+<BaseLayout
+  title={`${post.data.title} — GlideLingo`}
+  description={post.data.description}
+  canonicalPath={canonicalPath}
+  ogType="article"
+  publishedAt={post.data.publishedAt}
+  socialImage={post.data.heroImage}
+  socialImageAlt={post.data.heroAlt}
+  socialImageWidth={1672}
+  socialImageHeight={941}
+>
+  <SiteHeader activePage="blog" />
+
+  <main id="main-content" class="blog-article">
+    <article>
+      <header class="shell article-header">
+        <a class="article-back" href="/blog/"><span aria-hidden="true">←</span> Blog</a>
+        <div class="post-meta article-meta">
+          <span>{post.data.category}</span>
+          <time datetime={post.data.publishedAt.toISOString()}>{formatDate(post.data.publishedAt)}</time>
+          <span>{post.data.readMinutes} min read</span>
+        </div>
+        <h1>{post.data.title}</h1>
+        <p>{post.data.description}</p>
+      </header>
+
+      <figure class="shell article-hero">
+        <img src={post.data.heroImage} width="1672" height="941" alt={post.data.heroAlt} />
+      </figure>
+
+      <div class="article-body">
+        <Content />
+      </div>
+    </article>
+
+    <aside class="shell article-cta" aria-labelledby="article-cta-heading">
+      <p class="eyebrow">Keep moving</p>
+      <h2 id="article-cta-heading">Learn the language. Enter the world.</h2>
+      <a class="button button-primary" href="/#demo">See how GlideLingo works</a>
+    </aside>
+  </main>
+
+  <SiteFooter />
+</BaseLayout>

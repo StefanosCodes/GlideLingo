@@ -7,6 +7,12 @@ interface Props {
   description: string;
   canonicalPath?: string;
   noindex?: boolean;
+  ogType?: 'website' | 'article';
+  publishedAt?: Date;
+  socialImage?: string;
+  socialImageAlt?: string;
+  socialImageWidth?: number;
+  socialImageHeight?: number;
 }
 
 const {
@@ -14,10 +20,16 @@ const {
   description,
   canonicalPath = '/',
   noindex = false,
+  ogType = 'website',
+  publishedAt,
+  socialImage = '/images/product-home.png',
+  socialImageAlt = 'The GlideLingo Greek Foundations home screen',
+  socialImageWidth = 1440,
+  socialImageHeight = 1000,
 } = Astro.props;
 
 const canonicalUrl = new URL(canonicalPath, Astro.site);
-const socialImageUrl = new URL('/images/product-home.png', Astro.site);
+const socialImageUrl = new URL(socialImage, Astro.site);
 ---
 
 <!doctype html>
@@ -32,19 +44,21 @@ const socialImageUrl = new URL('/images/product-home.png', Astro.site);
     <link rel="canonical" href={canonicalUrl} />
     <link rel="icon" type="image/svg+xml" href="/brand/glidelingo-bird-black.svg" />
     <link rel="alternate icon" type="image/png" href="/favicon.png" />
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={ogType} />
     <meta property="og:site_name" content="GlideLingo" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonicalUrl} />
     <meta property="og:image" content={socialImageUrl} />
-    <meta property="og:image:width" content="1440" />
-    <meta property="og:image:height" content="1000" />
-    <meta property="og:image:alt" content="The GlideLingo Greek Foundations home screen" />
+    <meta property="og:image:width" content={String(socialImageWidth)} />
+    <meta property="og:image:height" content={String(socialImageHeight)} />
+    <meta property="og:image:alt" content={socialImageAlt} />
+    {ogType === 'article' && publishedAt && <meta property="article:published_time" content={publishedAt.toISOString()} />}
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={socialImageUrl} />
+    <meta name="twitter:image:alt" content={socialImageAlt} />
     <title>{title}</title>
   </head>
   <body>

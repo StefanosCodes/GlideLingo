@@ -13,6 +13,7 @@ const contentTypes = {
   '.html': 'text/html; charset=utf-8',
   '.png': 'image/png',
   '.txt': 'text/plain; charset=utf-8',
+  '.webp': 'image/webp',
   '.woff2': 'font/woff2',
   '.xml': 'application/xml; charset=utf-8',
 };
@@ -22,7 +23,8 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', `http://${host}:${port}`);
     let pathname = decodeURIComponent(url.pathname);
     if (pathname === '/') pathname = '/index.html';
-    if (!extname(pathname)) pathname += '.html';
+    else if (pathname.endsWith('/')) pathname += 'index.html';
+    else if (!extname(pathname)) pathname += '.html';
 
     const requestedPath = resolve(distRoot, `.${pathname}`);
     if (!requestedPath.startsWith(`${distRoot}${sep}`)) {

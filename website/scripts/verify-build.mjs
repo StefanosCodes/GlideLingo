@@ -10,14 +10,19 @@ const read = (path) => readFile(new URL(path, root), 'utf8');
 await Promise.all([
   access(new URL('index.html', root)),
   access(new URL('404.html', root)),
+  access(new URL('blog/index.html', root)),
+  access(new URL('blog/why-learning-words-isnt-enough/index.html', root)),
+  access(new URL('images/blog/from-words-to-conversation.webp', root)),
   access(new URL('_headers', root)),
   access(new URL('robots.txt', root)),
   access(new URL('sitemap-index.xml', root)),
 ]);
 
-const [home, notFound, headers, robots] = await Promise.all([
+const [home, notFound, blog, article, headers, robots] = await Promise.all([
   read('index.html'),
   read('404.html'),
+  read('blog/index.html'),
+  read('blog/why-learning-words-isnt-enough/index.html'),
   read('_headers'),
   read('robots.txt'),
 ]);
@@ -41,6 +46,7 @@ assert.doesNotMatch(home, /Download for Mac/);
 assert.match(home, /button-platform-icon/);
 assert.match(home, /button-apple-icon/);
 assert.match(home, /id="pricing"/);
+assert.match(home, /href="\/blog\/"/);
 assert.match(home, /\$19\.99/);
 assert.match(home, /Billed monthly\. Cancel anytime\./);
 assert.doesNotMatch(home, /Desktop apps|Choose your desktop|Download for Windows/);
@@ -49,6 +55,15 @@ assert.doesNotMatch(home, /<script(?![^>]+src=)(?:\s|>)/i);
 assert.doesNotMatch(home, /<form(?:\s|>)/i);
 assert.doesNotMatch(home, /document\.cookie|localStorage|sessionStorage/i);
 assert.match(notFound, /This page flew off course/);
+assert.match(blog, /<title>Blog — GlideLingo<\/title>/);
+assert.match(blog, /rel="canonical" href="https:\/\/glidelingo\.com\/blog\/"/);
+assert.match(blog, /Why learning words isn’t the same as learning a language/);
+assert.match(blog, /images\/blog\/from-words-to-conversation\.webp/);
+assert.match(article, /property="og:type" content="article"/);
+assert.match(article, /rel="canonical" href="https:\/\/glidelingo\.com\/blog\/why-learning-words-isnt-enough\/"/);
+assert.match(article, /Knowing is not yet using/);
+assert.match(article, /The goal is participation/);
+assert.doesNotMatch(blog + article, /https?:\/\/(?!glidelingo\.com|github\.com)/);
 assert.match(headers, /Content-Security-Policy:/);
 assert.match(headers, /script-src 'self'/);
 assert.match(headers, /Permissions-Policy:/);

@@ -1,4 +1,6 @@
-FROM ghcr.io/astral-sh/uv:0.12.3-python3.13-bookworm-slim AS builder
+FROM python:3.13-slim-trixie AS builder
+
+COPY --from=ghcr.io/astral-sh/uv:0.12.3 /uv /uvx /bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
@@ -10,7 +12,7 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY app ./app
 RUN uv sync --locked --no-dev --no-editable
 
-FROM python:3.13-slim-bookworm AS runtime
+FROM python:3.13-slim-trixie AS runtime
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PORT=8080 \

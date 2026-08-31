@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 FROM ghcr.io/astral-sh/uv:0.12.3-python3.13-bookworm-slim AS builder
 
 ENV UV_COMPILE_BYTECODE=1 \

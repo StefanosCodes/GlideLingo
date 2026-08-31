@@ -7,6 +7,8 @@ const { app, BrowserWindow, net, protocol, session, shell } = require('electron'
 const {
   APP_HOST,
   APP_SCHEME,
+  PRODUCTION_API_ORIGIN,
+  PRODUCTION_CLERK_ORIGIN,
   buildContentSecurityPolicy,
   findAuthCallbackUrl,
   isAllowedAuthWindowUrl,
@@ -16,12 +18,24 @@ const {
   parseAuthCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
+  validateProductionApiOrigin,
+  validateProductionClerkOrigin,
 } = require('./runtime.cjs');
+const { glidelingoApiOrigin, glidelingoClerkOrigin } = require('./package.json');
 
 const DEVELOPMENT_URL = validateDevelopmentUrl(process.env.ELECTRON_RENDERER_URL);
 const PRODUCTION_URL = `${APP_SCHEME}://${APP_HOST}/`;
 const RENDERER_URL = DEVELOPMENT_URL ?? PRODUCTION_URL;
-const CONTENT_SECURITY_POLICY = buildContentSecurityPolicy();
+const PACKAGED_API_ORIGIN = validateProductionApiOrigin(
+  glidelingoApiOrigin ?? PRODUCTION_API_ORIGIN,
+);
+const PACKAGED_CLERK_ORIGIN = validateProductionClerkOrigin(
+  glidelingoClerkOrigin ?? PRODUCTION_CLERK_ORIGIN,
+);
+const CONTENT_SECURITY_POLICY = buildContentSecurityPolicy({
+  apiOrigin: PACKAGED_API_ORIGIN,
+  clerkOrigin: PACKAGED_CLERK_ORIGIN,
+});
 let mainWindow = null;
 let pendingAuthCallbackUrl = findAuthCallbackUrl(process.argv);
 
@@ -144,7 +158,7 @@ function createWindow() {
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (isAllowedAuthWindowUrl(url)) {
+    if (isAllowedAuthWindowUrl(url, PACKAGED_CLERK_ORIGIN)) {
       if (!DEVELOPMENT_URL) {
         openExternalUrl(url);
         return { action: 'deny' };

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -61,26 +61,30 @@ export function NoticeBeat({ text, onContinue }: { text: string; onContinue: () 
 export function CheckBeat({
   beat,
   onContinue,
+  onSelectChoice,
+  selectedChoice,
 }: {
   beat: Extract<SittingBeat, { type: 'check' }>;
   onContinue: () => void;
+  onSelectChoice: (choice: string) => void;
+  selectedChoice: string | null;
 }) {
   const theme = useTheme();
   const pronunciation = usePronunciationPlayer();
-  const [picked, setPicked] = useState<string | null>(null);
-  const correct = picked !== null && picked === beat.answer;
+  const correct = selectedChoice !== null && selectedChoice === beat.answer;
   const playback = beat.audioId ? pronunciation.stateFor(beat.audioId) : null;
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     function onKey(event: KeyboardEvent) {
       const index = Number(event.key) - 1;
-      if (index < 0 || index >= beat.choices.length || picked === beat.answer) return;
-      setPicked(beat.choices[index] ?? null);
+      if (index < 0 || index >= beat.choices.length || selectedChoice === beat.answer) return;
+      const choice = beat.choices[index] ?? null;
+      if (choice) onSelectChoice(choice);
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [beat.answer, beat.choices, picked]);
+  }, [beat.answer, beat.choices, onSelectChoice, selectedChoice]);
 
   return (
     <View style={styles.stage}>
@@ -107,8 +111,8 @@ export function CheckBeat({
 
       <View style={styles.choices}>
         {beat.choices.map((choice, index) => {
-          const selected = picked === choice;
-          const showCorrect = picked !== null && choice === beat.answer && (correct || selected);
+          const selected = selectedChoice === choice;
+          const showCorrect = selectedChoice !== null && choice === beat.answer && (correct || selected);
           const showWrong = selected && choice !== beat.answer;
           return (
             <Pressable
@@ -117,7 +121,7 @@ export function CheckBeat({
               accessibilityRole="button"
               accessibilityState={{ selected, disabled: correct }}
               disabled={correct}
-              onPress={() => setPicked(choice)}
+              onPress={() => onSelectChoice(choice)}
               style={({ pressed, hovered }: PressState) => [
                 styles.choice,
                 {
@@ -138,7 +142,7 @@ export function CheckBeat({
         })}
       </View>
 
-      {picked && correct ? (
+      {selectedChoice && correct ? (
         <>
           <ThemedText type="footnote" style={{ color: theme.success }}>
             That’s {beat.answer}.
@@ -147,7 +151,7 @@ export function CheckBeat({
         </>
       ) : null}
 
-      {picked && !correct ? (
+      {selectedChoice && !correct ? (
         <ThemedText type="footnote" themeColor="textSecondary">
           Not that one. {beat.answer} is the one. Try again.
         </ThemedText>

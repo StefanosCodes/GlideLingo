@@ -52,19 +52,23 @@ to import or reject it; importing moves the legacy data into that Clerk user's s
 4. Replace Clerk's shared web Apple credentials with production OAuth credentials.
 5. Choose the production SMS country allowlist and accept Clerk Pro pricing before shipping phone authentication.
 6. Inject production keys through EAS environments. Keep the Clerk secret key and RevenueCat secret API keys server-only.
+7. In Clerk's production Native application, allowlist both exact desktop redirect URLs:
+   `glidelingo://app/sign-in` and `glidelingo://app/sso-callback`. Do not allowlist a wildcard host,
+   alternate authority, port, userinfo, or arbitrary custom-protocol path.
 
 ## Packaged Electron contract
 
-- The packaged renderer permits only the exact current Clerk frontend origin and the exact development Cloud Run API
-  origin. `desktop:export` embeds that same non-secret API origin in the web bundle. Update the export script and both
-  reviewed constants in `desktop/runtime.cjs` together when promoting to a production Clerk/API environment; wildcard
-  Clerk instance trust is intentionally rejected.
+- The packaged renderer permits only the exact configured Clerk frontend and API origins. Ordinary development packages
+  use the reviewed defaults in `desktop/runtime.cjs`; `desktop:release` validates the production origins, embeds them in
+  Electron package metadata, and exports the web bundle with the matching public client configuration. Wildcard Clerk
+  instance trust is intentionally rejected.
 - Packaged OAuth uses redirect mode and opens provider navigation in the system browser. The installer registers the
   `glidelingo` protocol. The main process enforces one app instance and accepts callbacks only at
   `glidelingo://app/sign-in` or `glidelingo://app/sso-callback`, with bounded parameter names/counts/values.
 - Before publishing a signed artifact, install it, start an OAuth flow, confirm the system browser returns to the already
-  running app, then repeat with the app initially closed. This signed-installed callback smoke is a release gate; unit
-  tests prove parsing and routing policy but cannot prove operating-system registration.
+  running app (warm callback), then repeat with the app initially closed (cold callback). These signed-installed warm and
+  cold OAuth callback smokes remain activation gates; unit tests prove parsing and routing policy but cannot prove
+  operating-system registration or Clerk Native application allowlisting.
 
 ## Verification checklist
 

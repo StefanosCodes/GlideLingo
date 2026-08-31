@@ -8,17 +8,16 @@ only Clerk's stable `userId`; email addresses and phone numbers are never used a
 - Application: `GlideLingo`
 - Frontend API / issuer: `https://vast-gator-9531.clerk.accounts.dev`
 - Native identifier: `com.stefanoscodes.glidelingo`
-- Configured development sign-in methods: Apple, email verification code, and phone SMS code. Google is intentionally
-  deferred so the shared Clerk instance cannot advertise an unconfigured provider in native builds.
+- Android development signing certificate: registered in Clerk from the signed EAS development build
+- Configured development sign-in methods: Google, Apple, email verification code, and phone SMS code.
 - Profile requirement: first name only, collected by the app immediately after authentication
 - Email and phone are alternatives; neither contact method is required when another sign-in method is used
 - MFA strategies and mandatory MFA are disabled for the MVP
 
-Web Apple can use Clerk's shared OAuth credentials in the development instance. Google must remain disabled in Clerk for
-this MVP; enabling it is a separate native integration that must supply and verify each platform's OAuth configuration
-before the shared provider is exposed anywhere. Production Apple requires custom provider credentials. Phone
-authentication is free to exercise in development but is a Clerk Pro feature in production. The development SMS
-allowlist starts with Clerk's two Tier A countries and is capped at 20 messages per month.
+Google and web Apple use Clerk's shared OAuth credentials in the development instance. Production requires custom Google
+and Apple provider credentials plus installed-build callback testing on each shipping platform. Phone authentication is
+free to exercise in development but is a Clerk Pro feature in production. The development SMS allowlist starts with
+Clerk's two Tier A countries and is capped at 20 messages per month.
 
 ## Local configuration
 
@@ -46,9 +45,8 @@ to import or reject it; importing moves the legacy data into that Clerk user's s
    cannot exercise the native Clerk and RevenueCat modules.
 2. Add the Apple Developer Team ID / App ID Prefix to Clerk's iOS native application and enable Sign in with Apple for
    `com.stefanoscodes.glidelingo`.
-3. Keep Google disabled. Add native Google as a separate release slice with platform OAuth clients and an installed-build
-   callback test before enabling it in the shared Clerk instance. Add the Android signing SHA-256 fingerprint to Clerk
-   once EAS creates the signing certificate.
+3. Before production, register the Google Play app-signing SHA-256 fingerprint in Clerk, replace Clerk's shared Google
+   credentials with platform-owned OAuth credentials, and pass installed-build callback tests on Android and iOS.
 4. Replace Clerk's shared web Apple credentials with production OAuth credentials.
 5. Choose the production SMS country allowlist and accept Clerk Pro pricing before shipping phone authentication.
 6. Inject production keys through EAS environments. Keep the Clerk secret key and RevenueCat secret API keys server-only.
@@ -72,7 +70,7 @@ to import or reject it; importing moves the legacy data into that Clerk user's s
 
 ## Verification checklist
 
-- Sign up separately with Apple, email code, and phone code. Confirm Google is not offered in web or native UI.
+- Sign up separately with Google, Apple, email code, and phone code on every shipping platform.
 - Confirm each new user is stopped at the one-field first-name screen before seeing learning content.
 - Confirm sign-out returns to `/sign-in`, and another account cannot see the first account's browser learning state or Pro
   entitlement.

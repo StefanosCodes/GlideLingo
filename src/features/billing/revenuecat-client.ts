@@ -18,9 +18,6 @@ const identitySession = new RevenueCatIdentitySession({
   logIn: async (appUserId) => {
     await Purchases.logIn(appUserId);
   },
-  logOut: async () => {
-    await Purchases.logOut();
-  },
 });
 
 function runtimePlatform(): RevenueCatPlatform {

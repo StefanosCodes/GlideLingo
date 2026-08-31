@@ -24,6 +24,9 @@ env:
   GCP_REPOSITORY: glidelingo-containers
   GCP_SERVICE: glidelingo-api
   IMAGE_NAME: glidelingo-api
+  CLERK_ISSUER: https://vast-gator-9531.clerk.accounts.dev
+  CLERK_JWKS_URL: https://vast-gator-9531.clerk.accounts.dev/.well-known/jwks.json
+  CLERK_AUTHORIZED_PARTIES: '["http://localhost:8081","http://127.0.0.1:8081","glidelingo://app"]'
 
 jobs:
   deploy:
@@ -107,6 +110,16 @@ jobs:
               || return 1
             curl --fail --retry 6 --retry-all-errors --retry-delay 5 "${url}/health/ready" \
               || return 1
+            local auth_status
+            auth_status="$(curl --silent --show-error --output /dev/null \
+              --header 'Authorization: Bearer invalid-deployment-smoke-token' \
+              --write-out '%{http_code}' \
+              "${url}/v1/auth/session")" \
+              || return 1
+            if [[ "${auth_status}" != "401" ]]; then
+              echo "Expected configured authentication to reject an invalid token with 401; received ${auth_status}." >&2
+              return 1
+            fi
           }
           trap cleanup_candidate_tag EXIT
 
@@ -114,6 +127,7 @@ jobs:
             --project="${GCP_PROJECT_ID}" \
             --region="${GCP_REGION}" \
             --image="${{ steps.image.outputs.uri }}" \
+            --update-env-vars="^@^GLIDELINGO_CLERK_ISSUER=${CLERK_ISSUER}@GLIDELINGO_CLERK_JWKS_URL=${CLERK_JWKS_URL}@GLIDELINGO_CLERK_AUTHORIZED_PARTIES=${CLERK_AUTHORIZED_PARTIES}" \
             --no-traffic \
             --tag="${candidate_tag}" \
             --quiet

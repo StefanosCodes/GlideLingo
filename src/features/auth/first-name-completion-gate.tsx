@@ -91,7 +91,7 @@ export function FirstNameCompletionGate({ children }: PropsWithChildren) {
             What should we call you?
           </ThemedText>
           <ThemedText type="body" themeColor="textSecondary" style={styles.centeredCopy}>
-            Your first name is enough. You can update it later from your account.
+            Your first name is enough to personalize your learning experience.
           </ThemedText>
         </View>
 

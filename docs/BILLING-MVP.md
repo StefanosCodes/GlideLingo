@@ -7,8 +7,10 @@ enable Clerk Billing for the same subscription.
 ## Integration contract
 
 - Mount `BillingProvider` inside `ClerkProvider` and pass `userId={userId}` from Clerk's `useAuth()` result.
-- Keep the provider mounted while Clerk finishes sign-out so it can detach the RevenueCat identity. It also clears visible
-  entitlement state synchronously when the `userId` prop changes.
+- Keep the provider mounted while Clerk finishes sign-out so it can clear logical RevenueCat ownership. It also clears
+  visible entitlement state synchronously when the `userId` prop changes.
+- Switch custom Clerk user IDs directly with RevenueCat `logIn()`. Do not call RevenueCat `logOut()` during application
+  sign-out because it creates an unnecessary anonymous App User ID and alias.
 - Identity changes, offering loads, purchases, and restores share one serialized queue so a purchase cannot finish under a
   different Clerk account during rapid sign-out or account switching.
 - Never pass an email address or phone number as the RevenueCat App User ID.
@@ -41,6 +43,8 @@ mock package or Pro state. Never expose a RevenueCat secret API key through `EXP
 4. Add monthly and annual packages to the current offering.
 5. Add the Test Store public SDK key locally and restart Metro.
 6. Sign in through Clerk, open `/subscription`, and test success, cancellation, failure, refresh, and sign-out/account switch.
+7. Set RevenueCat restore behavior to **Keep with original App User ID** so restoring one store account cannot transfer a
+   subscription between different Clerk accounts.
 
 With the explicit development-only mock flag and no public SDK key, the screen uses an in-memory mock package scoped to
 the current signed-in account. Without either a real key or that development opt-in, billing is unavailable. Real native

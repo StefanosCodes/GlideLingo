@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GlideLingo — Product prototype</title>
+    <style>
+      :root { --ink:#1c211f; --muted:#7f8780; --line:#dce2d9; --paper:#f7f8f4; --panel:#fff; --soft:#eef3ec; --green:#315f4c; --sidebar:248px; font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif; }
+      * { box-sizing:border-box; }
+      body { margin:0; color:var(--ink); background:var(--paper); }
+      button { font:inherit; }
+      .app { min-height:100vh; display:grid; grid-template-columns:var(--sidebar) minmax(0,1fr); }
+      .sidebar { min-height:100vh; display:flex; flex-direction:column; padding:28px 18px 20px; background:#edf2eb; border-right:1px solid var(--line); }
+      .brand { display:flex; align-items:center; gap:10px; padding:0 10px 42px; font-size:17px; font-weight:700; }
+      .mark { width:30px; height:30px; display:grid; place-items:center; color:#fff; background:var(--green); border-radius:9px; }
+      .nav-label { padding:0 12px 10px; color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
+      .nav { display:grid; gap:5px; margin:0 0 28px; }
+      .nav button { width:100%; display:flex; align-items:center; gap:12px; padding:11px 12px; color:#69736b; background:none; border:0; border-radius:10px; cursor:pointer; text-align:left; }
+      .nav button:hover { color:var(--ink); background:#fff9; }
+      .nav button.active { color:var(--green); background:#fff; font-weight:700; }
+      .nav-icon { width:18px; text-align:center; font-size:16px; }
+      .spacer { flex:1; }
+      .profile { display:flex; align-items:center; gap:10px; padding:12px; border-top:1px solid var(--line); }
+      .avatar { width:32px; height:32px; display:grid; place-items:center; flex:0 0 auto; color:#fff; background:#ba8067; border-radius:50%; font-size:11px; font-weight:800; }
+      .profile strong,.profile span { display:block; } .profile strong { font-size:13px; } .profile span { margin-top:3px; color:var(--muted); font-size:11px; }
+      main { min-width:0; padding:30px clamp(24px,5vw,72px) 64px; }
+      .topbar,.content { max-width:1180px; margin-inline:auto; }
+      .topbar { display:flex; align-items:center; justify-content:space-between; gap:20px; margin-bottom:64px; }
+      .crumbs { color:var(--muted); font-size:12px; } .crumbs strong { color:var(--ink); }
+      .top-actions { display:flex; align-items:center; gap:12px; }
+      .streak { padding:8px 11px; color:#765c18; background:#fff7d9; border:1px solid #eddda0; border-radius:999px; font-size:12px; font-weight:700; }
+      .notification { width:36px; height:36px; color:var(--muted); background:#fff; border:1px solid var(--line); border-radius:50%; cursor:pointer; }
+      .eyebrow { margin:0 0 14px; color:var(--green); font-size:11px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
+      h1,h2,h3,p { margin-top:0; } h1 { max-width:660px; margin-bottom:14px; font-size:clamp(38px,5vw,64px); line-height:.98; letter-spacing:-.06em; } h2 { margin-bottom:8px; font-size:22px; letter-spacing:-.03em; } h3 { margin-bottom:6px; font-size:16px; }
+      .lede { max-width:500px; margin-bottom:42px; color:var(--muted); font-size:17px; line-height:1.55; }
+      .dashboard { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(280px,.8fr); gap:20px; } .stack { display:grid; gap:20px; align-content:start; }
+      .panel { padding:24px; background:var(--panel); border:1px solid var(--line); border-radius:16px; }
+      .focus { min-height:310px; display:flex; flex-direction:column; justify-content:space-between; color:#f5f8f1; background:var(--green); border-color:var(--green); }
+      .focus .eyebrow { color:#b9d4bc; } .focus h2 { max-width:480px; margin-bottom:12px; font-size:32px; line-height:1.06; } .focus p { max-width:450px; margin-bottom:28px; color:#c8ddca; line-height:1.5; }
+      .meta,.footer,.heading,.progress-line,.activity { display:flex; align-items:center; justify-content:space-between; gap:16px; } .meta { color:#c8ddca; font-size:11px; font-weight:800; letter-spacing:.12em; }
+      .focus .footer { margin-top:24px; } .focus small { color:#c8ddca; }
+      .primary { min-height:44px; padding:0 17px; color:var(--green); background:#f4f8ef; border:0; border-radius:9px; cursor:pointer; font-size:13px; font-weight:800; } .primary:hover { background:#fff; }
+      .mini-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; } .mini { min-height:150px; } .mini-icon { margin-bottom:22px; font-size:22px; } .mini p { margin:0; color:var(--muted); font-size:13px; line-height:1.45; }
+      .heading { margin-bottom:20px; } .heading h2 { margin:0; } .heading a { color:var(--green); font-size:12px; font-weight:700; text-decoration:none; }
+      .progress-list { display:grid; gap:19px; } .progress-line { margin-bottom:8px; font-size:12px; } .progress-line span:last-child { color:var(--muted); } .track { height:7px; overflow:hidden; background:var(--soft); border-radius:999px; } .fill { height:100%; background:var(--green); border-radius:inherit; }
+      .activity-list { display:grid; gap:17px; } .activity { justify-content:flex-start; } .dot { width:9px; height:9px; flex:0 0 auto; background:var(--green); border-radius:50%; } .activity div { flex:1; } .activity strong,.activity span { display:block; } .activity strong { font-size:13px; } .activity span { margin-top:4px; color:var(--muted); font-size:11px; } .score { color:var(--green); font-size:12px; font-weight:800; }
+      .phrase { background:#fffaf0; border-color:#efe3ca; } .phrase blockquote { margin:22px 0 14px; font-size:25px; line-height:1.08; letter-spacing:-.04em; } .phrase cite { color:var(--muted); font-size:12px; font-style:normal; }
+      .toast { position:fixed; right:24px; bottom:24px; padding:12px 15px; color:#fff; background:var(--ink); border-radius:9px; opacity:0; transform:translateY(8px); pointer-events:none; transition:180ms ease; font-size:13px; } .toast.show { opacity:1; transform:translateY(0); }
+      @media (max-width:900px) { :root { --sidebar:76px; } .sidebar { padding-inline:12px; } .brand { justify-content:center; padding-inline:0; } .brand span:not(.mark),.nav-label,.nav button span:not(.nav-icon),.profile-copy { display:none; } .nav button { justify-content:center; padding-inline:0; } .profile { justify-content:center; padding-inline:0; } .dashboard { grid-template-columns:1fr; } }
+      @media (max-width:620px) { .app { display:block; } .sidebar { min-height:auto; height:62px; flex-direction:row; align-items:center; padding:10px 14px; } .brand { padding:0; } .nav { display:flex; margin:0 0 0 auto; } .nav + .nav,.spacer,.profile { display:none; } .nav button { width:40px; height:40px; } main { padding:28px 18px 48px; } .topbar { margin-bottom:48px; } .streak { display:none; } h1 { font-size:44px; } .lede { font-size:15px; } .mini-grid { grid-template-columns:1fr; } }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar" aria-label="Main navigation">
+        <div class="brand"><span class="mark">↗</span><span>GlideLingo</span></div>
+        <div class="nav-label">Workspace</div>
+        <nav class="nav">
+          <button class="active" data-section="Today"><span class="nav-icon">⌂</span><span>Today</span></button>
+          <button data-section="Course"><span class="nav-icon">▤</span><span>Course</span></button>
+          <button data-section="Practice"><span class="nav-icon">◌</span><span>Practice</span></button>
+        </nav>
+        <div class="nav-label">Your progress</div>
+        <nav class="nav">
+          <button data-section="Progress"><span class="nav-icon">↗</span><span>Progress</span></button>
+          <button data-section="Phrasebook"><span class="nav-icon">▥</span><span>Phrasebook</span></button>
+        </nav>
+        <div class="spacer"></div>
+        <div class="profile"><div class="avatar">AS</div><div class="profile-copy"><strong>Alex Smith</strong><span>Greek · A1</span></div></div>
+      </aside>
+      <main>
+        <div class="topbar"><div class="crumbs">Workspace <span>/</span> <strong id="section">Today</strong></div><div class="top-actions"><div class="streak">✦ 7 day streak</div><button class="notification" aria-label="Notifications">♡</button><div class="avatar">AS</div></div></div>
+        <div class="content">
+          <p class="eyebrow">Monday · Modern Greek A1</p>
+          <h1>Make a little progress today.</h1>
+          <p class="lede">A calm place to pick up your course, practice what is still forming, and see what you can do now.</p>
+          <section class="dashboard" aria-label="Today dashboard">
+            <div class="stack">
+              <article class="panel focus"><div><div class="meta"><span>CONTINUE YOUR COURSE</span><span>12 MIN</span></div><div style="margin-top:72px"><p class="eyebrow">Mission 01 · Meet someone</p><h2>Introduce yourself with confidence.</h2><p>Learn the phrases, sounds, and small turns of conversation that make a first meeting feel natural.</p></div></div><div class="footer"><button class="primary" id="lesson">Continue lesson →</button><small>Lesson 4 of 8</small></div></article>
+              <div class="mini-grid"><article class="panel mini"><div class="mini-icon">◉</div><h3>Speak</h3><p>Practice five phrases from today’s lesson.</p></article><article class="panel mini"><div class="mini-icon">◌</div><h3>Listen</h3><p>Hear a short dialogue and catch the details.</p></article></div>
+            </div>
+            <div class="stack">
+              <article class="panel"><div class="heading"><h2>Your progress</h2><a href="#progress">View details</a></div><div class="progress-list"><div><div class="progress-line"><span>Course completion</span><span>32%</span></div><div class="track"><div class="fill" style="width:32%"></div></div></div><div><div class="progress-line"><span>Speaking confidence</span><span>68%</span></div><div class="track"><div class="fill" style="width:68%"></div></div></div><div><div class="progress-line"><span>Words in review</span><span>24</span></div><div class="track"><div class="fill" style="width:54%"></div></div></div></div></article>
+              <article class="panel"><div class="heading"><h2>Recent activity</h2><a href="#activity">See all</a></div><div class="activity-list"><div class="activity"><span class="dot"></span><div><strong>Ordering at a café</strong><span>Yesterday · Listening</span></div><span class="score">+12 XP</span></div><div class="activity"><span class="dot"></span><div><strong>Greetings & introductions</strong><span>Friday · Speaking</span></div><span class="score">+18 XP</span></div></div></article>
+              <article class="panel phrase"><p class="eyebrow">Phrase of the day</p><blockquote>«Χάρηκα πολύ.»</blockquote><cite>Nice to meet you · literally “I was glad.”</cite></article>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status"></div>
+    <script>
+      const toast = document.querySelector('#toast');
+      const section = document.querySelector('#section');
+      let timer;
+      function notify(message) { toast.textContent = message; toast.classList.add('show'); clearTimeout(timer); timer = setTimeout(() => toast.classList.remove('show'), 1800); }
+      document.querySelectorAll('.nav button').forEach((button) => button.addEventListener('click', () => { document.querySelectorAll('.nav button').forEach((item) => item.classList.remove('active')); button.classList.add('active'); section.textContent = button.dataset.section; notify(`${button.dataset.section} is a prototype placeholder`); }));
+      document.querySelector('#lesson').addEventListener('click', () => notify('Lesson flow coming next'));
+    </script>
+  </body>
+</html>

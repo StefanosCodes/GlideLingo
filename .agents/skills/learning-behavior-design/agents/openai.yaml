@@ -1,0 +1,5 @@
+interface:
+  display_name: "Learning Behavior Design"
+  short_description: "Ethical motivation and emotional UX"
+  default_prompt: "Use $learning-behavior-design to turn this GlideLingo journey into an evidence-backed emotional behavior brief."
+

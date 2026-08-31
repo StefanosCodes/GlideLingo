@@ -1,0 +1,7 @@
+:root {
+  --font-display: 'Inter_600SemiBold', Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace;
+  --font-rounded: 'Inter_400Regular', Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Inter_600SemiBold', Inter, ui-sans-serif, system-ui, sans-serif;
+}

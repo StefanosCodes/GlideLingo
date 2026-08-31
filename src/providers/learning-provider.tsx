@@ -42,6 +42,7 @@ import {
   type WeeklyPracticeGoal,
 } from '@/features/learning-progress/rhythm-policy';
 import {
+  LegacyLearningImportFailure,
   mergeConcurrentLearning,
   mergeLegacyLearning,
   persistLegacyLearningImport,
@@ -465,8 +466,11 @@ export function LearningProvider({
             merged,
           });
           return { cleanupFailed: false, merged };
-        } catch {
-          return { cleanupFailed: true, merged };
+        } catch (error) {
+          if (error instanceof LegacyLearningImportFailure && error.destinationPersisted) {
+            return { cleanupFailed: true, merged };
+          }
+          throw new Error('import-not-persisted');
         }
       },
       { requireBrowserLock: Platform.OS === 'web' },
@@ -490,6 +494,8 @@ export function LearningProvider({
             ? 'The earlier progress is no longer available.'
             : message === 'destination-unsafe'
               ? 'Your account progress could not be read safely. Nothing was overwritten or removed.'
+              : message === 'import-not-persisted'
+                ? 'Progress could not be saved on this device. The earlier progress is still available.'
               : 'The earlier progress could not be read safely. Nothing was removed.',
         );
       });

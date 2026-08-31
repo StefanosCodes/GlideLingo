@@ -3,18 +3,20 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { Pressable, Text } from 'react-native';
 
 import { LearningProvider, useLearning } from '@/providers/learning-provider';
-import { learningStorageKey } from '@/providers/learning-storage';
+import { LEGACY_IMPORT_OWNER_KEY, learningStorageKey } from '@/providers/learning-storage';
 
 const storage = new Map<string, string>();
 let getItem: jest.MockedFunction<(key: string) => string | null>;
 let setItem: jest.MockedFunction<(key: string, value: string) => void>;
 const storageListeners = new Set<(event: StorageEvent) => void>();
 const legacyImporters = new Map<string, () => void>();
+const failingSetKeys = new Set<string>();
 
 beforeEach(() => {
   storage.clear();
   getItem = jest.fn((key: string) => storage.get(key) ?? null);
   setItem = jest.fn((key: string, value: string) => {
+    if (failingSetKeys.has(key)) throw new Error(`setItem failed for ${key}`);
     storage.set(key, value);
   });
   Object.defineProperty(globalThis, 'localStorage', {
@@ -23,6 +25,7 @@ beforeEach(() => {
   });
   storageListeners.clear();
   legacyImporters.clear();
+  failingSetKeys.clear();
   Object.defineProperties(window, {
     addEventListener: {
       configurable: true,
@@ -177,7 +180,7 @@ function ImportProbe({ account }: { account: string }) {
   );
 }
 
-test('concurrent accounts serialize the shared legacy source so at most one destination imports it', async () => {
+function seedLegacyProgress() {
   storage.set(
     'glidelingo-learning',
     JSON.stringify({
@@ -191,6 +194,10 @@ test('concurrent accounts serialize the shared legacy source so at most one dest
       fieldWrites: {},
     }),
   );
+}
+
+test('concurrent accounts serialize the shared legacy source so at most one destination imports it', async () => {
+  seedLegacyProgress();
   const screen = await render(
     <>
       <LearningProvider storageScope="account-a">
@@ -223,6 +230,78 @@ test('concurrent accounts serialize the shared legacy source so at most one dest
     ),
   );
   expect(screen.getByTestId(`${winner}-legacy`).props.children).toBe('hidden');
+});
+
+test('a failed shared owner claim creates no destination and leaves the source available', async () => {
+  seedLegacyProgress();
+  const screen = await render(
+    <LearningProvider storageScope="account-a">
+      <ImportProbe account="account-a" />
+    </LearningProvider>,
+  );
+  failingSetKeys.add(LEGACY_IMPORT_OWNER_KEY);
+
+  await act(async () => {
+    legacyImporters.get('account-a')?.();
+    await Promise.resolve();
+  });
+
+  await waitFor(() =>
+    expect(screen.getByTestId('account-a-error').props.children).toBe(
+      'Progress could not be saved on this device. The earlier progress is still available.',
+    ),
+  );
+  expect(storage.has(learningStorageKey('account-a'))).toBe(false);
+  expect(storage.has(LEGACY_IMPORT_OWNER_KEY)).toBe(false);
+  expect(storage.has('glidelingo-learning')).toBe(true);
+  expect(screen.getByTestId('account-a-legacy').props.children).toBe('available');
+});
+
+test('a destination failure retains the owner claim, blocks other accounts, and permits owner retry', async () => {
+  seedLegacyProgress();
+  const screen = await render(
+    <>
+      <LearningProvider storageScope="account-a">
+        <ImportProbe account="account-a" />
+      </LearningProvider>
+      <LearningProvider storageScope="account-b">
+        <ImportProbe account="account-b" />
+      </LearningProvider>
+    </>,
+  );
+  const accountAKey = learningStorageKey('account-a');
+  const accountBKey = learningStorageKey('account-b');
+  failingSetKeys.add(accountAKey);
+
+  await act(async () => {
+    legacyImporters.get('account-a')?.();
+    await Promise.resolve();
+  });
+  await waitFor(() => expect(storage.get(LEGACY_IMPORT_OWNER_KEY)).toBe('account-a'));
+  expect(storage.has(accountAKey)).toBe(false);
+  expect(storage.has('glidelingo-learning')).toBe(true);
+
+  await act(async () => {
+    legacyImporters.get('account-b')?.();
+    await Promise.resolve();
+  });
+  await waitFor(() =>
+    expect(screen.getByTestId('account-b-error').props.children).toBe(
+      'The earlier progress is no longer available.',
+    ),
+  );
+  expect(storage.has(accountBKey)).toBe(false);
+
+  failingSetKeys.delete(accountAKey);
+  await act(async () => {
+    legacyImporters.get('account-a')?.();
+    await Promise.resolve();
+  });
+  await waitFor(() => expect(storage.has(accountAKey)).toBe(true));
+  expect(JSON.parse(storage.get(accountAKey) ?? '{}').completedLessonIds).toContain('legacy-lesson');
+  expect(storage.has('glidelingo-learning')).toBe(false);
+  expect(storage.has(LEGACY_IMPORT_OWNER_KEY)).toBe(false);
+  expect(screen.getByTestId('account-a-legacy').props.children).toBe('hidden');
 });
 
 test('completion returns the actual merged evidence after a weaker replay', async () => {

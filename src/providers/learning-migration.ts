@@ -167,12 +167,22 @@ export function mergeLegacyLearning(current: StoredLearningV2, legacy: StoredLea
 }
 
 /**
- * Write the complete V2 account destination before changing either legacy
- * marker. When provided, the shared owner claim is written only after the
- * destination. Cleanup failures leave the source and owner claim intact while
- * removing the account decision marker, so only that account can retry the
- * exact idempotent merge.
+ * Claim the shared source before writing the complete V2 account destination.
+ * The source itself is removed only after destination durability. A claim
+ * failure leaves it untouched; a later failure leaves the source fail-closed
+ * to that owner. Cleanup failures likewise retain the claim so only that
+ * account can retry the exact idempotent merge.
  */
+export class LegacyLearningImportFailure extends Error {
+  readonly destinationPersisted: boolean;
+
+  constructor(message: string, destinationPersisted: boolean) {
+    super(message);
+    this.name = 'LegacyLearningImportFailure';
+    this.destinationPersisted = destinationPersisted;
+  }
+}
+
 export function persistLegacyLearningImport(
   storage: LearningStorage,
   {
@@ -191,20 +201,34 @@ export function persistLegacyLearningImport(
     merged: StoredLearningV2;
   },
 ) {
-  storage.setItem(destinationKey, JSON.stringify(merged));
-  if (claimKey && claimOwner) storage.setItem(claimKey, claimOwner);
-  storage.setItem(decisionKey, 'imported');
+  if (claimKey && claimOwner) {
+    try {
+      storage.setItem(claimKey, claimOwner);
+    } catch {
+      throw new LegacyLearningImportFailure('The shared progress could not be claimed.', false);
+    }
+  }
+  try {
+    storage.setItem(destinationKey, JSON.stringify(merged));
+  } catch {
+    throw new LegacyLearningImportFailure('The account destination could not be saved.', false);
+  }
+  try {
+    storage.setItem(decisionKey, 'imported');
+  } catch {
+    throw new LegacyLearningImportFailure('The import decision could not be saved.', true);
+  }
 
   try {
     storage.removeItem(legacyKey);
-  } catch (error) {
+  } catch {
     try {
       storage.removeItem(decisionKey);
     } catch {
       // The complete account copy remains durable. A later explicit import can
       // safely merge the same source again without duplicating stored evidence.
     }
-    throw error;
+    throw new LegacyLearningImportFailure('The shared progress cleanup did not finish.', true);
   }
 
   if (claimKey) {

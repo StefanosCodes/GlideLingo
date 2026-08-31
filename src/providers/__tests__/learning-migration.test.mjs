@@ -193,7 +193,7 @@ test('cleanup failure keeps the source and makes an exact retry possible', () =>
         legacyKey: 'legacy',
         merged,
       }),
-    /cleanup failed/,
+    /cleanup did not finish/,
   );
   assert.equal(values.has('legacy'), true);
   assert.equal(values.has('decision'), false);

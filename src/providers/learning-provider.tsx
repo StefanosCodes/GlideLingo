@@ -33,12 +33,14 @@ type LearningContextValue = {
   currentModule: ReturnType<typeof currentModule>;
   nextLesson: ReturnType<typeof nextLesson>;
   focusedModuleId: string | null;
+  activeLessonId: string | null;
   progress: number;
   streakDays: number;
   completedModuleIds: string[];
   setLanguage: (id: LanguageId) => void;
   startCourse: (courseId: string) => boolean;
   focusModule: (moduleId: string | null) => void;
+  openLesson: (lessonId: string | null) => void;
 };
 
 const LearningContext = createContext<LearningContextValue | null>(null);
@@ -78,6 +80,7 @@ export function LearningProvider({ children }: PropsWithChildren) {
   );
   const [completedModuleIds, setCompletedModuleIds] = useState<string[]>(initial.completedModuleIds);
   const [focusedModuleId, setFocusedModuleId] = useState<string | null>(null);
+  const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -99,13 +102,28 @@ export function LearningProvider({ children }: PropsWithChildren) {
   const progress = enrolledCourse ? courseProgress(enrolledCourse, completedModuleIds) : 0;
 
   const setLanguage = useCallback((id: LanguageId) => {
+    setActiveLessonId(null);
     setFocusedModuleId(null);
     setLanguageId(id);
   }, []);
 
   const focusModule = useCallback((moduleId: string | null) => {
+    setActiveLessonId(null);
     setFocusedModuleId(moduleId);
   }, []);
+
+  const openLesson = useCallback(
+    (lessonId: string | null) => {
+      setActiveLessonId(lessonId);
+      if (lessonId && enrolledCourse) {
+        const found = enrolledCourse.modules.find((m) => m.lessons.some((l) => l.id === lessonId));
+        if (found) {
+          setFocusedModuleId(found.id);
+        }
+      }
+    },
+    [enrolledCourse],
+  );
 
   const startCourse = useCallback(
     (courseId: string) => {
@@ -114,6 +132,7 @@ export function LearningProvider({ children }: PropsWithChildren) {
       setEnrolledByLanguage((current) => ({ ...current, [languageId]: course.id }));
       setCompletedModuleIds((current) => current.filter((id) => !course.modules.some((module) => module.id === id)));
       setFocusedModuleId(null);
+      setActiveLessonId(null);
       return true;
     },
     [language.available, languageId],
@@ -129,14 +148,17 @@ export function LearningProvider({ children }: PropsWithChildren) {
       currentModule: moduleNow,
       nextLesson: lessonNow,
       focusedModuleId,
+      activeLessonId,
       progress,
       streakDays,
       completedModuleIds,
       setLanguage,
       startCourse,
       focusModule,
+      openLesson,
     }),
     [
+      activeLessonId,
       completedModuleIds,
       courses,
       enrolledCourse,
@@ -146,6 +168,7 @@ export function LearningProvider({ children }: PropsWithChildren) {
       languageId,
       lessonNow,
       moduleNow,
+      openLesson,
       progress,
       setLanguage,
       startCourse,

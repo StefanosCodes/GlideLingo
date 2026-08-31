@@ -1,4 +1,8 @@
+import elLettersOne from '../../content/courses/en-el-GR/missions/el-letters-1.json';
+
 export type LanguageId = 'el' | 'es' | 'fr';
+
+export type AudioClipId = string;
 
 export type Language = {
   id: LanguageId;
@@ -9,10 +13,19 @@ export type Language = {
   available: boolean;
 };
 
+export type LessonBlock =
+  | { type: 'heading'; text: string }
+  | { type: 'prose'; text: string }
+  | { type: 'example'; greek: string; gloss: string; audioId?: AudioClipId }
+  | { type: 'callout'; text: string }
+  | { type: 'listen'; label: string; audioId: AudioClipId }
+  | { type: 'check'; prompt: string; choices: string[]; answer: string };
+
 export type Lesson = {
   id: string;
   title: string;
   durationMin: number;
+  blocks?: LessonBlock[];
 };
 
 export type CourseModule = {
@@ -56,7 +69,12 @@ export const courses: Course[] = [
         title: 'Decode Greek letters',
         canDo: 'I can recognize core Greek letters and sound patterns.',
         lessons: [
-          { id: 'el-letters-1', title: 'The sound of Greek', durationMin: 8 },
+          {
+            id: 'el-letters-1',
+            title: 'The sound of Greek',
+            durationMin: 8,
+            blocks: elLettersOne.blocks as LessonBlock[],
+          },
           { id: 'el-letters-2', title: 'The alphabet', durationMin: 10 },
           { id: 'el-letters-3', title: 'First words', durationMin: 8 },
         ],
@@ -189,6 +207,14 @@ export function getLesson(course: Course, lessonId: string) {
   for (const module of course.modules) {
     const lesson = module.lessons.find((item) => item.id === lessonId);
     if (lesson) return { module, lesson };
+  }
+  return null;
+}
+
+export function findLesson(lessonId: string) {
+  for (const course of courses) {
+    const found = getLesson(course, lessonId);
+    if (found) return { course, ...found };
   }
   return null;
 }

@@ -1,25 +1,32 @@
-import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
+import { LessonLectureView } from '@/features/learning-session/lesson-lecture-view';
 import { ListRow } from '@/components/list-row';
 import { ScreenFrame } from '@/components/screen-frame';
 import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
-import { GlideSymbol } from '@/components/ui/glide-symbol';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { getModule, moduleStatus } from '@/constants/catalog';
 import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
 import { useLearning } from '@/providers/learning-provider';
 
 export default function TodayScreen() {
-  const theme = useTheme();
   const router = useRouter();
-  const { language, enrolledCourse, currentModule, nextLesson, focusedModuleId, completedModuleIds, progress, courses, setLanguage } =
-    useLearning();
-  const [queued, setQueued] = useState(false);
+  const {
+    language,
+    enrolledCourse,
+    currentModule,
+    nextLesson,
+    focusedModuleId,
+    activeLessonId,
+    completedModuleIds,
+    progress,
+    courses,
+    setLanguage,
+    openLesson,
+  } = useLearning();
   const catalogCourse = enrolledCourse ?? courses[0] ?? null;
   const percent = Math.round(progress * 100);
 
@@ -75,6 +82,10 @@ export default function TodayScreen() {
     );
   }
 
+  if (activeLessonId) {
+    return <LessonLectureView lessonId={activeLessonId} onClose={() => openLesson(null)} />;
+  }
+
   const lesson = nextLesson?.lesson;
   const module = currentModule ?? nextLesson?.module;
   const focused = focusedModuleId ? getModule(enrolledCourse, focusedModuleId) : null;
@@ -103,6 +114,7 @@ export default function TodayScreen() {
               detail={`${item.durationMin} min`}
               label={item.title}
               last={lessonIndex === focused.lessons.length - 1}
+              onPress={() => openLesson(item.id)}
             />
           ))}
         </GlideSurface>
@@ -110,8 +122,8 @@ export default function TodayScreen() {
         {status === 'current' && lesson ? (
           <GlideButton
             fullWidth
-            label={queued ? 'Continue lesson' : 'Start today’s lesson'}
-            onPress={() => setQueued(true)}
+            label="Start today’s lesson"
+            onPress={() => openLesson(lesson.id)}
             testID="start-lesson"
           />
         ) : (
@@ -168,24 +180,11 @@ export default function TodayScreen() {
           <ProgressBar value={progress} />
         </View>
 
-        {queued && (
-          <View style={[styles.readyRow, { borderTopColor: theme.separator }]}>
-            <GlideSymbol
-              name={{ ios: 'checkmark', android: 'check', web: 'check' }}
-              size={15}
-              tintColor={theme.success}
-            />
-            <ThemedText type="footnote" style={{ color: theme.success }}>
-              Lesson playback comes next. The path already knows where you are.
-            </ThemedText>
-          </View>
-        )}
-
         {lesson ? (
           <GlideButton
             fullWidth
-            label={queued ? 'Continue lesson' : 'Start today’s lesson'}
-            onPress={() => setQueued(true)}
+            label="Start today’s lesson"
+            onPress={() => openLesson(lesson.id)}
             testID="start-lesson"
           />
         ) : (
@@ -221,12 +220,5 @@ const styles = StyleSheet.create({
   lessonCopy: { gap: Spacing.two, maxWidth: 520 },
   progressBlock: { gap: Spacing.two },
   progressLabels: { flexDirection: 'row', justifyContent: 'space-between' },
-  readyRow: {
-    alignItems: 'center',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: Spacing.two,
-    paddingTop: Spacing.three,
-  },
   sectionHeading: { gap: Spacing.one },
 });

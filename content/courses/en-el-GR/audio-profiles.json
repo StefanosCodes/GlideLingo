@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "el-GR-primary": {
+      "locale": "el-GR",
+      "voice": "el-GR-Chirp3-HD-Aoede",
+      "encoding": "MP3",
+      "priceUsdPerMillionCharacters": 30
+    }
+  }
+}

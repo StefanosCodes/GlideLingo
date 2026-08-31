@@ -28,7 +28,20 @@ The `.p12`, its password, the app-specific password, and their encoded contents 
 
 ## GitHub configuration
 
-Configure these Actions secrets:
+Create a protected GitHub Actions environment named exactly `desktop-release-signing` before
+enabling this workflow. Configure at least one required reviewer who is not the person starting
+the run, disallow administrators from bypassing the approval, and limit deployments to the
+protected `main` branch and protected `desktop-v*` tags. The signing job is deliberately bound
+to this environment; a repository without these protections is not release-ready.
+
+Create a tag ruleset for `desktop-v*` that restricts tag creation, update, and deletion to the
+release maintainers. A release tag must already exist, match `desktop/package.json`, and point to
+an exact commit in the complete `main` history. The workflow enforces the commit/tag ancestry
+again before any credential-bearing build step, but the ruleset is still required to prevent a
+time-of-check/time-of-use tag change.
+
+Configure these as environment secrets on `desktop-release-signing`, not as unprotected
+repository-level secrets:
 
 | Name | Value |
 | --- | --- |
@@ -38,7 +51,7 @@ Configure these Actions secrets:
 | `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password created for GlideLingo notarization |
 | `APPLE_TEAM_ID` | Personal Stefanos Sophocleous Apple Developer Team ID |
 
-Configure this Actions variable:
+Configure this environment variable on `desktop-release-signing`:
 
 | Name | Value |
 | --- | --- |
@@ -54,7 +67,14 @@ For a signed local build, install the Developer ID identity in the login keychai
 npm run desktop:release
 ```
 
-For CI, run the **Desktop Release** workflow manually to produce a private workflow artifact without publishing a GitHub Release.
+To exercise the universal package layout without reading Apple credentials or producing a
+releasable binary, run `npm run desktop:package:dry-run`. Its separate builder overlay disables
+signing and the post-sign/notarization hook and writes only to ignored `release-dry-run/`. It is
+verification evidence, never a distribution artifact.
+
+For CI, run the **Desktop Release** workflow manually with both the exact 40-character reviewed
+`main` commit SHA and its existing protected release tag. Manual runs cannot select a branch,
+pull-request ref, or off-main commit.
 
 Publishing is tag-driven. The tag must match the version in `desktop/package.json`:
 
@@ -62,7 +82,12 @@ Publishing is tag-driven. The tag must match the version in `desktop/package.jso
 desktop-v1.0.0 ↔ desktop/package.json version 1.0.0
 ```
 
-Pushing that tag runs verification, creates the signed/notarized universal artifacts, and publishes a GitHub Release only after every release gate succeeds.
+Pushing that tag runs non-secret verification first and then waits for approval on the
+`desktop-release-signing` environment. After signing and notarization, the workflow creates or
+updates a **draft** GitHub Release. Reruns delete stale or partial draft assets, upload exactly
+`GlideLingo-<version>-universal.dmg`, `GlideLingo-<version>-universal.zip`, and
+`SHA256SUMS.txt`, and verify the names, upload state, byte sizes, and GitHub SHA-256 digests. A run refuses to replace an
+already-published release.
 
 ## Release gates
 
@@ -78,6 +103,17 @@ The automated workflow proves:
 - DMG and ZIP checksums are generated before upload.
 
 Before linking a release from the public landing page, download the DMG onto a second clean Mac, drag GlideLingo to Applications, launch it normally, and exercise the critical lesson, audio, persistence, and production API flows.
+
+The clean-Mac smoke test is currently external, so the workflow intentionally leaves every
+release in draft state and contains no publish step. Do not publish the draft or set
+`PUBLIC_MAC_DOWNLOAD_STATE=active` until a later promotion lane can consume machine-verifiable
+clean-Mac evidence and an authorized approval. Until then, the landing page remains in its
+explicit disabled state.
+
+During later integration with the authentication PR, preserve its corrected desktop origin and
+OAuth contract exactly: FastAPI CORS must allow `glidelingo://app`, and Electron must use the
+system browser for OAuth. Do not replace either behavior with a wildcard origin or embedded
+authentication window when resolving merge conflicts.
 
 ## Credential rotation and failure behavior
 

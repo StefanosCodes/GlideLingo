@@ -72,6 +72,7 @@
     "desktop:audio-smoke": "npm run desktop:export && cross-env ELECTRON_AUDIO_SMOKE_TEST=1 electron desktop",
     "desktop:export": "expo export --platform web",
     "desktop:package": "npm run desktop:export && electron-builder --projectDir desktop --dir",
+    "desktop:package:dry-run": "npm run desktop:export && electron-builder --projectDir desktop --config electron-builder.dry-run.yml --mac --universal --dir --publish never",
     "desktop:dist": "npm run desktop:export && electron-builder --projectDir desktop",
     "desktop:release": "node desktop/release.cjs",
     "audio:estimate": "node --env-file-if-exists=.env scripts/course-audio/cli.mjs estimate",

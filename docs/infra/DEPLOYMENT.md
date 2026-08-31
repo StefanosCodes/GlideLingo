@@ -94,7 +94,7 @@ Required configuration includes a permanent Android application ID, signing keys
 
 The current Electron builder targets DMG and ZIP, so the recommended first macOS release is direct distribution rather than the Mac App Store.
 
-The implemented release path builds one universal application for Intel and Apple Silicon. `npm run desktop:dist` remains an unsigned packaging check; `npm run desktop:release` is the fail-safe public release command. The latter requires an exact HTTPS API configuration, Developer ID signing, and notarization credentials. The tag-triggered GitHub workflow validates the signature, stapled notarization ticket, Gatekeeper acceptance, and both architecture slices before publishing.
+The implemented release path builds one universal application for Intel and Apple Silicon. `npm run desktop:package:dry-run` is the explicit unsigned packaging check; `npm run desktop:release` is the fail-safe public release command. The latter requires an exact HTTPS API configuration, Developer ID signing, and notarization credentials. The tag-triggered GitHub workflow validates the signature, stapled notarization ticket, Gatekeeper acceptance, and both architecture slices before staging an exact draft release. Publishing remains disabled until clean-Mac evidence can be verified by a dedicated promotion gate.
 
 ```text
 Verify Expo and Electron

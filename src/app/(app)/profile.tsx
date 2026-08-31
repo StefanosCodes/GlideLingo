@@ -1,15 +1,17 @@
+import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ScreenFrame } from '@/components/screen-frame';
 import { ThemedText } from '@/components/themed-text';
+import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
 import {
   capabilityStateForMode,
   strongestCapabilityEvidence,
-  type WeeklyPracticeGoal,
 } from '@/features/learning-progress/evidence-policy';
+import type { WeeklyPracticeGoal } from '@/features/learning-progress/rhythm-policy';
 import { useTheme } from '@/hooks/use-theme';
 import { useLearning } from '@/providers/learning-provider';
 
@@ -31,6 +33,7 @@ const stateLabel = {
 } as const;
 
 export default function ProfileScreen() {
+  const router = useRouter();
   const theme = useTheme();
   const {
     language,
@@ -163,6 +166,7 @@ export default function ProfileScreen() {
               </ThemedText>
             </Pressable>
           ) : null}
+          <GlideButton label="Open rhythm calendar" variant="secondary" onPress={() => router.push('/rhythm')} />
         </GlideSurface>
       </View>
 

@@ -1,3 +1,5 @@
+import '@/providers/install-local-storage';
+
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-google-fonts/inter';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider as NavigationThemeProvider } from 'expo-router';
 import { useFonts } from 'expo-font';
@@ -51,6 +53,7 @@ function AppNavigation() {
         <Stack.Screen name="(app)" />
         <Stack.Screen name="course/[id]" />
         <Stack.Screen name="lesson/[id]" />
+        <Stack.Screen name="rhythm" />
         <Stack.Screen name="kit" />
         <Stack.Screen name="diagnostics" />
       </Stack>

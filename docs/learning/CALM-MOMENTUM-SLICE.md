@@ -2,7 +2,7 @@
 
 ## Decision
 
-GlideLingo's first gameful loop makes a narrow learned capability emotionally visible. It records attempts, support, path completion, review need, and weekly consistency separately; it does not add XP, currency, public competition, or a punitive daily streak.
+GlideLingo's first gameful loop makes a narrow learned capability emotionally visible. It records attempts, support, path completion, review need, and weekly consistency separately; it does not add XP, currency, public competition, or a punitive daily streak. A weekly rhythm streak counts consecutive weeks in which the learner meets a chosen two-, three-, or five-day practice target.
 
 ## Learner and moment
 
@@ -26,6 +26,9 @@ GlideLingo's first gameful loop makes a narrow learned capability emotionally vi
 - Review uses a separate variation and explains why it returned.
 - Path completion, communication-mode evidence, capability state, review need, and weekly consistency remain separate views.
 - The learner chooses two, three, or five practice days per week, or no target. Missing a day erases nothing.
+- One local calendar day counts after a completed authored lesson or strengthening review. Partial sittings, elapsed time, and repeated completions on the same day add no extra credit.
+- An unfinished current week preserves the preceding rhythm until the week ends. Missing the completed week's target restarts the current rhythm while preserving the best rhythm and every learning record.
+- Goal changes apply to the current and future weeks. Earlier weeks keep the target active at that time, and practice recorded before the first target cannot backfill a streak.
 
 ## Emotional transition
 
@@ -40,6 +43,8 @@ GlideLingo's first gameful loop makes a narrow learned capability emotionally vi
 - Lesson closure names the evidence state and distinguishes demonstration from retention.
 - Due strengthening practice becomes the primary Home action; new material remains secondary until recovery is complete.
 - Progress uses restrained surfaces, existing semantic colors, no decorative reward layer, and one weekly-rhythm control.
+- A compact gold rhythm status opens a Monday-first calendar. Lesson closure shows quiet weekly progress and marks 1-, 4-, 12-, and 52-week milestones without sound, haptics, looping motion, or a blocking modal.
+- After a lapse, the product says: "Your learning is still here. Start a new rhythm with one short lesson."
 
 ## Measurement contract
 

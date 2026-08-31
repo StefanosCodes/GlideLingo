@@ -18,6 +18,7 @@ import {
   type LessonMode,
   summarizeLessonCompletion,
 } from '@/features/learning-progress/evidence-policy';
+import type { PracticeCompletionResult } from '@/features/learning-progress/rhythm-policy';
 import { useTheme } from '@/hooks/use-theme';
 import { useLearning } from '@/providers/learning-provider';
 
@@ -48,6 +49,7 @@ export function LessonSittingView({
   const [askOpen, setAskOpen] = useState(false);
   const [selectedChoices, setSelectedChoices] = useState<Record<number, string | null>>({});
   const [checkObservations, setCheckObservations] = useState<Record<number, CheckObservation>>({});
+  const [practiceResult, setPracticeResult] = useState<PracticeCompletionResult | null>(null);
   const completionRecorded = useRef(false);
   const web = Platform.OS === 'web';
   const top = web ? Spacing.three : insets.top + Spacing.two;
@@ -97,7 +99,7 @@ export function LessonSittingView({
     const nextStep = step + 1;
     if (nextStep >= beats.length && !completionRecorded.current) {
       completionRecorded.current = true;
-      completeLesson(completionInput);
+      setPracticeResult(completeLesson(completionInput));
     }
     setStep(nextStep);
   }
@@ -208,6 +210,7 @@ export function LessonSittingView({
               nextTitle={followingAuthored?.lesson.title ?? null}
               onNext={finishAndOpenNext}
               onHome={finishAndHome}
+              rhythmResult={practiceResult}
               summary={completionCopy.summary}
             />
           ) : beat?.type === 'hear' ? (

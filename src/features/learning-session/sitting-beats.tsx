@@ -7,6 +7,8 @@ import { type SittingBeat } from '@/constants/catalog';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
 import { PronunciationControl } from '@/features/learning-session/pronunciation-control';
 import { usePronunciationPlayer } from '@/features/learning-session/audio/use-pronunciation-player';
+import { RhythmClosure } from '@/features/learning-progress/rhythm-closure';
+import type { PracticeCompletionResult } from '@/features/learning-progress/rhythm-policy';
 import { useTheme } from '@/hooks/use-theme';
 
 type PressState = { pressed: boolean; hovered?: boolean };
@@ -175,6 +177,7 @@ export function DoneBeat({
   nextTitle,
   onNext,
   onHome,
+  rhythmResult,
 }: {
   kicker: string;
   summary: string;
@@ -182,6 +185,7 @@ export function DoneBeat({
   nextTitle: string | null;
   onNext: () => void;
   onHome: () => void;
+  rhythmResult: PracticeCompletionResult | null;
 }) {
   return (
     <View style={styles.stage}>
@@ -194,6 +198,7 @@ export function DoneBeat({
       <ThemedText type="body" themeColor="textSecondary" style={styles.notice}>
         {evidence}
       </ThemedText>
+      <RhythmClosure result={rhythmResult} />
       {nextTitle ? (
         <ThemedText type="body" themeColor="textSecondary">
           Next: {nextTitle}

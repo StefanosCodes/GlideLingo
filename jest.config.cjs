@@ -1,6 +1,6 @@
 module.exports = {
   preset: 'jest-expo',
-  testMatch: ['**/lesson-tutor/__tests__/**/*.test.ts?(x)'],
+  testMatch: ['**/__tests__/**/*.test.ts?(x)'],
   moduleNameMapper: {
     '\\.(css)$': '<rootDir>/test/style-mock.cjs',
     '^@/(.*)$': '<rootDir>/src/$1',

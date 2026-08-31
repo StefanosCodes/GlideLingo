@@ -1,5 +1,4 @@
 import { createContext, type PropsWithChildren, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Platform } from 'react-native';
 
 import {
   type Course,
@@ -15,29 +14,28 @@ import {
   nextLesson,
 } from '@/constants/catalog';
 import {
-  isLessonEvidenceRecord,
   type LessonCompletionInput,
   type LessonEvidenceRecord,
   type LessonMode,
-  localDayKey,
-  practiceDaysInCurrentWeek,
   reviewItemsFor,
   summarizeLessonCompletion,
-  type WeeklyPracticeGoal,
   upsertLessonEvidence,
 } from '@/features/learning-progress/evidence-policy';
-
-const STORAGE_KEY = 'glidelingo-learning';
-const DEFAULT_LANGUAGE: LanguageId = 'el';
-
-type StoredLearning = {
-  languageId: LanguageId;
-  enrolledByLanguage: Partial<Record<LanguageId, string>>;
-  completedLessonIds: string[];
-  lessonEvidence: LessonEvidenceRecord[];
-  practiceDayKeys: string[];
-  weeklyPracticeGoal: WeeklyPracticeGoal | null;
-};
+import {
+  recordMeaningfulPractice,
+  setGoalForCurrentWeek,
+  summarizeRhythm,
+  type PracticeCompletionResult,
+  type RhythmSummary,
+  type WeeklyGoalChange,
+  type WeeklyPracticeGoal,
+} from '@/features/learning-progress/rhythm-policy';
+import {
+  LEARNING_STORAGE_VERSION,
+  readStoredLearning,
+  type LearningPersistenceStatus,
+  writeStoredLearning,
+} from '@/providers/learning-storage';
 
 type LearningContextValue = {
   language: Language;
@@ -55,91 +53,68 @@ type LearningContextValue = {
   completedLessonIds: string[];
   lessonEvidence: LessonEvidenceRecord[];
   reviewItems: ReturnType<typeof reviewItemsFor>;
+  practiceDayKeys: string[];
   practiceDaysThisWeek: number;
   weeklyPracticeGoal: WeeklyPracticeGoal | null;
+  weeklyGoalChanges: WeeklyGoalChange[];
+  rhythmSummary: RhythmSummary;
+  persistenceStatus: LearningPersistenceStatus;
   setLanguage: (id: LanguageId) => void;
   switchCourse: (courseId: string) => boolean;
   startCourse: (courseId: string) => boolean;
   focusModule: (moduleId: string | null) => void;
   openLesson: (lessonId: string | null, mode?: LessonMode) => void;
-  completeLesson: (completion: LessonCompletionInput) => void;
+  completeLesson: (completion: LessonCompletionInput) => PracticeCompletionResult;
   setWeeklyPracticeGoal: (goal: WeeklyPracticeGoal | null) => void;
 };
 
 const LearningContext = createContext<LearningContextValue | null>(null);
 
-function isLanguageId(value: string): value is LanguageId {
-  return value === 'el' || value === 'es' || value === 'fr';
-}
-
-function readStored(): StoredLearning {
-  const fallback: StoredLearning = {
-    languageId: DEFAULT_LANGUAGE,
-    enrolledByLanguage: {},
-    completedLessonIds: [],
-    lessonEvidence: [],
-    practiceDayKeys: [],
-    weeklyPracticeGoal: null,
-  };
-
-  if (Platform.OS !== 'web') return fallback;
-
-  try {
-    const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw) as Partial<StoredLearning> & { completedModuleIds?: string[] };
-    return {
-      languageId: parsed.languageId && isLanguageId(parsed.languageId) ? parsed.languageId : DEFAULT_LANGUAGE,
-      enrolledByLanguage: parsed.enrolledByLanguage ?? {},
-      completedLessonIds: Array.isArray(parsed.completedLessonIds) ? parsed.completedLessonIds : [],
-      lessonEvidence: Array.isArray(parsed.lessonEvidence)
-        ? parsed.lessonEvidence.filter(isLessonEvidenceRecord)
-        : [],
-      practiceDayKeys: Array.isArray(parsed.practiceDayKeys)
-        ? parsed.practiceDayKeys.filter((key): key is string => typeof key === 'string')
-        : [],
-      weeklyPracticeGoal:
-        parsed.weeklyPracticeGoal === 2 || parsed.weeklyPracticeGoal === 3 || parsed.weeklyPracticeGoal === 5
-          ? parsed.weeklyPracticeGoal
-          : null,
-    };
-  } catch {
-    return fallback;
-  }
-}
-
 export function LearningProvider({ children }: PropsWithChildren) {
-  const [initial] = useState(() => readStored());
-  const [languageId, setLanguageId] = useState<LanguageId>(initial.languageId);
-  const [enrolledByLanguage, setEnrolledByLanguage] = useState<Partial<Record<LanguageId, string>>>(
-    initial.enrolledByLanguage,
-  );
-  const [completedLessonIds, setCompletedLessonIds] = useState<string[]>(initial.completedLessonIds);
-  const [lessonEvidence, setLessonEvidence] = useState<LessonEvidenceRecord[]>(initial.lessonEvidence);
-  const [practiceDayKeys, setPracticeDayKeys] = useState<string[]>(initial.practiceDayKeys);
-  const [weeklyPracticeGoal, setWeeklyPracticeGoal] = useState<WeeklyPracticeGoal | null>(initial.weeklyPracticeGoal);
+  const [languageId, setLanguageId] = useState<LanguageId>('el');
+  const [enrolledByLanguage, setEnrolledByLanguage] = useState<Partial<Record<LanguageId, string>>>({});
+  const [completedLessonIds, setCompletedLessonIds] = useState<string[]>([]);
+  const [lessonEvidence, setLessonEvidence] = useState<LessonEvidenceRecord[]>([]);
+  const [practiceDayKeys, setPracticeDayKeys] = useState<string[]>([]);
+  const [weeklyGoalChanges, setWeeklyGoalChanges] = useState<WeeklyGoalChange[]>([]);
+  const [persistenceStatus, setPersistenceStatus] = useState<LearningPersistenceStatus>('available');
+  const [hasHydrated, setHasHydrated] = useState(false);
   const [focusedModuleId, setFocusedModuleId] = useState<string | null>(null);
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
   const [activeLessonMode, setActiveLessonMode] = useState<LessonMode>('learn');
 
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    try {
-      globalThis.localStorage?.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
-          languageId,
-          enrolledByLanguage,
-          completedLessonIds,
-          lessonEvidence,
-          practiceDayKeys,
-          weeklyPracticeGoal,
-        } satisfies StoredLearning),
-      );
-    } catch {
-      // Session still works without persistence.
-    }
-  }, [completedLessonIds, enrolledByLanguage, languageId, lessonEvidence, practiceDayKeys, weeklyPracticeGoal]);
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      const stored = readStoredLearning();
+      setLanguageId(stored.value.languageId);
+      setEnrolledByLanguage(stored.value.enrolledByLanguage);
+      setCompletedLessonIds(stored.value.completedLessonIds);
+      setLessonEvidence(stored.value.lessonEvidence);
+      setPracticeDayKeys(stored.value.practiceDayKeys);
+      setWeeklyGoalChanges(stored.value.weeklyGoalChanges);
+      setPersistenceStatus(stored.status);
+      setHasHydrated(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasHydrated) return;
+    const saved = writeStoredLearning({
+      version: LEARNING_STORAGE_VERSION,
+      languageId,
+      enrolledByLanguage,
+      completedLessonIds,
+      lessonEvidence,
+      practiceDayKeys,
+      weeklyGoalChanges,
+    });
+    if (!saved) queueMicrotask(() => setPersistenceStatus('unavailable'));
+  }, [completedLessonIds, enrolledByLanguage, hasHydrated, languageId, lessonEvidence, practiceDayKeys, weeklyGoalChanges]);
 
   const language = getLanguage(languageId);
   const courses = getCoursesForLanguage(languageId);
@@ -152,7 +127,10 @@ export function LearningProvider({ children }: PropsWithChildren) {
     [completedLessonIds, enrolledCourse],
   );
   const reviewItems = useMemo(() => reviewItemsFor(lessonEvidence), [lessonEvidence]);
-  const practiceDaysThisWeek = useMemo(() => practiceDaysInCurrentWeek(practiceDayKeys), [practiceDayKeys]);
+  const rhythmSummary = useMemo(
+    () => summarizeRhythm(practiceDayKeys, weeklyGoalChanges),
+    [practiceDayKeys, weeklyGoalChanges],
+  );
 
   const setLanguage = useCallback((id: LanguageId) => {
     setActiveLessonId(null);
@@ -207,20 +185,26 @@ export function LearningProvider({ children }: PropsWithChildren) {
     [language.available, languageId],
   );
 
-  const completeLesson = useCallback((completion: LessonCompletionInput) => {
-    const completedAt = Date.now();
-    setCompletedLessonIds((current) =>
-      current.includes(completion.lessonId) ? current : [...current, completion.lessonId],
-    );
-    setLessonEvidence((current) => {
-      const previous = current.find((record) => record.lessonId === completion.lessonId);
-      const incoming = summarizeLessonCompletion(completion, completedAt, previous);
-      return upsertLessonEvidence(current, incoming);
-    });
-    setPracticeDayKeys((current) => {
-      const today = localDayKey(completedAt);
-      return current.includes(today) ? current : [...current, today];
-    });
+  const completeLesson = useCallback(
+    (completion: LessonCompletionInput) => {
+      const completedAt = Date.now();
+      const practice = recordMeaningfulPractice(practiceDayKeys, weeklyGoalChanges, completedAt);
+      setCompletedLessonIds((current) =>
+        current.includes(completion.lessonId) ? current : [...current, completion.lessonId],
+      );
+      setLessonEvidence((current) => {
+        const previous = current.find((record) => record.lessonId === completion.lessonId);
+        const incoming = summarizeLessonCompletion(completion, completedAt, previous);
+        return upsertLessonEvidence(current, incoming);
+      });
+      setPracticeDayKeys(practice.practiceDayKeys);
+      return practice.result;
+    },
+    [practiceDayKeys, weeklyGoalChanges],
+  );
+
+  const setWeeklyPracticeGoal = useCallback((goal: WeeklyPracticeGoal | null) => {
+    setWeeklyGoalChanges((current) => setGoalForCurrentWeek(current, goal));
   }, []);
 
   const value = useMemo<LearningContextValue>(
@@ -240,8 +224,12 @@ export function LearningProvider({ children }: PropsWithChildren) {
       completedLessonIds,
       lessonEvidence,
       reviewItems,
-      practiceDaysThisWeek,
-      weeklyPracticeGoal,
+      practiceDayKeys,
+      practiceDaysThisWeek: rhythmSummary.practiceDaysThisWeek,
+      weeklyPracticeGoal: rhythmSummary.activeGoal,
+      weeklyGoalChanges,
+      rhythmSummary,
+      persistenceStatus,
       setLanguage,
       switchCourse,
       startCourse,
@@ -266,13 +254,16 @@ export function LearningProvider({ children }: PropsWithChildren) {
       lessonNow,
       moduleNow,
       openLesson,
-      practiceDaysThisWeek,
+      persistenceStatus,
+      practiceDayKeys,
       progress,
       reviewItems,
+      rhythmSummary,
       setLanguage,
+      setWeeklyPracticeGoal,
       startCourse,
       switchCourse,
-      weeklyPracticeGoal,
+      weeklyGoalChanges,
     ],
   );
 

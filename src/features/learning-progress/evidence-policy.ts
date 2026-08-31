@@ -6,8 +6,6 @@ export type EvidenceLevel = 'practice' | 'checkpoint';
 
 export type LessonMode = 'learn' | 'review';
 
-export type WeeklyPracticeGoal = 2 | 3 | 5;
-
 export type LessonCapability = {
   id: string;
   canDo: string;

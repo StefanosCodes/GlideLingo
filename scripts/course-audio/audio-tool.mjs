@@ -259,6 +259,20 @@ function lockEntry(clip, profile, sourceHash) {
   };
 }
 
+function lockDocument(clips, generatedAt) {
+  return {
+    schemaVersion: 1,
+    generatedAt,
+    clips: Object.fromEntries(Object.entries(clips).sort(([a], [b]) => a.localeCompare(b))),
+  };
+}
+
+async function writeLock(lockPath, clips, generatedAt) {
+  const document = lockDocument(clips, generatedAt);
+  await writeAtomicallyIfChanged(lockPath, `${JSON.stringify(document, null, 2)}\n`);
+  return document;
+}
+
 function renderRegistry(entriesById) {
   const entries = Object.entries(entriesById).sort(([left], [right]) => left.localeCompare(right));
   const lines = entries.map(
@@ -295,6 +309,7 @@ export async function generateAudio({
   const nextClips = { ...(lock.clips ?? {}) };
   const generated = [];
   const skipped = [];
+  let batchGeneratedAt = null;
 
   for (const clip of clips) {
     const profile = project.profiles[clip.profile];
@@ -322,14 +337,11 @@ export async function generateAudio({
     await writeAtomically(destination, bytes);
     nextClips[clip.id] = entry;
     generated.push(clip.id);
+    batchGeneratedAt ??= now().toISOString();
+    await writeLock(project.lockPath, nextClips, batchGeneratedAt);
   }
 
-  const nextLock = {
-    schemaVersion: 1,
-    generatedAt: generated.length ? now().toISOString() : lock.generatedAt,
-    clips: Object.fromEntries(Object.entries(nextClips).sort(([a], [b]) => a.localeCompare(b))),
-  };
-  await writeAtomicallyIfChanged(project.lockPath, `${JSON.stringify(nextLock, null, 2)}\n`);
+  const nextLock = await writeLock(project.lockPath, nextClips, batchGeneratedAt ?? lock.generatedAt);
   if (writeRegistry) await writeAtomicallyIfChanged(project.registryPath, renderRegistry(nextLock.clips));
   return { estimate, generated, skipped, lock: nextLock };
 }

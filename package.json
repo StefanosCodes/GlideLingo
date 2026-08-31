@@ -75,7 +75,7 @@
     "desktop:dist": "npm run desktop:export && electron-builder --projectDir desktop",
     "audio:estimate": "node --env-file-if-exists=.env scripts/course-audio/cli.mjs estimate",
     "audio:generate": "node --env-file-if-exists=.env scripts/course-audio/cli.mjs generate",
-    "audio:validate": "node scripts/course-audio/cli.mjs validate",
+    "audio:validate": "node --env-file-if-exists=.env scripts/course-audio/cli.mjs validate",
     "diagnose": "node ./scripts/diagnose.mjs",
     "doctor": "npx expo-doctor",
     "typecheck": "tsc --noEmit",

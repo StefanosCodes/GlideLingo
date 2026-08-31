@@ -114,6 +114,59 @@ test('a permanent synthesis failure leaves no partial output', async (t) => {
   assert.deepEqual(await readdir(project.courseDir), []);
 });
 
+test('a failed batch checkpoints completed clips and resumes without re-synthesizing them', async (t) => {
+  const { project } = await temporaryFixture(t);
+  project.clips.push({
+    id: 'goodbye',
+    lessonId: 'lesson-1',
+    profile: 'primary',
+    text: 'Αντίο.',
+  });
+  project.missions[0].blocks.push({
+    type: 'listen',
+    label: 'Goodbye',
+    audioId: 'goodbye',
+  });
+  const firstRunCalls = [];
+
+  await assert.rejects(
+    generateAudio({
+      project,
+      clips: project.clips,
+      maxUsd: 1,
+      synthesize: async ({ clip }) => {
+        firstRunCalls.push(clip.id);
+        if (clip.id === 'goodbye') {
+          throw Object.assign(new Error('invalid voice'), { code: 3 });
+        }
+        return Buffer.from(`audio for ${clip.id}`);
+      },
+    }),
+    /invalid voice/,
+  );
+
+  const checkpoint = JSON.parse(await readFile(project.lockPath, 'utf8'));
+  assert.deepEqual(firstRunCalls, ['hello', 'goodbye']);
+  assert.deepEqual(Object.keys(checkpoint.clips), ['hello']);
+  assert.equal(await readFile(path.join(project.assetDir, 'hello.mp3'), 'utf8'), 'audio for hello');
+
+  const secondRunCalls = [];
+  const resumed = await generateAudio({
+    project,
+    clips: project.clips,
+    maxUsd: 1,
+    synthesize: async ({ clip }) => {
+      secondRunCalls.push(clip.id);
+      return Buffer.from(`audio for ${clip.id}`);
+    },
+  });
+
+  assert.deepEqual(secondRunCalls, ['goodbye']);
+  assert.deepEqual(resumed.skipped, ['hello']);
+  assert.deepEqual(resumed.generated, ['goodbye']);
+  assert.deepEqual((await validateGenerated(project)), []);
+});
+
 test('retry handles transient errors but preserves permanent failures', async () => {
   let attempts = 0;
   const value = await withRetry(

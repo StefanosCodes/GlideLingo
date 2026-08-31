@@ -48,6 +48,7 @@ import {
 } from '@/providers/learning-migration';
 import {
   getLearningStorage,
+  LEGACY_IMPORT_OWNER_KEY,
   LEARNING_STORAGE_KEY,
   learningStorageKey,
   legacyDecisionStorageKey,
@@ -57,6 +58,7 @@ import {
   type LearningWriteStamp,
   type StoredLearningV2,
   withLearningStorageLock,
+  withLearningStorageLocks,
   writeStoredLearning,
 } from '@/providers/learning-storage';
 
@@ -170,6 +172,8 @@ function legacyProgressNeedsDecision(storageScope: string) {
   let decision: string | null;
   try {
     decision = storage.getItem(legacyDecisionStorageKey(storageScope));
+    const owner = storage.getItem(LEGACY_IMPORT_OWNER_KEY);
+    if (owner && owner !== storageScope) return false;
   } catch {
     return false;
   }
@@ -429,9 +433,16 @@ export function LearningProvider({
       return;
     }
 
-    void withLearningStorageLock(
-      storageKey,
+    void withLearningStorageLocks(
+      [LEARNING_STORAGE_KEY, storageKey],
       () => {
+        let claimOwner: string | null;
+        try {
+          claimOwner = storage.getItem(LEGACY_IMPORT_OWNER_KEY);
+        } catch {
+          throw new Error('legacy-unsafe');
+        }
+        if (claimOwner && claimOwner !== storageScope) throw new Error('legacy-missing');
         const legacy = readStoredLearning(LEARNING_STORAGE_KEY, storage);
         if (legacy.kind !== 'found') {
           throw new Error(legacy.kind === 'missing' ? 'legacy-missing' : 'legacy-unsafe');
@@ -446,6 +457,8 @@ export function LearningProvider({
         const merged = mergeLegacyLearning(durableCurrent, legacy.value);
         try {
           persistLegacyLearningImport(storage, {
+            claimKey: LEGACY_IMPORT_OWNER_KEY,
+            claimOwner: storageScope,
             decisionKey: legacyDecisionKey,
             destinationKey: storageKey,
             legacyKey: LEARNING_STORAGE_KEY,
@@ -480,7 +493,7 @@ export function LearningProvider({
               : 'The earlier progress could not be read safely. Nothing was removed.',
         );
       });
-  }, [legacyDecisionKey, reconcileLearning, storageKey]);
+  }, [legacyDecisionKey, reconcileLearning, storageKey, storageScope]);
 
   const value = useMemo<LearningContextValue>(
     () => ({

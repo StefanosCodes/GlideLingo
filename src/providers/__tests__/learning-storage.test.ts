@@ -7,6 +7,7 @@ import {
   parseStoredLearning,
   readStoredLearning,
   withLearningStorageLock,
+  withLearningStorageLocks,
   writeStoredLearning,
 } from '@/providers/learning-storage';
 
@@ -158,5 +159,33 @@ describe('learning storage', () => {
     releaseFirst?.();
     await Promise.all([first, second]);
     expect(order).toEqual(['first-start', 'first-end', 'second']);
+  });
+
+  it('acquires multi-key transactions in stable lexical order and releases in reverse order', async () => {
+    const events: string[] = [];
+    const lockManager = {
+      async request<T>(name: string, _options: { mode: 'exclusive' }, callback: () => Promise<T> | T) {
+        events.push(`acquire:${name}`);
+        try {
+          return await callback();
+        } finally {
+          events.push(`release:${name}`);
+        }
+      },
+    };
+
+    await withLearningStorageLocks(
+      ['z-destination', 'a-shared', 'z-destination'],
+      () => events.push('work'),
+      { lockManager, requireBrowserLock: true },
+    );
+
+    expect(events).toEqual([
+      'acquire:glidelingo:a-shared',
+      'acquire:glidelingo:z-destination',
+      'work',
+      'release:glidelingo:z-destination',
+      'release:glidelingo:a-shared',
+    ]);
   });
 });

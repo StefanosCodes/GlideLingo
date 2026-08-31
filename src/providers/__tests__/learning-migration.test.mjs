@@ -186,6 +186,8 @@ test('cleanup failure keeps the source and makes an exact retry possible', () =>
   assert.throws(
     () =>
       persistLegacyLearningImport(storage, {
+        claimKey: 'claim',
+        claimOwner: 'user-a',
         destinationKey: 'scoped',
         decisionKey: 'decision',
         legacyKey: 'legacy',
@@ -195,16 +197,20 @@ test('cleanup failure keeps the source and makes an exact retry possible', () =>
   );
   assert.equal(values.has('legacy'), true);
   assert.equal(values.has('decision'), false);
+  assert.equal(values.get('claim'), 'user-a');
   assert.deepEqual(JSON.parse(values.get('scoped')), merged);
 
   failCleanup = false;
   persistLegacyLearningImport(storage, {
+    claimKey: 'claim',
+    claimOwner: 'user-a',
     destinationKey: 'scoped',
     decisionKey: 'decision',
     legacyKey: 'legacy',
     merged,
   });
   assert.equal(values.has('legacy'), false);
+  assert.equal(values.has('claim'), false);
   assert.equal(values.get('decision'), 'imported');
   assert.deepEqual(JSON.parse(values.get('scoped')), merged);
 });

@@ -168,17 +168,23 @@ export function mergeLegacyLearning(current: StoredLearningV2, legacy: StoredLea
 
 /**
  * Write the complete V2 account destination before changing either legacy
- * marker. Cleanup failures leave the shared source intact and remove the
- * decision marker so the exact idempotent merge can be retried.
+ * marker. When provided, the shared owner claim is written only after the
+ * destination. Cleanup failures leave the source and owner claim intact while
+ * removing the account decision marker, so only that account can retry the
+ * exact idempotent merge.
  */
 export function persistLegacyLearningImport(
   storage: LearningStorage,
   {
+    claimKey,
+    claimOwner,
     decisionKey,
     destinationKey,
     legacyKey,
     merged,
   }: {
+    claimKey?: string;
+    claimOwner?: string;
     decisionKey: string;
     destinationKey: string;
     legacyKey: string;
@@ -186,6 +192,7 @@ export function persistLegacyLearningImport(
   },
 ) {
   storage.setItem(destinationKey, JSON.stringify(merged));
+  if (claimKey && claimOwner) storage.setItem(claimKey, claimOwner);
   storage.setItem(decisionKey, 'imported');
 
   try {
@@ -198,5 +205,14 @@ export function persistLegacyLearningImport(
       // safely merge the same source again without duplicating stored evidence.
     }
     throw error;
+  }
+
+  if (claimKey) {
+    try {
+      storage.removeItem(claimKey);
+    } catch {
+      // Once the shared source is gone, a stale owner marker cannot expose it
+      // to another account and can be cleaned up by a later maintenance pass.
+    }
   }
 }

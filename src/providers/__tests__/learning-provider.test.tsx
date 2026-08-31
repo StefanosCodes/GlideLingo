@@ -9,6 +9,7 @@ const storage = new Map<string, string>();
 let getItem: jest.MockedFunction<(key: string) => string | null>;
 let setItem: jest.MockedFunction<(key: string, value: string) => void>;
 const storageListeners = new Set<(event: StorageEvent) => void>();
+const legacyImporters = new Map<string, () => void>();
 
 beforeEach(() => {
   storage.clear();
@@ -21,6 +22,7 @@ beforeEach(() => {
     value: { getItem, removeItem: jest.fn((key: string) => storage.delete(key)), setItem },
   });
   storageListeners.clear();
+  legacyImporters.clear();
   Object.defineProperties(window, {
     addEventListener: {
       configurable: true,
@@ -161,6 +163,66 @@ test('an incomplete imported-source cleanup remains retryable after restart', as
   );
 
   expect(screen.getByTestId('legacy').props.children).toBe('available');
+});
+
+function ImportProbe({ account }: { account: string }) {
+  const { importLegacyProgress, legacyProgressAvailable, legacyProgressError } = useLearning();
+  legacyImporters.set(account, importLegacyProgress);
+  return (
+    <>
+      <Text testID={`${account}-legacy`}>{legacyProgressAvailable ? 'available' : 'hidden'}</Text>
+      <Text testID={`${account}-error`}>{legacyProgressError ?? ''}</Text>
+      <Pressable accessibilityLabel={`${account} import legacy`} onPress={importLegacyProgress} />
+    </>
+  );
+}
+
+test('concurrent accounts serialize the shared legacy source so at most one destination imports it', async () => {
+  storage.set(
+    'glidelingo-learning',
+    JSON.stringify({
+      version: 2,
+      languageId: 'el',
+      enrolledByLanguage: {},
+      completedLessonIds: ['legacy-lesson'],
+      lessonEvidence: [],
+      practiceDayKeys: ['2026-08-31'],
+      weeklyGoalChanges: [],
+      fieldWrites: {},
+    }),
+  );
+  const screen = await render(
+    <>
+      <LearningProvider storageScope="account-a">
+        <ImportProbe account="account-a" />
+      </LearningProvider>
+      <LearningProvider storageScope="account-b">
+        <ImportProbe account="account-b" />
+      </LearningProvider>
+    </>,
+  );
+
+  await act(async () => {
+    legacyImporters.get('account-a')?.();
+    legacyImporters.get('account-b')?.();
+    await Promise.resolve();
+  });
+
+  await waitFor(() =>
+    expect(['account-a', 'account-b'].filter((account) => storage.has(learningStorageKey(account)))).toHaveLength(1),
+  );
+  const destinations = ['account-a', 'account-b'].filter((account) => storage.has(learningStorageKey(account)));
+  const winner = destinations[0];
+  const loser = winner === 'account-a' ? 'account-b' : 'account-a';
+  expect(JSON.parse(storage.get(learningStorageKey(winner)) ?? '{}').completedLessonIds).toContain('legacy-lesson');
+  expect(storage.has(learningStorageKey(loser))).toBe(false);
+  expect(storage.has('glidelingo-learning')).toBe(false);
+  await waitFor(() =>
+    expect(screen.getByTestId(`${loser}-error`).props.children).toBe(
+      'The earlier progress is no longer available.',
+    ),
+  );
+  expect(screen.getByTestId(`${winner}-legacy`).props.children).toBe('hidden');
 });
 
 test('completion returns the actual merged evidence after a weaker replay', async () => {

@@ -32,7 +32,10 @@ if [[ -z "${terraform_version}" ]] \
   exit 1
 fi
 
-gcloud services enable serviceusage.googleapis.com storage.googleapis.com \
+gcloud services enable \
+  cloudresourcemanager.googleapis.com \
+  serviceusage.googleapis.com \
+  storage.googleapis.com \
   --project="${expected_project}"
 
 state_bucket="${expected_project}-terraform-state"

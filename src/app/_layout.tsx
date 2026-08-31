@@ -97,7 +97,6 @@ function AppNavigation({ signedIn }: { signedIn: boolean }) {
     <NavigationThemeProvider value={navigationTheme}>
       <AnimatedSplashOverlay />
       <Stack screenOptions={{ contentStyle: { backgroundColor: colors.background }, headerShown: false }}>
-        <Stack.Screen name="sso-callback" />
         <Stack.Protected guard={!signedIn}>
           <Stack.Screen name="(auth)" />
         </Stack.Protected>
@@ -110,6 +109,7 @@ function AppNavigation({ signedIn }: { signedIn: boolean }) {
           <Stack.Screen name="diagnostics" />
           <Stack.Screen name="subscription" />
         </Stack.Protected>
+        <Stack.Screen name="sso-callback" />
       </Stack>
     </NavigationThemeProvider>
   );

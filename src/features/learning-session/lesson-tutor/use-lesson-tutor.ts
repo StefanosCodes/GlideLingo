@@ -105,8 +105,15 @@ export function useLessonTutor(
         }
         dispatch({
           type: 'fail',
+          error:
+            error instanceof LessonTutorRequestError && error.reason === 'requires-pro'
+              ? 'requires-pro'
+              : error instanceof LessonTutorRequestError && error.reason === 'billing-unavailable'
+                ? 'billing-unavailable'
+                : error instanceof LessonTutorRequestError && !error.retryable
+                  ? 'terminal'
+                  : 'retryable',
           messageId: userMessage.id,
-          retryable: !(error instanceof LessonTutorRequestError) || error.retryable,
         });
       } finally {
         if (activeRequest.current === controller) activeRequest.current = null;
@@ -129,7 +136,10 @@ export function useLessonTutor(
   );
 
   const retry = useCallback(() => {
-    if (stateRef.current.error !== 'retryable' || stateRef.current.status === 'working') return;
+    if (
+      (stateRef.current.error !== 'retryable' && stateRef.current.error !== 'billing-unavailable') ||
+      stateRef.current.status === 'working'
+    ) return;
     const message = [...stateRef.current.messages].reverse().find((item) => item.role === 'user');
     if (!message) return;
     dispatch({ type: 'retry', messageId: message.id });

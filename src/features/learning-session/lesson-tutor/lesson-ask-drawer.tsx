@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -20,6 +21,7 @@ export function LessonAskDrawer({
   onSend: (message: string) => boolean;
   state: LessonTutorState;
 }) {
+  const router = useRouter();
   const theme = useTheme();
   const [draft, setDraft] = useState('');
   const web = Platform.OS === 'web';
@@ -78,11 +80,22 @@ export function LessonAskDrawer({
         {state.error ? (
           <View accessibilityLiveRegion="polite" style={styles.error}>
             <ThemedText type="footnote" themeColor="textSecondary">
-              {state.error === 'retryable'
-                ? 'The tutor didn’t return an answer. Retry safely checks the same request and won’t send it twice.'
-                : 'We couldn’t safely retry that turn. Ask again as a new question.'}
+              {state.error === 'requires-pro'
+                ? 'Lesson tutor assistance is included with GlideLingo Pro.'
+                : state.error === 'billing-unavailable'
+                  ? 'We couldn’t verify Pro access right now. Your subscription has not changed.'
+                  : state.error === 'retryable'
+                    ? 'The tutor didn’t return an answer. Retry safely checks the same request and won’t send it twice.'
+                    : 'We couldn’t safely retry that turn. Ask again as a new question.'}
             </ThemedText>
-            {state.error === 'retryable' ? (
+            {state.error === 'requires-pro' ? (
+              <Pressable
+                accessibilityLabel="View Pro plans"
+                accessibilityRole="button"
+                onPress={() => router.push('/subscription')}>
+                <ThemedText type="footnote">View Pro plans</ThemedText>
+              </Pressable>
+            ) : state.error === 'retryable' || state.error === 'billing-unavailable' ? (
               <Pressable
                 accessibilityLabel="Retry tutor message"
                 accessibilityRole="button"

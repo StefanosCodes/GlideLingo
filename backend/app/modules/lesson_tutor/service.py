@@ -61,6 +61,15 @@ class LessonTutorService:
         except TimeoutError as error:
             raise LessonTutorTimeoutError from error
 
+    def ensure_available(self) -> None:
+        if (
+            not self._enabled
+            or self._gateway is None
+            or self._guard is None
+            or self._pseudonym_key is None
+        ):
+            raise LessonTutorUnavailableError
+
     async def _run_turn(
         self,
         request: LessonTutorTurnRequest,
@@ -69,13 +78,10 @@ class LessonTutorService:
         idempotency_key: str,
         request_id: str,
     ) -> LessonTutorTurnResponse:
-        if (
-            not self._enabled
-            or self._gateway is None
-            or self._guard is None
-            or self._pseudonym_key is None
-        ):
-            raise LessonTutorUnavailableError
+        self.ensure_available()
+        assert self._gateway is not None
+        assert self._guard is not None
+        assert self._pseudonym_key is not None
 
         actor_ref = derive_tutor_actor_ref(key=self._pseudonym_key, principal=principal)
         canonical_request = json.dumps(

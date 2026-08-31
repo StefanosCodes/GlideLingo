@@ -7,10 +7,12 @@ const {
   PRODUCTION_CLERK_ORIGIN,
   buildContentSecurityPolicy,
   findAuthCallbackUrl,
+  isAllowedAuthPopupNavigation,
   isAllowedAuthWindowUrl,
   isAllowedNavigation,
   isExactAppUrl,
   isSafeExternalUrl,
+  installAuthPopupNavigationSecurity,
   parseAuthCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
@@ -28,6 +30,42 @@ test('authentication popups are restricted to Clerk, Google, and Apple HTTPS ori
   assert.equal(isAllowedAuthWindowUrl('javascript:alert(1)'), false);
 });
 
+test('development auth popup navigation stays on reviewed OAuth or renderer origins', () => {
+  const rendererUrl = 'http://127.0.0.1:8081/';
+
+  assert.equal(
+    isAllowedAuthPopupNavigation(
+      'https://vast-gator-9531.clerk.accounts.dev/v1/oauth_callback',
+      rendererUrl,
+    ),
+    true,
+  );
+  assert.equal(
+    isAllowedAuthPopupNavigation('https://accounts.google.com/o/oauth2/v2/auth', rendererUrl),
+    true,
+  );
+  assert.equal(
+    isAllowedAuthPopupNavigation('https://appleid.apple.com/auth/authorize', rendererUrl),
+    true,
+  );
+  assert.equal(
+    isAllowedAuthPopupNavigation('http://127.0.0.1:8081/sso-callback?state=opaque', rendererUrl),
+    true,
+  );
+  assert.equal(
+    isAllowedAuthPopupNavigation('http://localhost:8081/sso-callback', rendererUrl),
+    false,
+  );
+  assert.equal(
+    isAllowedAuthPopupNavigation('https://example.com/oauth', rendererUrl),
+    false,
+  );
+  assert.equal(
+    isAllowedAuthPopupNavigation('javascript:alert(1)', rendererUrl),
+    false,
+  );
+});
+
 test('packaged CSP includes exact API and Clerk origins plus web checkout providers', () => {
   const policy = buildContentSecurityPolicy();
 
@@ -36,6 +74,55 @@ test('packaged CSP includes exact API and Clerk origins plus web checkout provid
   assert.match(policy, /https:\/\/js\.stripe\.com/);
   assert.match(policy, /https:\/\/cdn\.paddle\.com/);
   assert.doesNotMatch(policy, /\*\.clerk\.accounts\.dev/);
+});
+
+test('packaged CSP permits the pinned RevenueCat Web runtime resources by exact origin', () => {
+  const policy = buildContentSecurityPolicy();
+  const directives = new Map(
+    policy.split('; ').map((directive) => {
+      const [name, ...sources] = directive.split(' ');
+      return [name, sources];
+    }),
+  );
+
+  assert.ok(directives.get('script-src').includes('https://sdk.revenuecat-static.com'));
+  assert.ok(directives.get('img-src').includes('https://da08ctfrofx1b.cloudfront.net'));
+  assert.ok(directives.get('font-src').includes('https://da08ctfrofx1b.cloudfront.net'));
+  assert.ok(!directives.get('script-src').includes('https://*.revenuecat-static.com'));
+  assert.ok(!directives.get('img-src').includes('https://*.cloudfront.net'));
+  assert.ok(!directives.get('font-src').includes('https://*.cloudfront.net'));
+});
+
+test('auth popup navigation and redirect events enforce the same origin allowlist', () => {
+  const listeners = new Map();
+  const openedExternally = [];
+  const webContents = {
+    on(eventName, listener) {
+      listeners.set(eventName, listener);
+    },
+  };
+  installAuthPopupNavigationSecurity(webContents, {
+    clerkOrigin: PRODUCTION_CLERK_ORIGIN,
+    rendererUrl: 'http://127.0.0.1:8081/',
+    openExternalUrl: (url) => openedExternally.push(url),
+  });
+
+  assert.deepEqual([...listeners.keys()], ['will-navigate', 'will-redirect']);
+
+  for (const eventName of ['will-navigate', 'will-redirect']) {
+    const allowedEvent = { prevented: false, preventDefault() { this.prevented = true; } };
+    listeners.get(eventName)(allowedEvent, 'https://accounts.google.com/o/oauth2/v2/auth');
+    assert.equal(allowedEvent.prevented, false);
+
+    const blockedEvent = { prevented: false, preventDefault() { this.prevented = true; } };
+    listeners.get(eventName)(blockedEvent, 'https://example.com/unreviewed-auth');
+    assert.equal(blockedEvent.prevented, true);
+  }
+
+  assert.deepEqual(openedExternally, [
+    'https://example.com/unreviewed-auth',
+    'https://example.com/unreviewed-auth',
+  ]);
 });
 
 test('OS authentication callbacks require the exact app origin, route, and bounded parameters', () => {

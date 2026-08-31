@@ -15,6 +15,7 @@ const {
   isAllowedNavigation,
   isExactAppUrl,
   isSafeExternalUrl,
+  installAuthPopupNavigationSecurity,
   parseAuthCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
@@ -134,6 +135,43 @@ function handleAuthCallback(targetUrl) {
   return true;
 }
 
+function authPopupWindowOptions(parent) {
+  return {
+    autoHideMenuBar: true,
+    parent,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+    },
+  };
+}
+
+function installAuthPopupSecurity(authWindow, parent) {
+  installAuthPopupNavigationSecurity(authWindow.webContents, {
+    rendererUrl: RENDERER_URL,
+    clerkOrigin: PACKAGED_CLERK_ORIGIN,
+    openExternalUrl,
+  });
+
+  authWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (!isAllowedAuthWindowUrl(url, PACKAGED_CLERK_ORIGIN)) {
+      openExternalUrl(url);
+      return { action: 'deny' };
+    }
+
+    return {
+      action: 'allow',
+      overrideBrowserWindowOptions: authPopupWindowOptions(parent),
+    };
+  });
+
+  authWindow.webContents.on('did-create-window', (childWindow) => {
+    installAuthPopupSecurity(childWindow, parent);
+  });
+}
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1280,
@@ -165,21 +203,16 @@ function createWindow() {
       }
       return {
         action: 'allow',
-        overrideBrowserWindowOptions: {
-          autoHideMenuBar: true,
-          parent: window,
-          webPreferences: {
-            contextIsolation: true,
-            nodeIntegration: false,
-            sandbox: true,
-            webSecurity: true,
-          },
-        },
+        overrideBrowserWindowOptions: authPopupWindowOptions(window),
       };
     }
 
     openExternalUrl(url);
     return { action: 'deny' };
+  });
+
+  window.webContents.on('did-create-window', (childWindow) => {
+    installAuthPopupSecurity(childWindow, window);
   });
 
   window.webContents.on('will-navigate', (event, url) => {

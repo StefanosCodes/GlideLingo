@@ -67,6 +67,12 @@ to import or reject it; importing moves the legacy data into that Clerk user's s
   running app (warm callback), then repeat with the app initially closed (cold callback). These signed-installed warm and
   cold OAuth callback smokes remain activation gates; unit tests prove parsing and routing policy but cannot prove
   operating-system registration or Clerk Native application allowlisting.
+- Development Electron popup windows may navigate only among the exact configured Clerk origin, Google, Apple, and the
+  exact loopback renderer origin that opened the flow. The same policy is installed on every auth child window and its
+  nested window attempts; unrelated HTTPS destinations leave Electron and open in the system browser.
+- The internal diagnostics screen calls `GET /v1/auth/session` with the normal API client, compares FastAPI's verified
+  subject to Clerk's current `userId`, and displays only match state, HTTP status, and request ID. It never renders the
+  session token or either raw user ID.
 
 ## Verification checklist
 
@@ -76,3 +82,6 @@ to import or reject it; importing moves the legacy data into that Clerk user's s
   entitlement.
 - Call `GET /v1/auth/session` with and without the Clerk bearer token; expect `200` and `401` respectively.
 - Exercise popup OAuth in a normal browser and system-browser redirect OAuth in a signed, installed Electron package.
+
+The exact desktop development and packaged acceptance procedure, including failure/cancellation recovery and the
+remaining live-only gates, is maintained in [`infra/DESKTOP-AUTH-ACCEPTANCE.md`](infra/DESKTOP-AUTH-ACCEPTANCE.md).

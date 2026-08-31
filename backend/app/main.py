@@ -12,6 +12,7 @@ from app.auth.router import router as auth_router
 from app.core.config import Settings
 from app.core.errors import (
     AuthenticationUnavailableError,
+    BillingUnavailableError,
     DependencyUnavailableError,
     InternalErrorMiddleware,
     LessonContextNotFoundError,
@@ -19,18 +20,25 @@ from app.core.errors import (
     LessonTutorLimitedError,
     LessonTutorTimeoutError,
     LessonTutorUnavailableError,
+    ProRequiredError,
     authentication_unavailable_handler,
+    billing_unavailable_handler,
     dependency_unavailable_handler,
     lesson_context_not_found_handler,
     lesson_tutor_conflict_handler,
     lesson_tutor_limited_handler,
     lesson_tutor_timeout_handler,
     lesson_tutor_unavailable_handler,
+    pro_required_handler,
 )
 from app.core.logging import configure_logging
 from app.core.request_id import REQUEST_ID_HEADER, RequestIdMiddleware
 from app.db.engine import create_database_engine, create_database_probe
 from app.integrations.lesson_tutor.client import GoogleIdentityTokenProvider, LessonTutorHttpClient
+from app.integrations.revenuecat.client import RevenueCatHttpClient
+from app.modules.billing.repository import PostgresEntitlementRepository
+from app.modules.billing.router import router as billing_router
+from app.modules.billing.service import BillingService
 from app.modules.lesson_tutor.guard import GuardLimits, PostgresLessonTutorGuard
 from app.modules.lesson_tutor.router import router as lesson_tutor_router
 from app.modules.lesson_tutor.service import LessonTutorService
@@ -40,6 +48,7 @@ def create_app(
     settings: Settings | None = None,
     *,
     lesson_tutor_service: LessonTutorService | None = None,
+    billing_service: BillingService | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings.log_level)
@@ -59,6 +68,16 @@ def create_app(
         else None
     )
     clerk_configuration = settings.clerk_configuration
+    revenuecat_provider = (
+        RevenueCatHttpClient(
+            api_key=settings.revenuecat_api_key.get_secret_value(),
+            timeout_seconds=settings.revenuecat_api_timeout_seconds,
+        )
+        if billing_service is None
+        and settings.revenuecat_enabled
+        and settings.revenuecat_api_key is not None
+        else None
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -69,7 +88,11 @@ def create_app(
                 if lesson_tutor_gateway is not None:
                     await lesson_tutor_gateway.close()
             finally:
-                database_engine.dispose()
+                try:
+                    if revenuecat_provider is not None:
+                        await revenuecat_provider.close()
+                finally:
+                    database_engine.dispose()
 
     application = FastAPI(
         title="GlideLingo API",
@@ -77,6 +100,32 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.database_probe = create_database_probe(database_engine)
+    application.state.revenuecat_webhook_max_body_bytes = settings.revenuecat_webhook_max_body_bytes
+    application.state.billing_service = billing_service or BillingService(
+        enabled=settings.revenuecat_enabled,
+        repository=PostgresEntitlementRepository(engine=database_engine),
+        provider=revenuecat_provider,
+        pseudonym_key=(
+            settings.revenuecat_pseudonym_key.get_secret_value().encode()
+            if settings.revenuecat_pseudonym_key is not None
+            else None
+        ),
+        environment=settings.revenuecat_environment,
+        freshness_seconds=settings.revenuecat_entitlement_freshness_seconds,
+        webhook_authorization=(
+            settings.revenuecat_webhook_authorization.get_secret_value()
+            if settings.revenuecat_webhook_authorization is not None
+            else None
+        ),
+        webhook_signing_secret=(
+            settings.revenuecat_webhook_signing_secret.get_secret_value()
+            if settings.revenuecat_webhook_signing_secret is not None
+            else None
+        ),
+        webhook_signature_tolerance_seconds=(
+            settings.revenuecat_webhook_signature_tolerance_seconds
+        ),
+    )
     application.state.lesson_tutor_service = lesson_tutor_service or LessonTutorService(
         enabled=settings.lesson_tutor_enabled,
         gateway=lesson_tutor_gateway,
@@ -129,6 +178,8 @@ def create_app(
     )
     application.add_exception_handler(LessonTutorConflictError, lesson_tutor_conflict_handler)
     application.add_exception_handler(LessonTutorLimitedError, lesson_tutor_limited_handler)
+    application.add_exception_handler(ProRequiredError, pro_required_handler)
+    application.add_exception_handler(BillingUnavailableError, billing_unavailable_handler)
     application.add_middleware(InternalErrorMiddleware)
     application.add_middleware(
         CORSMiddleware,
@@ -141,6 +192,7 @@ def create_app(
     application.add_middleware(RequestIdMiddleware)
     application.include_router(health_router)
     application.include_router(lesson_tutor_router)
+    application.include_router(billing_router)
     application.include_router(auth_router)
     return application
 

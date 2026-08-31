@@ -53,6 +53,16 @@ class Settings(BaseSettings):
     lesson_tutor_concurrency_limit: int = Field(default=1, ge=1, le=3)
     lesson_tutor_daily_limit: int = Field(default=50, ge=1, le=1000)
     lesson_tutor_global_daily_turn_limit: int = Field(default=2000, ge=1, le=100000)
+    revenuecat_enabled: bool = False
+    revenuecat_environment: Literal["SANDBOX", "PRODUCTION"] = "SANDBOX"
+    revenuecat_api_key: SecretStr | None = None
+    revenuecat_pseudonym_key: SecretStr | None = None
+    revenuecat_webhook_authorization: SecretStr | None = None
+    revenuecat_webhook_signing_secret: SecretStr | None = None
+    revenuecat_api_timeout_seconds: float = Field(default=2.5, gt=0, le=5)
+    revenuecat_entitlement_freshness_seconds: int = Field(default=900, ge=60, le=3600)
+    revenuecat_webhook_max_body_bytes: int = Field(default=65536, ge=1024, le=262144)
+    revenuecat_webhook_signature_tolerance_seconds: int = Field(default=300, ge=30, le=600)
     clerk_issuer: str | None = None
     clerk_jwks_url: str | None = None
     clerk_audience: str | None = None
@@ -172,6 +182,21 @@ class Settings(BaseSettings):
                 or parsed.fragment
             ):
                 raise ValueError(f"{name} must be an HTTPS URL without credentials or query data")
+        return self
+
+    @model_validator(mode="after")
+    def validate_revenuecat_configuration(self) -> Self:
+        if not self.revenuecat_enabled:
+            return self
+        required_secrets = (
+            ("RevenueCat API key", self.revenuecat_api_key, 8),
+            ("RevenueCat pseudonym key", self.revenuecat_pseudonym_key, 32),
+            ("RevenueCat webhook authorization", self.revenuecat_webhook_authorization, 16),
+            ("RevenueCat webhook signing secret", self.revenuecat_webhook_signing_secret, 32),
+        )
+        for name, secret, minimum_length in required_secrets:
+            if secret is None or len(secret.get_secret_value().encode()) < minimum_length:
+                raise ValueError(f"{name} must be at least {minimum_length} bytes when enabled")
         return self
 
     @property

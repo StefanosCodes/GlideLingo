@@ -7,7 +7,10 @@ const downloadUrl =
   'https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/GlideLingo-0.1.0-universal.dmg';
 const { origin: testOrigin } = resolvePlaywrightServerConfig();
 
-test('renders the complete landing page without third-party requests or horizontal overflow', async ({ page }) => {
+test('renders the complete landing page without third-party requests or horizontal overflow', async ({
+  page,
+  browserName,
+}) => {
   /** @type {string[]} */
   const unexpectedRequests = [];
   /** @type {string[]} */
@@ -33,14 +36,40 @@ test('renders the complete landing page without third-party requests or horizont
   await expect(page.locator('.site-header .brand-name')).toHaveText('GlideLingo');
   await expect(page.locator('.site-header nav')).toHaveCount(0);
   await expect(page.locator('main > section')).toHaveCount(2);
-  await expect(page.locator('[data-video-state="awaiting-source"]')).toBeVisible();
+  await expect(page.locator('[data-video-state="ready"]')).toBeVisible();
   await expect(page.getByText('How it works', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('GlideLingo product walkthrough')).toHaveAttribute(
-    'poster',
-    '/images/product-home.png',
+  const productVideo = page.getByLabel('GlideLingo product walkthrough');
+  await expect(productVideo).toHaveAttribute('controls', '');
+  await expect(productVideo).toHaveAttribute('data-autoplay-when-visible', 'true');
+  await expect(productVideo).toHaveAttribute('loop', '');
+  await expect(productVideo).toHaveAttribute('muted', '');
+  await expect(productVideo).toHaveAttribute('poster', '/images/product-home.png');
+  await expect(page.locator('.demo-player source[type="video/webm"]')).toHaveAttribute(
+    'src',
+    '/videos/glidelingo-product-walkthrough.webm',
   );
-  await expect(page.getByLabel('Product walkthrough video coming soon')).toBeVisible();
-  await expect(page.locator('.demo-player source')).toHaveCount(0);
+  await expect(page.locator('.demo-player source[type="video/mp4"]')).toHaveAttribute(
+    'src',
+    '/videos/glidelingo-product-walkthrough.mp4',
+  );
+  await expect(page.locator('.demo-player track[kind="captions"]')).toHaveAttribute(
+    'src',
+    '/videos/glidelingo-product-walkthrough.vtt',
+  );
+  await expect(page.getByLabel('Product walkthrough video coming soon')).toHaveCount(0);
+  await productVideo.scrollIntoViewIfNeeded();
+  if (browserName === 'webkit') {
+    await expect
+      .poll(() => productVideo.evaluate((video) => /** @type {HTMLVideoElement} */ (video).readyState))
+      .toBeGreaterThanOrEqual(1);
+  } else {
+    await expect
+      .poll(
+        () => productVideo.evaluate((video) => /** @type {HTMLVideoElement} */ (video).currentTime),
+        { message: 'product video should autoplay' },
+      )
+      .toBeGreaterThan(0);
+  }
   await expect(page.locator('.download-section')).toHaveCount(0);
   await expect(page.locator('body')).not.toContainText('Desktop apps');
   await expect(page.locator('.hero-actions .button-platform-icon')).toHaveCount(1);
@@ -73,6 +102,11 @@ test('renders the complete landing page without third-party requests or horizont
 test('supports keyboard navigation and reduced motion', async ({ page, browserName }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
+
+  const productVideo = page.getByLabel('GlideLingo product walkthrough');
+  await productVideo.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(250);
+  expect(await productVideo.evaluate((video) => /** @type {HTMLVideoElement} */ (video).paused)).toBe(true);
 
   await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
   await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();

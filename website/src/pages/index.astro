@@ -1,5 +1,6 @@
 ---
 import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { resolveMacDownload } from '../lib/download-config.mjs';
@@ -9,10 +10,12 @@ const productVideo = {
   captions: '/videos/glidelingo-product-walkthrough.vtt',
   poster: '/images/product-home.png',
   src: '/videos/glidelingo-product-walkthrough.mp4',
+  webm: '/videos/glidelingo-product-walkthrough.webm',
 };
 const productVideoReady =
-  existsSync(new URL('../../public/videos/glidelingo-product-walkthrough.mp4', import.meta.url)) &&
-  existsSync(new URL('../../public/videos/glidelingo-product-walkthrough.vtt', import.meta.url));
+  existsSync(resolve('public/videos/glidelingo-product-walkthrough.mp4')) &&
+  existsSync(resolve('public/videos/glidelingo-product-walkthrough.webm')) &&
+  existsSync(resolve('public/videos/glidelingo-product-walkthrough.vtt'));
 const description =
   'GlideLingo redesigns language learning around clear lessons, focused review, and a calm weekly rhythm you can keep.';
 ---
@@ -76,6 +79,9 @@ const description =
         <div class="demo-player">
           <video
             controls={productVideoReady}
+            data-autoplay-when-visible={productVideoReady || undefined}
+            loop={productVideoReady}
+            muted={productVideoReady}
             playsinline
             poster={productVideo.poster}
             preload="metadata"
@@ -84,9 +90,9 @@ const description =
             {
               productVideoReady && (
                 <>
+                  <source src={productVideo.webm} type="video/webm" />
                   <source src={productVideo.src} type="video/mp4" />
                   <track
-                    default
                     kind="captions"
                     label="English"
                     src={productVideo.captions}
@@ -130,4 +136,5 @@ const description =
       <a href="https://github.com/StefanosCodes/GlideLingo/releases">GitHub releases</a>
     </div>
   </footer>
+  <script src="/scripts/video-player.js" defer is:inline></script>
 </BaseLayout>

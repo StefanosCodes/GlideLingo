@@ -60,6 +60,7 @@ def revenuecat_engine() -> Generator[Engine]:
             cursor.execute("SET ROLE cloudsqlsuperuser")
             cursor.execute(f'SET search_path TO "{schema}", public')
             cursor.execute(MIGRATION.read_text(encoding="utf-8"))
+            cursor.execute("RESET ROLE")
             maintenance_migration = (
                 MAINTENANCE_MIGRATION.read_text(encoding="utf-8")
                 .replace(
@@ -69,7 +70,6 @@ def revenuecat_engine() -> Generator[Engine]:
                 .replace("SCHEMA public", f'SCHEMA "{schema}"')
             )
             cursor.execute(maintenance_migration)
-            cursor.execute("RESET ROLE")
         finally:
             cursor.close()
     finally:
@@ -225,30 +225,41 @@ def test_delayed_webhook_applies_newer_current_snapshot_after_reconciliation(
 def test_runtime_role_has_no_delete_or_ddl_privileges(revenuecat_engine: Engine) -> None:
     now = datetime.now(UTC).replace(microsecond=0)
     with revenuecat_engine.begin() as connection:
-        maintenance_membership = connection.execute(
+        maintenance_memberships = connection.execute(
             text(
                 """
-                SELECT membership.admin_option, membership.set_option
+                SELECT count(*)
                 FROM pg_auth_members AS membership
-                WHERE membership.roleid =
+                WHERE membership.member =
                         'glidelingo_revenuecat_maintenance'::regrole
-                  AND membership.member = 'cloudsqlsuperuser'::regrole
+                   OR membership.roleid =
+                        'glidelingo_revenuecat_maintenance'::regrole
                 """
             )
-        ).one()
-        assert maintenance_membership.admin_option is True
-        assert maintenance_membership.set_option is False
+        ).scalar_one()
+        assert maintenance_memberships == 0
 
-        connection.exec_driver_sql("SET LOCAL ROLE cloudsqlsuperuser")
         connection.exec_driver_sql("GRANT glidelingo_revenuecat_maintenance TO SESSION_USER")
         connection.exec_driver_sql("SET LOCAL ROLE glidelingo_revenuecat_maintenance")
         assert connection.execute(text("SELECT current_user")).scalar_one() == (
             "glidelingo_revenuecat_maintenance"
         )
         connection.exec_driver_sql("RESET ROLE")
-        connection.exec_driver_sql("SET LOCAL ROLE cloudsqlsuperuser")
         connection.exec_driver_sql("REVOKE glidelingo_revenuecat_maintenance FROM SESSION_USER")
-        connection.exec_driver_sql("RESET ROLE")
+
+        maintenance_memberships = connection.execute(
+            text(
+                """
+                SELECT count(*)
+                FROM pg_auth_members AS membership
+                WHERE membership.member =
+                        'glidelingo_revenuecat_maintenance'::regrole
+                   OR membership.roleid =
+                        'glidelingo_revenuecat_maintenance'::regrole
+                """
+            )
+        ).scalar_one()
+        assert maintenance_memberships == 0
 
         owners = set(
             connection.execute(
@@ -436,5 +447,42 @@ def test_maintenance_migration_removes_extra_target_schema_grants(
                 "SELECT has_table_privilege("
                 "'glidelingo_revenuecat_maintenance', "
                 "'revenuecat_entitlement_state', 'SELECT')"
+            )
+        ).scalar_one()
+
+
+@pytest.mark.integration
+def test_maintenance_migration_clears_password_drift(
+    revenuecat_engine: Engine,
+) -> None:
+    with revenuecat_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        schema = connection.execute(text("SELECT current_schema()")).scalar_one()
+        connection.exec_driver_sql(
+            "ALTER ROLE glidelingo_revenuecat_maintenance PASSWORD 'test-only-drift'"
+        )
+        assert connection.execute(
+            text(
+                "SELECT rolpassword IS NOT NULL "
+                "FROM pg_authid "
+                "WHERE rolname = 'glidelingo_revenuecat_maintenance'"
+            )
+        ).scalar_one()
+
+        maintenance_migration = (
+            MAINTENANCE_MIGRATION.read_text(encoding="utf-8")
+            .replace(
+                "public.revenuecat_webhook_event",
+                f'"{schema}".revenuecat_webhook_event',
+            )
+            .replace("SCHEMA public", f'SCHEMA "{schema}"')
+            .replace("%I", "%%I")
+        )
+        connection.exec_driver_sql(maintenance_migration)
+
+        assert connection.execute(
+            text(
+                "SELECT rolpassword IS NULL "
+                "FROM pg_authid "
+                "WHERE rolname = 'glidelingo_revenuecat_maintenance'"
             )
         ).scalar_one()

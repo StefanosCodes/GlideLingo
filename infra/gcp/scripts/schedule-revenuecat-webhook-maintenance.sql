@@ -66,6 +66,18 @@ RESET ROLE;
 SET ROLE cloudsqlsuperuser;
 REVOKE glidelingo_revenuecat_maintenance FROM SESSION_USER;
 
+SELECT count(*) = 0 AS maintenance_memberships_removed
+FROM pg_auth_members
+WHERE member = 'glidelingo_revenuecat_maintenance'::regrole
+   OR roleid = 'glidelingo_revenuecat_maintenance'::regrole
+\gset
+
+\if :maintenance_memberships_removed
+\else
+  \echo 'schedule refused: temporary maintenance-role membership remains'
+  \quit 3
+\endif
+
 SELECT count(*) = 1 AS scheduled_job_is_exact
 FROM cron.job
 WHERE jobname = 'glidelingo-revenuecat-webhook-retention'

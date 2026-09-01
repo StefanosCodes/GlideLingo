@@ -145,6 +145,34 @@ jobs:
             exit 1
           fi
 
+          previous_revision_json="$(gcloud run revisions describe "${previous_revision}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --format=json)"
+          candidate_revision_json="$(gcloud run revisions describe "${candidate_revision}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --format=json)"
+          previous_revenuecat_raw="$(jq -r \
+            '[.spec.containers[0].env[]? | select(.name == "GLIDELINGO_REVENUECAT_ENABLED")][0].value // empty' \
+            <<< "${previous_revision_json}")"
+          candidate_revenuecat_raw="$(jq -r \
+            '[.spec.containers[0].env[]? | select(.name == "GLIDELINGO_REVENUECAT_ENABLED")][0].value // empty' \
+            <<< "${candidate_revision_json}")"
+          previous_revenuecat_enabled=false
+          candidate_revenuecat_enabled=false
+          if [[ "${previous_revenuecat_raw}" == "true" ]]; then
+            previous_revenuecat_enabled=true
+          fi
+          if [[ "${candidate_revenuecat_raw}" == "true" ]]; then
+            candidate_revenuecat_enabled=true
+          fi
+          if [[ "${previous_revenuecat_enabled}" != "${candidate_revenuecat_enabled}" ]]; then
+            echo "Refusing ordinary deployment because the 100%-serving revision and candidate have different RevenueCat activation states." >&2
+            echo "Use ./infra/gcp/scripts/activate-revenuecat-development.sh for the reviewed billing activation procedure." >&2
+            exit 1
+          fi
+
           smoke "${candidate_url}"
 
           if ! gcloud run services update-traffic "${GCP_SERVICE}" \

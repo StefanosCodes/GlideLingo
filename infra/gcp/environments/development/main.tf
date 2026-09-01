@@ -478,7 +478,8 @@ resource "google_cloud_run_v2_service" "api" {
   ]
 
   lifecycle {
-    ignore_changes = [template[0].containers[0].image]
+    # GitHub Actions and the reviewed activation script are the sole traffic owners.
+    ignore_changes = [traffic, template[0].containers[0].image]
 
     precondition {
       condition = !var.lesson_tutor_enabled || (

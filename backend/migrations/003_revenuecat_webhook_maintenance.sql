@@ -17,17 +17,12 @@ BEGIN
       NOCREATEROLE
       NOREPLICATION
       NOBYPASSRLS;
-  ELSE
-    ALTER ROLE glidelingo_revenuecat_maintenance
-      LOGIN
-      PASSWORD NULL
-      CONNECTION LIMIT 1
-      NOINHERIT
-      NOCREATEDB
-      NOCREATEROLE;
   END IF;
 END
 $$;
+
+ALTER ROLE glidelingo_revenuecat_maintenance PASSWORD NULL;
+REVOKE glidelingo_revenuecat_maintenance FROM cloudsqlsuperuser;
 
 DO $$
 BEGIN
@@ -49,16 +44,7 @@ BEGIN
     SELECT 1
     FROM pg_auth_members
     WHERE member = 'glidelingo_revenuecat_maintenance'::regrole
-       OR (
-         roleid = 'glidelingo_revenuecat_maintenance'::regrole
-         AND member <> 'cloudsqlsuperuser'::regrole
-       )
-  ) OR NOT EXISTS (
-    SELECT 1
-    FROM pg_auth_members
-    WHERE roleid = 'glidelingo_revenuecat_maintenance'::regrole
-      AND member = 'cloudsqlsuperuser'::regrole
-      AND admin_option
+       OR roleid = 'glidelingo_revenuecat_maintenance'::regrole
   ) THEN
     RAISE EXCEPTION
       'glidelingo_revenuecat_maintenance has unexpected role memberships';

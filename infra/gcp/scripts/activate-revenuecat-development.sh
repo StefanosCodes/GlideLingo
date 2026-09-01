@@ -5,6 +5,12 @@ readonly expected_project="glidelingo-development"
 readonly expected_region="us-west1"
 readonly expected_service="glidelingo-api"
 readonly revenuecat_flag="GLIDELINGO_REVENUECAT_ENABLED"
+readonly revenuecat_secret_contract='{
+  "GLIDELINGO_REVENUECAT_API_KEY": "glidelingo-revenuecat-api-key",
+  "GLIDELINGO_REVENUECAT_PSEUDONYM_KEY": "glidelingo-revenuecat-pseudonym-key",
+  "GLIDELINGO_REVENUECAT_WEBHOOK_AUTHORIZATION": "glidelingo-revenuecat-webhook-authorization",
+  "GLIDELINGO_REVENUECAT_WEBHOOK_SIGNING_SECRET": "glidelingo-revenuecat-webhook-signing-secret"
+}'
 
 candidate_tag=""
 candidate_revision=""
@@ -48,6 +54,49 @@ template_revenuecat_flag() {
 revision_revenuecat_flag() {
   jq -r --arg name "${revenuecat_flag}" \
     '[(.spec.containers[0].env // [])[]? | select(.name == $name)][0].value // empty'
+}
+
+revenuecat_secret_refs() {
+  local resource_kind="$1"
+  jq -c --arg resource_kind "${resource_kind}" --argjson expected "${revenuecat_secret_contract}" '
+    def supported_refs:
+      [
+        if .valueFrom.secretKeyRef? != null then
+          {
+            secret: (.valueFrom.secretKeyRef.name // ""),
+            version: (.valueFrom.secretKeyRef.key // "" | tostring)
+          }
+        else empty end,
+        if .valueSource.secretKeyRef? != null then
+          {
+            secret: (.valueSource.secretKeyRef.secret // ""),
+            version: (.valueSource.secretKeyRef.version // "" | tostring)
+          }
+        else empty end
+      ];
+    (if $resource_kind == "service" then
+       (.spec.template.spec.containers[0].env // .spec.template.containers[0].env // null)
+     elif $resource_kind == "revision" then
+       (.spec.containers[0].env // null)
+     else
+       error("unsupported resource kind")
+     end) as $env
+    | if ($env | type) != "array" then error("missing container environment") else . end
+    | reduce ($expected | keys[]) as $name
+        ({};
+          [$env[] | select(.name == $name)] as $matches
+          | if ($matches | length) != 1 then error("missing or duplicate required secret ref") else . end
+          | $matches[0] as $entry
+          | if $entry.value? != null then error("required environment entry contains a literal value") else . end
+          | ($entry | supported_refs) as $refs
+          | if ($refs | length) != 1 then error("required environment entry has no single supported secret ref") else . end
+          | $refs[0] as $ref
+          | ($ref.secret | tostring | split("/")[-1]) as $secret_id
+          | if $secret_id != $expected[$name] then error("required environment entry references the wrong secret") else . end
+          | if ($ref.version | test("^[1-9][0-9]*$") | not) then error("secret version is not an immutable positive number") else . end
+          | .[$name] = {secret: $secret_id, version: $ref.version}
+        )
+  '
 }
 
 one_hundred_percent_revision() {
@@ -133,7 +182,6 @@ cleanup() {
 
   exit "${exit_status}"
 }
-trap cleanup EXIT
 
 health_smoke() {
   local base_url="$1"
@@ -205,6 +253,9 @@ authenticated_entitlement_smoke() {
   fi
 }
 
+main() {
+trap cleanup EXIT
+
 require_command gcloud
 require_command curl
 require_command jq
@@ -230,6 +281,8 @@ initial_generation="$(jq -r '.metadata.generation // empty' <<< "${initial_servi
 initial_observed_generation="$(jq -r '.status.observedGeneration // empty' <<< "${initial_service_json}")"
 previous_revision="$(one_hundred_percent_revision <<< "${initial_service_json}")"
 initial_template_flag="$(template_revenuecat_flag <<< "${initial_service_json}")"
+initial_secret_refs="$(revenuecat_secret_refs service <<< "${initial_service_json}" 2>/dev/null)" \
+  || die "The current service template must contain the four expected RevenueCat Secret Manager refs with immutable positive numeric versions."
 
 [[ "${service_name}" == "${expected_service}" ]] || die "The described Cloud Run service is not exactly ${expected_service}."
 if [[ -n "${service_location}" && "${service_location}" != "${expected_region}" ]]; then
@@ -301,6 +354,8 @@ expected_generation="$(jq -r '.metadata.generation // empty' <<< "${staged_servi
 expected_observed_generation="$(jq -r '.status.observedGeneration // empty' <<< "${staged_service_json}")"
 staged_previous_revision="$(one_hundred_percent_revision <<< "${staged_service_json}")"
 staged_template_flag="$(template_revenuecat_flag <<< "${staged_service_json}")"
+staged_secret_refs="$(revenuecat_secret_refs service <<< "${staged_service_json}" 2>/dev/null)" \
+  || die "The staged service template does not contain the required immutable RevenueCat secret refs."
 candidate_traffic="$(jq -c --arg tag "${candidate_tag}" \
   '[.status.traffic[]? | select(.tag == $tag)] | if length == 1 then .[0] else empty end' \
   <<< "${staged_service_json}")"
@@ -314,14 +369,20 @@ candidate_percent="$(jq -r '.percent // 0' <<< "${candidate_traffic}")"
   || die "Traffic moved while staging; refusing activation."
 [[ "${staged_template_flag}" == "true" ]] \
   || die "The staged service template is not RevenueCat enabled."
+[[ "${staged_secret_refs}" == "${initial_secret_refs}" ]] \
+  || die "The staged service template changed a RevenueCat secret ref or pinned version."
 [[ -n "${candidate_revision}" && -n "${candidate_url}" && "${candidate_percent}" == "0" ]] \
   || die "The exact candidate tag must resolve to one zero-traffic revision and URL."
 
 candidate_revision_json="$(describe_revision "${candidate_revision}")" \
   || die "Could not describe candidate revision ${candidate_revision}."
 candidate_flag="$(revision_revenuecat_flag <<< "${candidate_revision_json}")"
+candidate_secret_refs="$(revenuecat_secret_refs revision <<< "${candidate_revision_json}" 2>/dev/null)" \
+  || die "The exact candidate revision does not expose the required immutable RevenueCat secret refs."
 [[ "${candidate_flag}" == "true" ]] \
   || die "The exact candidate revision is not RevenueCat enabled."
+[[ "${candidate_secret_refs}" == "${initial_secret_refs}" ]] \
+  || die "The exact candidate revision changed a RevenueCat secret ref or pinned version."
 
 echo "Running zero-traffic candidate smoke checks." >&2
 health_smoke "${candidate_url}"
@@ -336,6 +397,8 @@ prepromotion_observed_generation="$(jq -r '.status.observedGeneration // empty' 
 prepromotion_previous_revision="$(one_hundred_percent_revision <<< "${prepromotion_json}")"
 prepromotion_url="$(jq -r '.status.url // empty' <<< "${prepromotion_json}")"
 prepromotion_template_flag="$(template_revenuecat_flag <<< "${prepromotion_json}")"
+prepromotion_secret_refs="$(revenuecat_secret_refs service <<< "${prepromotion_json}" 2>/dev/null)" \
+  || die "The service template RevenueCat secret refs became invalid before promotion."
 prepromotion_candidate_traffic="$(jq -c --arg tag "${candidate_tag}" \
   '[.status.traffic[]? | select(.tag == $tag)] | if length == 1 then .[0] else empty end' \
   <<< "${prepromotion_json}")"
@@ -354,6 +417,8 @@ prepromotion_candidate_percent="$(jq -r '.percent // 0' <<< "${prepromotion_cand
   || die "The candidate tag, revision, or zero-traffic state drifted before promotion."
 [[ "${prepromotion_template_flag}" == "true" ]] \
   || die "The service template RevenueCat flag drifted before promotion."
+[[ "${prepromotion_secret_refs}" == "${initial_secret_refs}" ]] \
+  || die "A RevenueCat secret ref or pinned version drifted before promotion."
 
 previous_revision_json="$(describe_revision "${previous_revision}")" \
   || die "Could not re-check previous revision ${previous_revision}."
@@ -361,8 +426,12 @@ candidate_revision_json="$(describe_revision "${candidate_revision}")" \
   || die "Could not re-check candidate revision ${candidate_revision}."
 previous_flag="$(revision_revenuecat_flag <<< "${previous_revision_json}")"
 candidate_flag="$(revision_revenuecat_flag <<< "${candidate_revision_json}")"
+candidate_secret_refs="$(revenuecat_secret_refs revision <<< "${candidate_revision_json}" 2>/dev/null)" \
+  || die "The candidate RevenueCat secret refs became invalid before promotion."
 [[ "${previous_flag}" == "false" && "${candidate_flag}" == "true" ]] \
   || die "Previous or candidate RevenueCat flags drifted before promotion."
+[[ "${candidate_secret_refs}" == "${initial_secret_refs}" ]] \
+  || die "The candidate RevenueCat secret refs drifted before promotion."
 
 echo "Promoting exact revision ${candidate_revision} to 100% traffic." >&2
 if ! gcloud run services update-traffic "${expected_service}" \
@@ -393,3 +462,8 @@ echo "RevenueCat development activation succeeded on revision ${candidate_revisi
 echo "Next required reconciliation (not run automatically):" >&2
 echo "  Run a Terraform plan with revenuecat_enabled=true and all four exact pinned revenuecat_secret_versions." >&2
 echo "  Require that the plan contains no Cloud Run template or traffic change before applying the durable configuration." >&2
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

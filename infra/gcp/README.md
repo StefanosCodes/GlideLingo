@@ -210,10 +210,14 @@ gcloud config set project glidelingo-development
 The script is intentionally fixed to `glidelingo-development`, `us-west1`, and `glidelingo-api`. It
 records the sole 100%-serving disabled revision, stages only
 `GLIDELINGO_REVENUECAT_ENABLED=true` on a tagged zero-traffic candidate, and keeps the Clerk token in
-a mode-600 temporary curl configuration that is deleted on exit. It proves candidate liveness and
-readiness, invalid-token rejection, authenticated reconciliation, and the active sandbox Pro
-contract. Immediately before promotion it rejects any service generation, observed generation,
-traffic, tag, revision, URL, or RevenueCat-flag drift. After promoting the exact candidate, it repeats
+a mode-600 temporary curl configuration that is deleted on exit. Before staging, it fails closed
+unless the service template contains exactly one Secret Manager reference for each of the four
+expected RevenueCat environment variables, each pointing to its expected secret container and an
+immutable positive numeric version (never `latest`). It proves those refs and versions are unchanged
+on the staged template and exact candidate revision. It also proves candidate liveness and readiness,
+invalid-token rejection, authenticated reconciliation, and the active sandbox Pro contract.
+Immediately before promotion it rejects any service generation, observed generation, traffic, tag,
+revision, URL, RevenueCat-flag, or secret-ref drift. After promoting the exact candidate, it repeats
 canonical health and authenticated entitlement checks.
 
 Any failure before promotion resets the service template to

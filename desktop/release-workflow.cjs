@@ -114,6 +114,10 @@ function sha256(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
+function sha512(filePath) {
+  return crypto.createHash('sha512').update(fs.readFileSync(filePath)).digest('base64');
+}
+
 function writeChecksums(releaseDirectory, desktopVersion = version) {
   const directory = path.resolve(releaseDirectory);
   const distributables = distributableAssetNames(desktopVersion);
@@ -202,6 +206,15 @@ function inspectLocalAssets(releaseDirectory, desktopVersion = version) {
     (match) => match[1],
   );
   const primaryPath = /^path:\s*([^\s]+)$/m.exec(updateManifest)?.[1];
+  const primarySha512 = /^sha512:\s*([^\s]+)$/m.exec(updateManifest)?.[1];
+  const updateFiles = new Map(
+    [...updateManifest.matchAll(
+      /^\s*- url:\s*([^\s]+)\s*\n\s+sha512:\s*([^\s]+)\s*\n\s+size:\s*([0-9]+)\s*$/gm,
+    )].map((match) => [
+      match[1],
+      { sha512: match[2], size: Number.parseInt(match[3], 10) },
+    ]),
+  );
   const distributables = distributableAssetNames(desktopVersion);
 
   if (versionMatch?.[1] !== desktopVersion) {
@@ -210,6 +223,22 @@ function inspectLocalAssets(releaseDirectory, desktopVersion = version) {
   assertExactNames(updateUrls, distributables);
   if (primaryPath !== distributables[1]) {
     throw new Error('latest-mac.yml must select the universal ZIP as its primary update.');
+  }
+  if (updateFiles.size !== distributables.length) {
+    throw new Error('latest-mac.yml must contain SHA-512 and size metadata for each update.');
+  }
+
+  for (const name of distributables) {
+    const metadata = updateFiles.get(name);
+    const filePath = path.join(directory, name);
+    const expectedSha512 = sha512(filePath);
+    const expectedSize = fs.statSync(filePath).size;
+    if (metadata?.sha512 !== expectedSha512 || metadata?.size !== expectedSize) {
+      throw new Error(`latest-mac.yml metadata does not match ${name}.`);
+    }
+  }
+  if (primarySha512 !== updateFiles.get(distributables[1])?.sha512) {
+    throw new Error('latest-mac.yml primary SHA-512 must match the universal ZIP.');
   }
 
   return assets;

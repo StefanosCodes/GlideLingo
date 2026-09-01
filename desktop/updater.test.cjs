@@ -185,3 +185,40 @@ test('updater failures are contained and logged without remote error details', a
   assert.equal(messages.length, 2);
   assert.ok(messages.every((message) => !/token|secret|private updater response/.test(message)));
 });
+
+test('user-confirmed download and install failures show a safe recovery message', async () => {
+  const updater = createUpdater();
+  updater.downloadUpdate = async () => { throw new Error('private download details'); };
+  updater.quitAndInstall = () => { throw new Error('private install details'); };
+  const prompts = [];
+  const messages = [];
+  const dialog = {
+    async showMessageBox(...args) {
+      const options = args.at(-1);
+      prompts.push(options);
+      return { response: 0 };
+    },
+  };
+
+  installMacUpdater({
+    updater,
+    dialog,
+    parentWindow: { isDestroyed: () => false },
+    logger: { error(message) { messages.push(message); } },
+  });
+  await flushEvents();
+
+  updater.emit('update-available');
+  await flushEvents();
+  await flushEvents();
+  updater.emit('update-downloaded');
+  await flushEvents();
+  await flushEvents();
+
+  const failurePrompts = prompts.filter(
+    (prompt) => prompt.title === 'GlideLingo update unavailable',
+  );
+  assert.equal(failurePrompts.length, 2);
+  assert.ok(failurePrompts.every((prompt) => /current version is unchanged/i.test(prompt.detail)));
+  assert.ok(messages.every((message) => !/private|details/.test(message)));
+});

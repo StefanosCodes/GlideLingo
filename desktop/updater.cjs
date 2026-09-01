@@ -61,6 +61,24 @@ function showMessage(dialog, parentWindow, options) {
   return dialog.showMessageBox(options);
 }
 
+async function showUpdateFailure(dialog, parentWindow, logger, logMessage) {
+  logger.error(logMessage);
+  try {
+    await showMessage(dialog, parentWindow, {
+      type: 'error',
+      title: 'GlideLingo update unavailable',
+      message: 'The update could not be completed.',
+      detail: 'Your current version is unchanged. Please try again the next time you open GlideLingo.',
+      buttons: ['OK'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+  } catch {
+    logger.error('[desktop-update] The update failure message could not be shown.');
+  }
+}
+
 function installMacUpdater({ updater, dialog, parentWindow, logger = console }) {
   let downloadPromptOpen = false;
   let installPromptOpen = false;
@@ -90,10 +108,19 @@ function installMacUpdater({ updater, dialog, parentWindow, logger = console }) 
       });
 
       if (response === 0) {
-        await updater.downloadUpdate();
+        try {
+          await updater.downloadUpdate();
+        } catch {
+          await showUpdateFailure(
+            dialog,
+            parentWindow,
+            logger,
+            '[desktop-update] The update could not be downloaded.',
+          );
+        }
       }
     } catch {
-      logger.error('[desktop-update] The update could not be downloaded.');
+      logger.error('[desktop-update] The download prompt could not be shown.');
     } finally {
       downloadPromptOpen = false;
     }
@@ -116,7 +143,16 @@ function installMacUpdater({ updater, dialog, parentWindow, logger = console }) 
       });
 
       if (response === 0) {
-        updater.quitAndInstall(false, true);
+        try {
+          updater.quitAndInstall(false, true);
+        } catch {
+          await showUpdateFailure(
+            dialog,
+            parentWindow,
+            logger,
+            '[desktop-update] The update could not be installed.',
+          );
+        }
       }
     } catch {
       logger.error('[desktop-update] The install prompt could not be shown.');

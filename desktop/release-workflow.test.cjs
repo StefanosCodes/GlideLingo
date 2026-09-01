@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -46,20 +47,29 @@ function manualSelection(overrides = {}) {
 
 function createReleaseDirectory() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'glidelingo-release-'));
-  fs.writeFileSync(path.join(directory, 'GlideLingo-1.0.0-universal.dmg'), 'dmg');
+  const dmgName = 'GlideLingo-1.0.0-universal.dmg';
+  const zipName = 'GlideLingo-1.0.0-universal.zip';
+  const dmgPath = path.join(directory, dmgName);
+  const zipPath = path.join(directory, zipName);
+  fs.writeFileSync(dmgPath, 'dmg');
   fs.writeFileSync(path.join(directory, 'GlideLingo-1.0.0-universal.dmg.blockmap'), 'dmg-blockmap');
-  fs.writeFileSync(path.join(directory, 'GlideLingo-1.0.0-universal.zip'), 'zip');
+  fs.writeFileSync(zipPath, 'zip');
   fs.writeFileSync(path.join(directory, 'GlideLingo-1.0.0-universal.zip.blockmap'), 'zip-blockmap');
+  const digest = (filePath) =>
+    crypto.createHash('sha512').update(fs.readFileSync(filePath)).digest('base64');
   fs.writeFileSync(
     path.join(directory, 'latest-mac.yml'),
     [
       'version: 1.0.0',
       'files:',
-      '  - url: GlideLingo-1.0.0-universal.zip',
-      '    sha512: zip-sha512',
-      '  - url: GlideLingo-1.0.0-universal.dmg',
-      '    sha512: dmg-sha512',
-      'path: GlideLingo-1.0.0-universal.zip',
+      `  - url: ${zipName}`,
+      `    sha512: ${digest(zipPath)}`,
+      `    size: ${fs.statSync(zipPath).size}`,
+      `  - url: ${dmgName}`,
+      `    sha512: ${digest(dmgPath)}`,
+      `    size: ${fs.statSync(dmgPath).size}`,
+      `path: ${zipName}`,
+      `sha512: ${digest(zipPath)}`,
       '',
     ].join('\n'),
   );
@@ -142,6 +152,8 @@ test('asset validation rejects partial and tampered release output', (context) =
   assert.throws(() => inspectLocalAssets(directory, '1.0.0'), /does not match/);
 
   writeChecksums(directory, '1.0.0');
+  assert.throws(() => inspectLocalAssets(directory, '1.0.0'), /metadata does not match/);
+
   fs.writeFileSync(
     path.join(directory, 'latest-mac.yml'),
     'version: 1.0.1\nfiles:\n  - url: https://example.test/untrusted.zip\npath: untrusted.zip\n',

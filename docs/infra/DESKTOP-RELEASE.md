@@ -109,7 +109,8 @@ installed clients.
 
 For each forward release, increment `desktop/package.json`, merge the reviewed change to `main`,
 create the protected matching tag (for example `desktop-v1.0.1`), let the workflow converge the
-draft, complete the clean-Mac gates below, and then publish that exact draft. Never replace an
+draft, complete the clean-Mac gates below, and then publish that exact draft as the GitHub
+**Latest** release. Never replace an
 already-published binary or reuse its version/tag. Existing signed installations discover the
 new published version on their next launch.
 

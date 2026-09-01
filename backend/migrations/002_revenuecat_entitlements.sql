@@ -30,6 +30,9 @@ CREATE TABLE revenuecat_webhook_event (
 CREATE INDEX revenuecat_webhook_event_processed_idx
     ON revenuecat_webhook_event (processed_at);
 
+ALTER TABLE revenuecat_entitlement_state OWNER TO cloudsqlsuperuser;
+ALTER TABLE revenuecat_webhook_event OWNER TO cloudsqlsuperuser;
+
 GRANT SELECT, INSERT, UPDATE ON revenuecat_entitlement_state TO glidelingo_app;
 GRANT SELECT, INSERT ON revenuecat_webhook_event TO glidelingo_app;
 

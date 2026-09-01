@@ -134,6 +134,16 @@ resource "google_sql_database_instance" "postgres" {
     activation_policy           = "ALWAYS"
     deletion_protection_enabled = true
 
+    database_flags {
+      name  = "cloudsql.enable_pg_cron"
+      value = "on"
+    }
+
+    database_flags {
+      name  = "cron.database_name"
+      value = "glidelingo"
+    }
+
     backup_configuration {
       enabled                        = true
       point_in_time_recovery_enabled = true

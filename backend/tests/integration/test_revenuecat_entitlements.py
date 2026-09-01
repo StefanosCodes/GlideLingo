@@ -14,6 +14,7 @@ from app.modules.billing.repository import PostgresEntitlementRepository
 
 MIGRATIONS = Path(__file__).resolve().parents[2] / "migrations"
 MIGRATION = MIGRATIONS / "002_revenuecat_entitlements.sql"
+MAINTENANCE_MIGRATION = MIGRATIONS / "003_revenuecat_webhook_maintenance.sql"
 MAINTENANCE = MIGRATIONS / "maintenance_revenuecat_webhooks.sql"
 ACTOR = derive_billing_actor_ref(
     key=b"integration-billing-pseudonym-key-at-least-32-bytes",
@@ -32,6 +33,9 @@ def revenuecat_engine() -> Generator[Engine]:
             """
             DO $$
             BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cloudsqlsuperuser') THEN
+                CREATE ROLE cloudsqlsuperuser NOLOGIN CREATEROLE CREATEDB;
+              END IF;
               IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'glidelingo_app') THEN
                 CREATE ROLE glidelingo_app NOLOGIN;
               END IF;
@@ -39,8 +43,13 @@ def revenuecat_engine() -> Generator[Engine]:
             $$
             """
         )
+        connection.exec_driver_sql("ALTER ROLE cloudsqlsuperuser NOLOGIN CREATEROLE CREATEDB")
         connection.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
         connection.exec_driver_sql(f'GRANT USAGE ON SCHEMA "{schema}" TO glidelingo_app')
+        connection.exec_driver_sql(
+            f'GRANT USAGE, CREATE ON SCHEMA "{schema}" TO cloudsqlsuperuser WITH GRANT OPTION'
+        )
+        connection.exec_driver_sql("GRANT cloudsqlsuperuser TO glidelingo")
 
     raw_connection = operator.raw_connection()
     try:
@@ -48,8 +57,19 @@ def revenuecat_engine() -> Generator[Engine]:
         driver_connection.autocommit = True
         cursor = driver_connection.cursor()
         try:
+            cursor.execute("SET ROLE cloudsqlsuperuser")
             cursor.execute(f'SET search_path TO "{schema}", public')
             cursor.execute(MIGRATION.read_text(encoding="utf-8"))
+            maintenance_migration = (
+                MAINTENANCE_MIGRATION.read_text(encoding="utf-8")
+                .replace(
+                    "public.revenuecat_webhook_event",
+                    f'"{schema}".revenuecat_webhook_event',
+                )
+                .replace("SCHEMA public", f'SCHEMA "{schema}"')
+            )
+            cursor.execute(maintenance_migration)
+            cursor.execute("RESET ROLE")
         finally:
             cursor.close()
     finally:
@@ -205,6 +225,59 @@ def test_delayed_webhook_applies_newer_current_snapshot_after_reconciliation(
 def test_runtime_role_has_no_delete_or_ddl_privileges(revenuecat_engine: Engine) -> None:
     now = datetime.now(UTC).replace(microsecond=0)
     with revenuecat_engine.begin() as connection:
+        maintenance_membership = connection.execute(
+            text(
+                """
+                SELECT membership.admin_option, membership.set_option
+                FROM pg_auth_members AS membership
+                WHERE membership.roleid =
+                        'glidelingo_revenuecat_maintenance'::regrole
+                  AND membership.member = 'cloudsqlsuperuser'::regrole
+                """
+            )
+        ).one()
+        assert maintenance_membership.admin_option is True
+        assert maintenance_membership.set_option is False
+
+        connection.exec_driver_sql("SET LOCAL ROLE cloudsqlsuperuser")
+        connection.exec_driver_sql("GRANT glidelingo_revenuecat_maintenance TO SESSION_USER")
+        connection.exec_driver_sql("SET LOCAL ROLE glidelingo_revenuecat_maintenance")
+        assert connection.execute(text("SELECT current_user")).scalar_one() == (
+            "glidelingo_revenuecat_maintenance"
+        )
+        connection.exec_driver_sql("RESET ROLE")
+        connection.exec_driver_sql("SET LOCAL ROLE cloudsqlsuperuser")
+        connection.exec_driver_sql("REVOKE glidelingo_revenuecat_maintenance FROM SESSION_USER")
+        connection.exec_driver_sql("RESET ROLE")
+
+        owners = set(
+            connection.execute(
+                text(
+                    """
+                    SELECT tableowner
+                    FROM pg_tables
+                    WHERE schemaname = current_schema()
+                      AND tablename IN (
+                        'revenuecat_entitlement_state',
+                        'revenuecat_webhook_event'
+                      )
+                    """
+                )
+            ).scalars()
+        )
+        procedure_owner = connection.execute(
+            text(
+                """
+                SELECT pg_get_userbyid(proowner)
+                FROM pg_proc
+                WHERE pronamespace = current_schema()::regnamespace
+                  AND proname = 'prune_revenuecat_webhook_events'
+                """
+            )
+        ).scalar_one()
+        assert owners == {"cloudsqlsuperuser"}
+        assert procedure_owner == "cloudsqlsuperuser"
+
         connection.exec_driver_sql("SET LOCAL ROLE glidelingo_app")
         connection.execute(
             text(
@@ -216,6 +289,12 @@ def test_runtime_role_has_no_delete_or_ddl_privileges(revenuecat_engine: Engine)
                 """
             ),
             {"actor_ref": ACTOR, "now": now},
+        )
+        assert (
+            connection.execute(
+                text("SELECT has_schema_privilege(current_user, current_schema(), 'CREATE')")
+            ).scalar_one()
+            is False
         )
         connection.execute(
             text(
@@ -250,24 +329,112 @@ def test_runtime_role_has_no_delete_or_ddl_privileges(revenuecat_engine: Engine)
 
 @pytest.mark.integration
 def test_webhook_maintenance_is_bounded_and_operator_only(revenuecat_engine: Engine) -> None:
+    with revenuecat_engine.connect() as connection:
+        schema = connection.execute(text("SELECT current_schema()")).scalar_one()
+    maintenance_sql = MAINTENANCE.read_text(encoding="utf-8").replace(
+        "public.prune_revenuecat_webhook_events",
+        f'"{schema}".prune_revenuecat_webhook_events',
+    )
+
     with revenuecat_engine.begin() as connection:
         connection.execute(
             text(
                 """
                 INSERT INTO revenuecat_webhook_event
                   (event_id, environment, actor_ref, event_at, processed_at)
-                VALUES
-                  ('evt_expired', 'SANDBOX', :actor_ref, now() - interval '31 days',
-                   now() - interval '31 days'),
-                  ('evt_current', 'SANDBOX', :actor_ref, now(), now())
+                SELECT
+                  'evt_expired_' || series,
+                  'SANDBOX',
+                  :actor_ref,
+                  now() - interval '31 days',
+                  now() - interval '31 days'
+                FROM generate_series(1, 1005) AS series
                 """
             ),
             {"actor_ref": ACTOR},
         )
-        connection.exec_driver_sql(MAINTENANCE.read_text(encoding="utf-8"))
+        connection.execute(
+            text(
+                """
+                INSERT INTO revenuecat_webhook_event
+                  (event_id, environment, actor_ref, event_at, processed_at)
+                VALUES ('evt_current', 'SANDBOX', :actor_ref, now(), now())
+                """
+            ),
+            {"actor_ref": ACTOR},
+        )
+
+    with revenuecat_engine.begin() as connection:
+        connection.exec_driver_sql("SET LOCAL ROLE glidelingo_revenuecat_maintenance")
+        connection.exec_driver_sql(maintenance_sql)
 
     with revenuecat_engine.connect() as connection:
-        event_ids = set(
+        remaining = connection.execute(
+            text(
+                """
+                SELECT count(*) FILTER (WHERE event_id = 'evt_current') AS current_rows,
+                       count(*) FILTER (WHERE event_id LIKE 'evt_expired_%') AS expired_rows
+                FROM revenuecat_webhook_event
+                """
+            )
+        ).one()
+    assert remaining.current_rows == 1
+    assert remaining.expired_rows == 5
+
+    with revenuecat_engine.begin() as connection:
+        connection.exec_driver_sql("SET LOCAL ROLE glidelingo_revenuecat_maintenance")
+        connection.exec_driver_sql(maintenance_sql)
+
+    with revenuecat_engine.connect() as connection:
+        remaining_event_ids = set(
             connection.execute(text("SELECT event_id FROM revenuecat_webhook_event")).scalars()
         )
-    assert event_ids == {"evt_current"}
+    assert remaining_event_ids == {"evt_current"}
+
+    for statement in (
+        "SELECT * FROM revenuecat_entitlement_state",
+        "INSERT INTO revenuecat_webhook_event "
+        "(event_id, environment, actor_ref, event_at) "
+        f"VALUES ('evt_forbidden', 'SANDBOX', '{ACTOR}', now())",
+        "ALTER TABLE revenuecat_webhook_event ADD COLUMN forbidden text",
+    ):
+        with pytest.raises(DBAPIError), revenuecat_engine.begin() as connection:
+            connection.exec_driver_sql("SET LOCAL ROLE glidelingo_revenuecat_maintenance")
+            connection.exec_driver_sql(statement)
+
+
+@pytest.mark.integration
+def test_maintenance_migration_removes_extra_target_schema_grants(
+    revenuecat_engine: Engine,
+) -> None:
+    with revenuecat_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        schema = connection.execute(text("SELECT current_schema()")).scalar_one()
+        connection.exec_driver_sql(
+            "GRANT SELECT ON revenuecat_entitlement_state TO glidelingo_revenuecat_maintenance"
+        )
+        assert connection.execute(
+            text(
+                "SELECT has_table_privilege("
+                "'glidelingo_revenuecat_maintenance', "
+                "'revenuecat_entitlement_state', 'SELECT')"
+            )
+        ).scalar_one()
+
+        maintenance_migration = (
+            MAINTENANCE_MIGRATION.read_text(encoding="utf-8")
+            .replace(
+                "public.revenuecat_webhook_event",
+                f'"{schema}".revenuecat_webhook_event',
+            )
+            .replace("SCHEMA public", f'SCHEMA "{schema}"')
+            .replace("%I", "%%I")
+        )
+        connection.exec_driver_sql(maintenance_migration)
+
+        assert not connection.execute(
+            text(
+                "SELECT has_table_privilege("
+                "'glidelingo_revenuecat_maintenance', "
+                "'revenuecat_entitlement_state', 'SELECT')"
+            )
+        ).scalar_one()

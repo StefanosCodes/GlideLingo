@@ -58,7 +58,10 @@ cannot retain abandoned rows forever.
 
 `002_revenuecat_entitlements.sql` is an additive, operator-run migration for the server-owned
 `pro` authorization boundary. Apply it after `001_lesson_tutor_guard.sql` with the same DDL-capable
-operator and `psql --set ON_ERROR_STOP=1`. The API must not run either migration at startup.
+operator and `psql --set ON_ERROR_STOP=1`. Apply it through a separate short-lived Cloud SQL built-in
+operator after `SET ROLE cloudsqlsuperuser`; the migration explicitly transfers both tables to that
+non-login system owner. The API must not run either migration at startup, and `glidelingo_app` must
+never own the tables or maintenance procedure.
 
 The runtime role receives only `SELECT`, `INSERT`, and `UPDATE` on the current entitlement table,
 and only `SELECT` and `INSERT` on the webhook event ledger. It receives no DDL or `DELETE` grants.
@@ -66,15 +69,33 @@ Rows store only a keyed pseudonymous actor reference, the exact `pro` entitlemen
 active/expiry state, and provider verification timestamps. Raw Clerk IDs, email, phone, product IDs,
 transaction IDs, receipts, aliases, and complete webhook bodies are never persisted.
 
-Run `maintenance_revenuecat_webhooks.sql` at least daily with a separate maintenance credential that
-has `DELETE` on `revenuecat_webhook_event`, repeating its bounded statement until it affects zero rows.
-The 30-day event-ID window covers RevenueCat's automatic and operator-triggered webhook retries while
-bounding the deduplication ledger. Current entitlement rows remain until account deletion or an
-operator-approved privacy purge; those operations must derive the same `rcusr_v1_` actor reference
-with the production pseudonym key and run through a non-runtime maintenance identity.
+After `002`, apply `003_revenuecat_webhook_maintenance.sql` with the same DDL-capable operator. It
+creates a passwordless, one-connection maintenance role and a `SECURITY INVOKER` procedure containing
+one bounded delete. Each call removes at most 1,000 rows in one transaction. The role's
+target-database and target-schema privileges are revoked before its exact grants are reapplied: it can
+only connect, use the target schema, and select/delete the webhook ledger; it cannot access entitlement
+state, insert webhook rows, or run DDL. `maintenance_revenuecat_webhooks.sql` is the canonical manual
+`CALL` for that procedure.
 
-Keep `GLIDELINGO_REVENUECAT_ENABLED=false` and `GLIDELINGO_LESSON_TUTOR_ENABLED=false` until this
-migration, recurring webhook-ledger maintenance, webhook secrets, the least-privileged app public SDK
-key used by the server's read-only Customer Info request, environment filter, and live sandbox evidence
-are all in place. The development Terraform contract must pin all four RevenueCat Secret Manager
-version numbers before the flag can be enabled.
+In development, enable Cloud SQL `pg_cron` and schedule the procedure hourly with
+`infra/gcp/scripts/schedule-revenuecat-webhook-maintenance.sql`. The job must be owned by
+`glidelingo_revenuecat_maintenance`, not the API login or the DDL operator. Its null password prevents
+normal external password authentication while the Cloud SQL background worker executes with only the
+role's explicit table grants. Hourly 1,000-row transactions can retire up to 24,000 expired events per
+day without an unbounded cleanup transaction. The 30-day event-ID window covers RevenueCat's automatic
+and operator-triggered webhook retries while bounding the deduplication ledger. Current entitlement rows
+remain until account deletion or an operator-approved privacy purge; those operations must derive the
+same `rcusr_v1_` actor reference with the production pseudonym key and run through a non-runtime
+maintenance identity.
+
+Cloud SQL grants `cloudsqlsuperuser` to built-in users by default. Before activation, revoke all
+inherited roles from `glidelingo_app` with Cloud SQL's `users assign-roles --revoke-existing-roles`
+operation, reconnect, and prove the login has no `cloudsqlsuperuser`, `CREATEROLE`, `CREATEDB`, schema
+`CREATE`, table ownership, `DELETE`, or DDL capability. Direct grants from migration `002` remain the
+runtime contract.
+
+Keep `GLIDELINGO_REVENUECAT_ENABLED=false` and `GLIDELINGO_LESSON_TUTOR_ENABLED=false` until migrations
+`002` and `003`, recurring webhook-ledger maintenance, runtime-role demotion, webhook secrets, the
+least-privileged app public SDK key used by the server's read-only Customer Info request, environment
+filter, and live sandbox evidence are all in place. The development Terraform contract must pin all
+four RevenueCat Secret Manager version numbers before the flag can be enabled.

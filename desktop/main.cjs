@@ -2,7 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
-const { app, BrowserWindow, net, protocol, session, shell } = require('electron');
+const { app, BrowserWindow, dialog, net, protocol, session, shell } = require('electron');
 
 const {
   APP_HOST,
@@ -22,6 +22,7 @@ const {
   validateProductionApiOrigin,
   validateProductionClerkOrigin,
 } = require('./runtime.cjs');
+const { startMacUpdater } = require('./updater.cjs');
 const { glidelingoApiOrigin, glidelingoClerkOrigin } = require('./package.json');
 
 const DEVELOPMENT_URL = validateDevelopmentUrl(process.env.ELECTRON_RENDERER_URL);
@@ -265,6 +266,8 @@ function createWindow() {
     pendingAuthCallbackUrl = null;
     window.webContents.once('did-finish-load', () => handleAuthCallback(callbackUrl));
   }
+
+  return window;
 }
 
 app.on('open-url', (event, url) => {
@@ -295,7 +298,15 @@ app.whenReady().then(async () => {
   }
 
   installSessionSecurity();
-  createWindow();
+  const initialWindow = createWindow();
+  initialWindow.once('ready-to-show', () => {
+    startMacUpdater({
+      app,
+      dialog,
+      parentWindow: initialWindow,
+      developmentUrl: DEVELOPMENT_URL,
+    });
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

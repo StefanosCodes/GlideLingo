@@ -11,6 +11,7 @@ directories:
 files:
   - main.cjs
   - runtime.cjs
+  - updater.cjs
   - package.json
 
 extraResources:
@@ -21,6 +22,11 @@ protocols:
   - name: GlideLingo authentication callback
     schemes:
       - glidelingo
+
+publish:
+  provider: github
+  owner: StefanosCodes
+  repo: GlideLingo
 
 mac:
   category: public.app-category.education

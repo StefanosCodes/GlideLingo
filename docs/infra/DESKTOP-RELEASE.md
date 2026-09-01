@@ -6,6 +6,7 @@ GlideLingo's first desktop channel is a direct macOS download, not the Mac App S
 
 - a universal DMG for users;
 - a universal ZIP for release/update infrastructure;
+- macOS update metadata and DMG/ZIP blockmaps for installed clients;
 - SHA-256 checksums;
 - a signed and notarized `GlideLingo.app` containing both x64 and arm64 code.
 
@@ -95,9 +96,23 @@ desktop-v1.0.0 ↔ desktop/package.json version 1.0.0
 Pushing that tag runs non-secret verification first and then waits for approval on the
 `desktop-release-signing` environment. After signing and notarization, the workflow creates or
 updates a **draft** GitHub Release. Reruns delete stale or partial draft assets, upload exactly
-`GlideLingo-<version>-universal.dmg`, `GlideLingo-<version>-universal.zip`, and
-`SHA256SUMS.txt`, and verify the names, upload state, byte sizes, and GitHub SHA-256 digests. A run refuses to replace an
-already-published release.
+`GlideLingo-<version>-universal.dmg`, `GlideLingo-<version>-universal.zip`, both matching
+`.blockmap` files, `latest-mac.yml`, and `SHA256SUMS.txt`. It verifies the names, upload state,
+byte sizes, and GitHub SHA-256 digests. A run refuses to replace an already-published release.
+
+The packaged updater is fixed to the public `StefanosCodes/GlideLingo` GitHub Releases channel.
+It runs once at launch only from a packaged, currently validly signed macOS app. Development,
+unsigned, and non-macOS builds never contact the update service. When a newer published release
+exists, GlideLingo asks before downloading and asks again before restarting to install; choosing
+**Later** leaves the installed version untouched. Draft releases are intentionally invisible to
+installed clients.
+
+For each forward release, increment `desktop/package.json`, merge the reviewed change to `main`,
+create the protected matching tag (for example `desktop-v1.0.1`), let the workflow converge the
+draft, complete the clean-Mac gates below, and then publish that exact draft as the GitHub
+**Latest** release. Never replace an
+already-published binary or reuse its version/tag. Existing signed installations discover the
+new published version on their next launch.
 
 ## Release gates
 
@@ -111,6 +126,7 @@ The automated workflow proves:
 - Gatekeeper accepts the application;
 - the executable contains both x64 and arm64 slices;
 - DMG and ZIP checksums are generated before upload.
+- updater metadata and both blockmaps are present before the draft can converge.
 
 Before linking a release from the public landing page, download the DMG onto a second clean Mac, drag GlideLingo to Applications, launch it normally, and exercise the critical lesson, audio, persistence, and production API flows. With the installed signed app, prove the system-browser OAuth callback both while GlideLingo is already running (warm callback) and while it is fully closed (cold callback). These installed OAuth smokes remain activation gates even after unit and packaging checks pass.
 
@@ -119,6 +135,13 @@ release in draft state and contains no publish step. Do not publish the draft or
 `PUBLIC_MAC_DOWNLOAD_STATE=active` until a later promotion lane can consume machine-verifiable
 clean-Mac evidence and an authorized approval. Until then, the landing page remains in its
 explicit disabled state.
+
+Before calling automatic updates release-ready, complete one real forward-update acceptance test:
+install and launch the published signed/notarized `1.0.0`, publish a separately signed/notarized
+`1.0.1` through the same protected lane, relaunch `1.0.0`, accept both update prompts, and verify
+that `1.0.1` starts with authentication state and local learning data intact. Also repeat once by
+choosing **Later** at each prompt to prove no unattended install occurs. This signed `1.0.0` to
+`1.0.1` exercise cannot be replaced by an unsigned local package test.
 
 The authentication integration preserves the corrected desktop origin and OAuth contract:
 FastAPI CORS allows `glidelingo://app`, packaged Electron uses the system browser for OAuth, and
@@ -129,4 +152,4 @@ to the configured Clerk origin, and mock billing is rejected by release validati
 
 ## Credential rotation and failure behavior
 
-Replace the affected GitHub secret when a certificate or app-specific password is revoked, expires, or may have been exposed. Do not weaken the workflow to ship an unsigned or unnotarized build. A failed client release is corrected by incrementing the desktop version and publishing a new forward release; already downloaded desktop binaries are not silently replaced.
+Replace the affected GitHub secret when a certificate or app-specific password is revoked, expires, or may have been exposed. Do not weaken the workflow to ship an unsigned or unnotarized build. A failed client release is corrected by incrementing the desktop version and publishing a new forward release; installed clients update only after explicit user confirmation.

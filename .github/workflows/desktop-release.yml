@@ -59,6 +59,7 @@ jobs:
           GLIDELINGO_RELEASE_COMMIT: ${{ steps.selection.outputs.commit_sha }}
         run: git checkout --detach "$GLIDELINGO_RELEASE_COMMIT"
       - run: npm ci
+      - run: npm ci --prefix desktop
       - run: npm run verify
 
   sign:
@@ -89,6 +90,7 @@ jobs:
           git fetch --force origin main:refs/remotes/origin/main --tags
           node desktop/release-workflow.cjs validate-selection
       - run: npm ci
+      - run: npm ci --prefix desktop
       - name: Build signed and notarized universal app
         env:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -119,7 +121,10 @@ jobs:
           name: GlideLingo-macOS-${{ needs.validate.outputs.commit_sha }}
           path: |
             release/GlideLingo-${{ needs.validate.outputs.version }}-universal.dmg
+            release/GlideLingo-${{ needs.validate.outputs.version }}-universal.dmg.blockmap
             release/GlideLingo-${{ needs.validate.outputs.version }}-universal.zip
+            release/GlideLingo-${{ needs.validate.outputs.version }}-universal.zip.blockmap
+            release/latest-mac.yml
             release/SHA256SUMS.txt
           if-no-files-found: error
       - name: Converge the GitHub release to an exact draft

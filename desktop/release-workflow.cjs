@@ -95,8 +95,18 @@ function resolveReleaseSelection(input, git = createGitAdapter()) {
 function expectedReleaseAssetNames(desktopVersion = version) {
   return [
     `GlideLingo-${desktopVersion}-universal.dmg`,
+    `GlideLingo-${desktopVersion}-universal.dmg.blockmap`,
     `GlideLingo-${desktopVersion}-universal.zip`,
+    `GlideLingo-${desktopVersion}-universal.zip.blockmap`,
+    'latest-mac.yml',
     'SHA256SUMS.txt',
+  ];
+}
+
+function distributableAssetNames(desktopVersion = version) {
+  return [
+    `GlideLingo-${desktopVersion}-universal.dmg`,
+    `GlideLingo-${desktopVersion}-universal.zip`,
   ];
 }
 
@@ -104,10 +114,14 @@ function sha256(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
+function sha512(filePath) {
+  return crypto.createHash('sha512').update(fs.readFileSync(filePath)).digest('base64');
+}
+
 function writeChecksums(releaseDirectory, desktopVersion = version) {
   const directory = path.resolve(releaseDirectory);
-  const [dmgName, zipName, manifestName] = expectedReleaseAssetNames(desktopVersion);
-  const distributables = [dmgName, zipName];
+  const distributables = distributableAssetNames(desktopVersion);
+  const manifestName = 'SHA256SUMS.txt';
 
   for (const name of distributables) {
     const filePath = path.join(directory, name);
@@ -141,6 +155,8 @@ function inspectLocalAssets(releaseDirectory, desktopVersion = version) {
         entry.isFile() &&
         (entry.name.endsWith('.dmg') ||
           entry.name.endsWith('.zip') ||
+          entry.name.endsWith('.blockmap') ||
+          entry.name === 'latest-mac.yml' ||
           entry.name === 'SHA256SUMS.txt'),
     )
     .map((entry) => entry.name)
@@ -158,7 +174,10 @@ function inspectLocalAssets(releaseDirectory, desktopVersion = version) {
   });
 
   const expectedChecksums = new Map(
-    expectedNames.slice(0, 2).map((name) => [name, sha256(path.join(directory, name))]),
+    distributableAssetNames(desktopVersion).map((name) => [
+      name,
+      sha256(path.join(directory, name)),
+    ]),
   );
   const manifestLines = fs
     .readFileSync(path.join(directory, 'SHA256SUMS.txt'), 'utf8')
@@ -179,6 +198,47 @@ function inspectLocalAssets(releaseDirectory, desktopVersion = version) {
       throw new Error(`SHA256SUMS.txt does not match ${match[2]}.`);
     }
     seen.add(match[2]);
+  }
+
+  const updateManifest = fs.readFileSync(path.join(directory, 'latest-mac.yml'), 'utf8');
+  const versionMatch = /^version:\s*([^\s]+)$/m.exec(updateManifest);
+  const updateUrls = [...updateManifest.matchAll(/^\s*- url:\s*([^\s]+)$/gm)].map(
+    (match) => match[1],
+  );
+  const primaryPath = /^path:\s*([^\s]+)$/m.exec(updateManifest)?.[1];
+  const primarySha512 = /^sha512:\s*([^\s]+)$/m.exec(updateManifest)?.[1];
+  const updateFiles = new Map(
+    [...updateManifest.matchAll(
+      /^\s*- url:\s*([^\s]+)\s*\n\s+sha512:\s*([^\s]+)\s*\n\s+size:\s*([0-9]+)\s*$/gm,
+    )].map((match) => [
+      match[1],
+      { sha512: match[2], size: Number.parseInt(match[3], 10) },
+    ]),
+  );
+  const distributables = distributableAssetNames(desktopVersion);
+
+  if (versionMatch?.[1] !== desktopVersion) {
+    throw new Error('latest-mac.yml must match the packaged desktop version.');
+  }
+  assertExactNames(updateUrls, distributables);
+  if (primaryPath !== distributables[1]) {
+    throw new Error('latest-mac.yml must select the universal ZIP as its primary update.');
+  }
+  if (updateFiles.size !== distributables.length) {
+    throw new Error('latest-mac.yml must contain SHA-512 and size metadata for each update.');
+  }
+
+  for (const name of distributables) {
+    const metadata = updateFiles.get(name);
+    const filePath = path.join(directory, name);
+    const expectedSha512 = sha512(filePath);
+    const expectedSize = fs.statSync(filePath).size;
+    if (metadata?.sha512 !== expectedSha512 || metadata?.size !== expectedSize) {
+      throw new Error(`latest-mac.yml metadata does not match ${name}.`);
+    }
+  }
+  if (primarySha512 !== updateFiles.get(distributables[1])?.sha512) {
+    throw new Error('latest-mac.yml primary SHA-512 must match the universal ZIP.');
   }
 
   return assets;

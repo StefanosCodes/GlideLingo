@@ -9,6 +9,8 @@ on:
       - content/**
       - .dockerignore
       - .github/workflows/deploy-development-api.yml
+      - infra/gcp/scripts/read-revenuecat-deploy-flag.sh
+      - infra/gcp/scripts/resolve-revenuecat-deploy-flag.sh
 
 permissions:
   contents: read
@@ -88,12 +90,27 @@ jobs:
             '[.status.traffic[]? | select((.percent // 0) == 100)] | if length == 1 then (.[0].revisionName // "") else "" end' \
             <<< "${service_json}")"
           service_url="$(jq -r '.status.url // empty' <<< "${service_json}")"
+          template_revenuecat_raw="$(./infra/gcp/scripts/read-revenuecat-deploy-flag.sh \
+            service <<< "${service_json}")"
 
           if [[ ! "${initial_generation}" =~ ^[1-9][0-9]*$ \
             || "${initial_observed_generation}" != "${initial_generation}" \
             || -z "${previous_revision}" \
             || -z "${service_url}" ]]; then
             echo "The Cloud Run service must be stable with exactly one resolved revision serving 100% before deployment." >&2
+            exit 1
+          fi
+
+          previous_revision_json="$(gcloud run revisions describe "${previous_revision}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --format=json)"
+          previous_revenuecat_raw="$(./infra/gcp/scripts/read-revenuecat-deploy-flag.sh \
+            revision <<< "${previous_revision_json}")"
+          if ! resolved_revenuecat_flag="$(./infra/gcp/scripts/resolve-revenuecat-deploy-flag.sh \
+            "${previous_revenuecat_raw}" \
+            "${template_revenuecat_raw}")"; then
+            echo "Refusing deployment because the previous revision and current template are not a permitted RevenueCat deploy state." >&2
             exit 1
           fi
 
@@ -134,7 +151,7 @@ jobs:
             --project="${GCP_PROJECT_ID}" \
             --region="${GCP_REGION}" \
             --image="${{ steps.image.outputs.uri }}" \
-            --update-env-vars="^@^GLIDELINGO_CLERK_ISSUER=${CLERK_ISSUER}@GLIDELINGO_CLERK_JWKS_URL=${CLERK_JWKS_URL}@GLIDELINGO_CLERK_AUTHORIZED_PARTIES=${CLERK_AUTHORIZED_PARTIES}" \
+            --update-env-vars="^@^GLIDELINGO_CLERK_ISSUER=${CLERK_ISSUER}@GLIDELINGO_CLERK_JWKS_URL=${CLERK_JWKS_URL}@GLIDELINGO_CLERK_AUTHORIZED_PARTIES=${CLERK_AUTHORIZED_PARTIES}@GLIDELINGO_REVENUECAT_ENABLED=${resolved_revenuecat_flag}" \
             --no-traffic \
             --tag="${candidate_tag}" \
             --quiet
@@ -166,31 +183,14 @@ jobs:
             exit 1
           fi
 
-          previous_revision_json="$(gcloud run revisions describe "${previous_revision}" \
-            --project="${GCP_PROJECT_ID}" \
-            --region="${GCP_REGION}" \
-            --format=json)"
           candidate_revision_json="$(gcloud run revisions describe "${candidate_revision}" \
             --project="${GCP_PROJECT_ID}" \
             --region="${GCP_REGION}" \
             --format=json)"
-          previous_revenuecat_raw="$(jq -r \
-            '[.spec.containers[0].env[]? | select(.name == "GLIDELINGO_REVENUECAT_ENABLED")] | if length == 1 then (.[0].value // "") else "" end' \
-            <<< "${previous_revision_json}")"
-          candidate_revenuecat_raw="$(jq -r \
-            '[.spec.containers[0].env[]? | select(.name == "GLIDELINGO_REVENUECAT_ENABLED")] | if length == 1 then (.[0].value // "") else "" end' \
-            <<< "${candidate_revision_json}")"
-          if [[ "${previous_revenuecat_raw}" != "true" && "${previous_revenuecat_raw}" != "false" ]]; then
-            echo "Refusing deployment because the 100%-serving revision must explicitly set GLIDELINGO_REVENUECAT_ENABLED to literal true or false." >&2
-            exit 1
-          fi
-          if [[ "${candidate_revenuecat_raw}" != "true" && "${candidate_revenuecat_raw}" != "false" ]]; then
-            echo "Refusing deployment because the candidate revision must explicitly set GLIDELINGO_REVENUECAT_ENABLED to literal true or false." >&2
-            exit 1
-          fi
-          if [[ "${previous_revenuecat_raw}" != "${candidate_revenuecat_raw}" ]]; then
-            echo "Refusing ordinary deployment because the 100%-serving revision and candidate have different RevenueCat activation states." >&2
-            echo "Use ./infra/gcp/scripts/activate-revenuecat-development.sh for the reviewed billing activation procedure." >&2
+          candidate_revenuecat_raw="$(./infra/gcp/scripts/read-revenuecat-deploy-flag.sh \
+            revision <<< "${candidate_revision_json}")"
+          if [[ "${candidate_revenuecat_raw}" != "${resolved_revenuecat_flag}" ]]; then
+            echo "Refusing deployment because the candidate revision did not explicitly preserve the resolved RevenueCat activation state." >&2
             exit 1
           fi
 
@@ -212,9 +212,8 @@ jobs:
           prepromotion_candidate_revision="$(jq -r '.revisionName // empty' <<< "${prepromotion_candidate_traffic}")"
           prepromotion_candidate_url="$(jq -r '.url // empty' <<< "${prepromotion_candidate_traffic}")"
           prepromotion_candidate_percent="$(jq -r '.percent // 0' <<< "${prepromotion_candidate_traffic}")"
-          prepromotion_revenuecat_raw="$(jq -r \
-            '[(.spec.template.spec.containers[0].env // .spec.template.containers[0].env // [])[]? | select(.name == "GLIDELINGO_REVENUECAT_ENABLED")] | if length == 1 then (.[0].value // "") else "" end' \
-            <<< "${prepromotion_json}")"
+          prepromotion_revenuecat_raw="$(./infra/gcp/scripts/read-revenuecat-deploy-flag.sh \
+            service <<< "${prepromotion_json}")"
 
           if [[ "${prepromotion_revenuecat_raw}" != "true" && "${prepromotion_revenuecat_raw}" != "false" ]]; then
             echo "Refusing promotion because the current service template has no exact literal true/false RevenueCat activation state." >&2
@@ -227,7 +226,7 @@ jobs:
             || "${prepromotion_candidate_revision}" != "${candidate_revision}" \
             || "${prepromotion_candidate_url}" != "${candidate_url}" \
             || "${prepromotion_candidate_percent}" != "0" \
-            || "${prepromotion_revenuecat_raw}" != "${candidate_revenuecat_raw}" ]]; then
+            || "${prepromotion_revenuecat_raw}" != "${resolved_revenuecat_flag}" ]]; then
             echo "Refusing promotion because Cloud Run generation, traffic, candidate tag, URL, or RevenueCat state drifted after staging." >&2
             exit 1
           fi

@@ -196,9 +196,15 @@ Traffic and billing-state transitions are deliberately separated from Terraform.
 the API service's container image and `traffic` fields; GitHub Actions owns normal image promotion,
 and the interactive activation script owns the one-time disabled-to-enabled RevenueCat transition.
 An ordinary API deployment reads `GLIDELINGO_REVENUECAT_ENABLED` from the exact revision currently
-serving 100% and from its zero-traffic candidate. Both values must be exact literal `true` or `false`,
-and the workflow refuses promotion when they differ. It directs the operator to the activation script
-instead, so a routine image release cannot silently bypass the positive billing gate.
+serving 100% and from the current service template before it creates a candidate. For the one-time
+pre-RevenueCat bootstrap only, a missing previous-revision flag may resolve to literal `false` when
+the template is also missing or already literal `false`. This also recovers an interrupted bootstrap
+whose zero-traffic candidate made the template false without moving live traffic. In steady state,
+the previous revision and template must contain the same exact literal `true` or `false`. Every
+malformed value, conflict, or missing/enabled combination fails before deployment. The workflow passes
+the resolved literal explicitly to `gcloud`, requires the candidate and pre-promotion template to
+match it, and directs real activation changes to the reviewed activation script. A routine image
+release therefore cannot silently cross the billing gate.
 
 Do not intentionally run this activation and the normal API deployment workflow concurrently. Both
 paths record the stable Cloud Run generation, require their single staging operation to create exactly
@@ -346,8 +352,8 @@ The workflow:
 2. builds the production container;
 3. pushes a commit-addressed image to Artifact Registry;
 4. deploys that immutable image as a zero-traffic tagged candidate;
-5. refuses promotion if the exact live and candidate revisions have different normalized RevenueCat
-   activation states;
+5. resolves only the bounded legacy-disabled bootstrap or an exact steady RevenueCat state, passes
+   that literal explicitly to the candidate, and rejects every other state or later drift;
 6. verifies the candidate's `/health/live` and `/health/ready` endpoints;
 7. promotes the verified revision to 100% traffic and rolls back if the canonical smoke fails.
 

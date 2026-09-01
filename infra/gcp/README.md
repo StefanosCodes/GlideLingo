@@ -153,10 +153,14 @@ those four containers, and Cloud Run mounts only the immutable versions named in
 `revenuecat_secret_versions`; `latest` is never used.
 
 Keep the integration disabled while staging all four versions. The `api_key` value is the least-
-privileged app public SDK key accepted by RevenueCat's read-only v1 Customer Info endpoint (`test_...`
-for Test Store sandbox or `rcb_...` for desktop production), never a project-wide `sk_...` key. Add
-the other three high-entropy values out of band so they never enter Terraform state, committed
-tfvars, shell history, or CI logs.
+privileged app public SDK key accepted by RevenueCat's read-only v1 Customer Info endpoint. Use a
+`test_...` key only when both client and server exercise RevenueCat Test Store. For real desktop
+Stripe-sandbox acceptance, use the Web public SDK key from the dedicated RevenueCat Billing
+configuration connected to that Stripe sandbox (currently expected to start with `rcb_...`), and
+configure the renderer with the exact same key. Production requires a separate Billing configuration
+connected to live Stripe and its matching Web public SDK key. Never supply a project-wide `sk_...`
+key. Add the other three high-entropy values out of band so they never enter Terraform state,
+committed tfvars, shell history, or CI logs.
 
 Before changing `revenuecat_enabled` to `true`, independently verify:
 

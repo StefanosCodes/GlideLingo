@@ -38,32 +38,39 @@ EXPO_PUBLIC_ENABLE_MOCK_BILLING=true # development only
 ```
 
 Web/Electron prefers an explicit `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY` even in development, which makes local desktop builds
-exercise the real RevenueCat Billing checkout. When the web key is absent, the Test Store key is a local-development
-fallback only. Native development continues to prefer the Test Store key. Mock access requires both a development bundle
-and the explicit `EXPO_PUBLIC_ENABLE_MOCK_BILLING=true` opt-in. A release build with no platform key fails closed and
-exposes no mock package or Pro state. Never expose a RevenueCat secret API key through `EXPO_PUBLIC_*`.
+exercise the RevenueCat Billing configuration that issued that key. For Stripe-sandbox acceptance, use the Web public SDK
+key from a dedicated RevenueCat Billing configuration connected to the intended Stripe sandbox (currently expected to
+start with `rcb_...`). When the web key is absent, the Test Store `test_...` key is a local-development fallback only; it
+does not exercise RevenueCat Billing or Stripe. Native development continues to prefer the Test Store key. Mock access
+requires both a development bundle and the explicit `EXPO_PUBLIC_ENABLE_MOCK_BILLING=true` opt-in. A release build with no
+platform key fails closed and exposes no mock package or Pro state. Never expose a RevenueCat secret API key through
+`EXPO_PUBLIC_*`.
 
 The signed desktop workflow receives `GLIDELINGO_REVENUECAT_WEB_API_KEY` in its protected GitHub environment and exports
-it to the renderer as `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY`. For local work, put the public `rcb_...` key in the ignored
-root `.env`. Never expose Stripe credentials, project-wide RevenueCat secret keys, or webhook credentials through an
-`EXPO_PUBLIC_` variable.
+it to the renderer as `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY`. For local Stripe-sandbox work, put the matching Billing Web
+public SDK key in the ignored root `.env`. Never expose Stripe credentials, project-wide RevenueCat secret keys, or
+webhook credentials through an `EXPO_PUBLIC_` variable.
 
 ## RevenueCat dashboard setup
 
 1. Create the entitlement with the exact identifier `pro`.
-2. Under **Web**, create a **RevenueCat Billing** app/config and connect the intended Stripe account or sandbox as its
-   payment gateway. Follow RevenueCat's [Web SDK setup](https://www.revenuecat.com/docs/web/web-billing/web-sdk).
+2. Under **Web**, create a dedicated **RevenueCat Billing** app/config for sandbox acceptance and connect the intended
+   Stripe sandbox as its payment gateway. Do not substitute a RevenueCat Test Store configuration. Follow RevenueCat's
+   [Web SDK setup](https://www.revenuecat.com/docs/web/web-billing/web-sdk).
 3. Create one recurring monthly product and one recurring annual product for Web. Prices, currencies, tax behavior, trials,
    and customer-facing names remain dashboard-owned.
 4. Attach both products to `pro`, then add them to the current offering using RevenueCat's predefined Monthly and Annual
    package types. The client uses package type rather than hard-coded product IDs.
 5. Enable and brand the RevenueCat Billing customer portal. Confirm an active web subscription returns a secure
    `managementURL`; see [Customer Portal](https://www.revenuecat.com/docs/web/web-billing/customer-portal).
-6. Copy the Web **public SDK key** (`rcb_...`) into `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY` locally and
-   `GLIDELINGO_REVENUECAT_WEB_API_KEY` in the protected desktop release environment. Restart Metro after local env changes.
+6. Copy that configuration's Web **public SDK key** (currently expected to start with `rcb_...`) into
+   `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY` locally and `GLIDELINGO_REVENUECAT_WEB_API_KEY` in the protected desktop release
+   environment. Configure the server's `GLIDELINGO_REVENUECAT_API_KEY` with the exact same key so checkout and entitlement
+   reconciliation address the same RevenueCat Billing configuration. Restart Metro after local env changes.
 7. Sign in through Clerk, open `/subscription`, and verify the exact stable Clerk `userId` appears as the RevenueCat App
    User ID. Never use email or phone number as the App User ID.
-8. Exercise the acceptance matrix below in RevenueCat Billing's Stripe test/sandbox mode before using live mode.
+8. Exercise the acceptance matrix below through that RevenueCat Billing configuration and its connected Stripe sandbox
+   before using live mode.
 9. Set RevenueCat restore behavior to **Keep with original App User ID** so restoring one store account cannot transfer a
    subscription between different Clerk accounts.
 
@@ -74,7 +81,8 @@ or Stripe behavior.
 
 ## Desktop acceptance matrix
 
-Run these against a development Electron build using the `rcb_...` key and Stripe test/sandbox payment methods:
+Run these against a development Electron build using the dedicated sandbox Billing configuration's Web public SDK key
+(currently expected to start with `rcb_...`) in both renderer and server, plus Stripe sandbox payment methods:
 
 | Scenario | Required evidence |
 | --- | --- |
@@ -123,11 +131,16 @@ GLIDELINGO_REVENUECAT_WEBHOOK_SIGNING_SECRET=
 ```
 
 `GLIDELINGO_REVENUECAT_API_KEY` is deliberately the app public SDK key used with RevenueCat's read-only
-`GET /v1/subscribers/{app_user_id}` Customer Info endpoint: use the Test Store `test_...` key in sandbox and the
-RevenueCat Billing `rcb_...` key for the desktop production environment. Do not generate or supply a project-wide
-`sk_...` secret key; those keys can perform restricted write operations the entitlement verifier does not need. The
-backend keeps this value in server configuration to maintain one deployment contract, while the matching public key may
-also be present in the appropriate client build.
+`GET /v1/subscribers/{app_user_id}` Customer Info endpoint. The value must identify the same RevenueCat configuration as
+the client key for the environment being exercised: use `test_...` only when both sides use RevenueCat Test Store, or use
+the dedicated Stripe-sandbox Billing configuration's Web public SDK key (currently expected to start with `rcb_...`) in
+both `GLIDELINGO_REVENUECAT_API_KEY` and `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY` for real desktop sandbox acceptance. Do not
+generate or supply a project-wide `sk_...` secret key; those keys can perform restricted write operations the entitlement
+verifier does not need. The backend keeps the public key in server configuration to maintain one deployment contract.
+
+Production must use a separate RevenueCat Billing configuration connected to the live Stripe environment. Configure the
+renderer and server with that production configuration's matching Web public SDK key; never reuse the sandbox Billing
+configuration or infer the correct configuration from a key prefix alone.
 
 Create separate sandbox and production webhook integrations in RevenueCat. Set the dashboard
 Authorization value to exactly `GLIDELINGO_REVENUECAT_WEBHOOK_AUTHORIZATION`, enable RevenueCat HMAC

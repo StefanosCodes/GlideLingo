@@ -5,6 +5,33 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=activate-revenuecat-development.sh
 source "${script_dir}/activate-revenuecat-development.sh"
 
+tfvars_file="${script_dir}/../environments/development/revenuecat.auto.tfvars.json"
+if ! jq -e '
+  . as $root
+  | ($root.revenuecat_secret_versions | [.[]]) as $versions
+  | ($root | type) == "object"
+    and ($root | keys) == ["revenuecat_enabled", "revenuecat_secret_versions"]
+    and ($root.revenuecat_enabled | type) == "boolean"
+    and ($root.revenuecat_secret_versions | type) == "object"
+    and ($root.revenuecat_secret_versions | keys) == [
+      "api_key",
+      "pseudonym_key",
+      "webhook_authorization",
+      "webhook_signing_secret"
+    ]
+    and (
+      all($versions[]; . == null)
+      or all($versions[]; type == "string" and test("^[1-9][0-9]*$"))
+    )
+    and (
+      ($root.revenuecat_enabled | not)
+      or all($versions[]; type == "string" and test("^[1-9][0-9]*$"))
+    )
+' "${tfvars_file}" >/dev/null; then
+  echo "RevenueCat auto tfvars must contain only the complete disabled/null or complete pinned-version contract." >&2
+  exit 1
+fi
+
 valid_v1_fixture='{
   "spec": {
     "template": {
@@ -98,4 +125,4 @@ wrong_secret_fixture="$(jq '
 ' <<< "${valid_v1_fixture}")"
 expect_rejected wrong-secret "${wrong_secret_fixture}"
 
-echo "RevenueCat immutable secret-ref fixtures passed."
+echo "RevenueCat durable-config and immutable secret-ref fixtures passed."

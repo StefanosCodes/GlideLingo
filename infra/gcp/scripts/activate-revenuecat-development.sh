@@ -460,8 +460,9 @@ candidate_tag=""
 
 echo "RevenueCat development activation succeeded on revision ${candidate_revision}." >&2
 echo "Next required reconciliation (not run automatically):" >&2
-echo "  Run a Terraform plan with revenuecat_enabled=true and all four exact pinned revenuecat_secret_versions." >&2
-echo "  Require that the plan contains no Cloud Run template or traffic change before applying the durable configuration." >&2
+echo "  In a reviewed update to infra/gcp/environments/development/revenuecat.auto.tfvars.json," >&2
+echo "  change only revenuecat_enabled from false to true and retain the four exact pinned versions." >&2
+echo "  Run Terraform plan and require no Cloud Run template or traffic change before applying it." >&2
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

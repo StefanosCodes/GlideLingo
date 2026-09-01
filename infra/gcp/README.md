@@ -162,6 +162,12 @@ connected to live Stripe and its matching Web public SDK key. Never supply a pro
 key. Add the other three high-entropy values out of band so they never enter Terraform state,
 committed tfvars, shell history, or CI logs.
 
+`infra/gcp/environments/development/revenuecat.auto.tfvars.json` is the committed, automatically
+loaded desired-state contract for activation. It contains only the boolean activation flag and
+non-secret Secret Manager version selectors. Secret bytes—including the API key, pseudonym key,
+webhook Authorization value, and webhook signing secret—must never be written to that file. Its
+checked-in baseline is disabled with all four selectors explicitly `null`.
+
 Before changing `revenuecat_enabled` to `true`, independently verify:
 
 1. `backend/migrations/002_revenuecat_entitlements.sql` is applied and the runtime grants are exact.
@@ -191,13 +197,17 @@ serving 100% and from its zero-traffic candidate. It refuses promotion when thos
 differ and directs the operator to the activation script. Therefore a routine image release cannot
 silently bypass the positive billing gate.
 
-Before running the script, keep the 100%-serving revision and current service template explicitly
-disabled and complete all five gates above. In particular, retain operator evidence from a positive
-RevenueCat dashboard test webhook signed with the configured sandbox HMAC secret and accepted at the
-documented webhook URL. The activation script does not fetch, generate, display, or test provider
-webhook credentials; that signed dashboard result is a separate prerequisite. Also confirm that the
-Clerk user used for the smoke test currently has an active `pro` entitlement in the `SANDBOX`
-RevenueCat environment.
+Before running the script, submit a reviewed change to
+`infra/gcp/environments/development/revenuecat.auto.tfvars.json` that replaces all four `null`
+selectors with their exact positive Secret Manager version strings while leaving
+`revenuecat_enabled` false. Merge and apply that disabled configuration, then verify the service
+template exposes those exact immutable refs without moving traffic. Keep the 100%-serving revision
+and current service template explicitly disabled and complete all five gates above. In particular,
+retain operator evidence from a positive RevenueCat dashboard test webhook signed with the configured
+sandbox HMAC secret and accepted at the documented webhook URL. The activation script does not fetch,
+generate, display, or test provider webhook credentials; that signed dashboard result is a separate
+prerequisite. Also confirm that the Clerk user used for the smoke test currently has an active `pro`
+entitlement in the `SANDBOX` RevenueCat environment.
 
 Authenticate `gcloud`, select the exact development project, obtain a freshly issued short-lived
 Clerk session token for that test user, and run from an interactive terminal at the repository root:
@@ -228,13 +238,13 @@ a warning, immediately inspect Cloud Run and manually route the recorded previou
 before making another deployment. The script never changes secret versions and never performs a
 Terraform apply.
 
-After successful promotion, reconcile the durable desired state. Run a Terraform plan with
-`revenuecat_enabled=true`, `revenuecat_environment="SANDBOX"`, and the same four exact positive
-`revenuecat_secret_versions` already mounted on the candidate. Because this repository does not yet
-define a durable non-secret tfvars contract for those site-specific values, the activation script
-prints this required follow-up but does not construct or run the command. Review the plan and require
-that it proposes no Cloud Run template or traffic change before applying it. Do not leave the live
-enabled service dependent on console or script drift from Terraform's declared billing state.
+After successful promotion, submit a second reviewed update to
+`infra/gcp/environments/development/revenuecat.auto.tfvars.json` that changes only
+`revenuecat_enabled` from false to true and retains the same four exact positive version strings. Run
+Terraform plan and require that it proposes no Cloud Run template or traffic change before applying
+the now-durable enabled configuration. The activation script prints this exact follow-up but never
+edits the file or runs Terraform. Do not use ad hoc `-var` flags for this transition, and do not leave
+the live enabled service dependent on script drift from Terraform's declared billing state.
 
 ## Private tutor activation gates
 

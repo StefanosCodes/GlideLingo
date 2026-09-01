@@ -45,7 +45,8 @@ exposes no mock package or Pro state. Never expose a RevenueCat secret API key t
 
 The signed desktop workflow receives `GLIDELINGO_REVENUECAT_WEB_API_KEY` in its protected GitHub environment and exports
 it to the renderer as `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY`. For local work, put the public `rcb_...` key in the ignored
-root `.env`. Do not put Stripe credentials, RevenueCat secret keys, or RevenueCat v1/v2 REST authorization keys there.
+root `.env`. Never expose Stripe credentials, project-wide RevenueCat secret keys, or webhook credentials through an
+`EXPO_PUBLIC_` variable.
 
 ## RevenueCat dashboard setup
 
@@ -120,6 +121,13 @@ GLIDELINGO_REVENUECAT_PSEUDONYM_KEY=
 GLIDELINGO_REVENUECAT_WEBHOOK_AUTHORIZATION=
 GLIDELINGO_REVENUECAT_WEBHOOK_SIGNING_SECRET=
 ```
+
+`GLIDELINGO_REVENUECAT_API_KEY` is deliberately the app public SDK key used with RevenueCat's read-only
+`GET /v1/subscribers/{app_user_id}` Customer Info endpoint: use the Test Store `test_...` key in sandbox and the
+RevenueCat Billing `rcb_...` key for the desktop production environment. Do not generate or supply a project-wide
+`sk_...` secret key; those keys can perform restricted write operations the entitlement verifier does not need. The
+backend keeps this value in server configuration to maintain one deployment contract, while the matching public key may
+also be present in the appropriate client build.
 
 Create separate sandbox and production webhook integrations in RevenueCat. Set the dashboard
 Authorization value to exactly `GLIDELINGO_REVENUECAT_WEBHOOK_AUTHORIZATION`, enable RevenueCat HMAC

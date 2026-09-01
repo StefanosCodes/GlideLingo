@@ -104,5 +104,5 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
 - The repository contains the clients, a public FastAPI/Cloud SQL API, verified Clerk session authentication, internal diagnostics, and a dormant authenticated lesson-tutor gateway.
 - `services/lesson-tutor` owns the IAM-private OpenAI runtime. Both server flags and the client flag default off; do not enable them until the activation gates in `infra/gcp/README.md` pass.
 - `backend/migrations/001_lesson_tutor_guard.sql` is a reviewed operator-run guard migration. It is not executed at application startup, and the public runtime must never receive DDL or retention `DELETE` privileges.
-- Server-owned RevenueCat entitlement authorization, recurring tutor retention, graded agent-evaluation thresholds, workers, and a separate production GCP environment are not implemented yet.
+- Server-owned RevenueCat entitlement authorization is implemented but disabled until its migration, version-pinned secrets, signed webhooks, and sandbox acceptance gates pass. Recurring tutor retention, graded agent-evaluation thresholds, workers, and a separate production GCP environment are not implemented yet.
 - Use API port `8123` and loopback-bound PostgreSQL port `55433` unless an explicit local override is documented. Check port ownership before stopping any process.

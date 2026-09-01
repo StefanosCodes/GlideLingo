@@ -197,6 +197,12 @@ class Settings(BaseSettings):
         for name, secret, minimum_length in required_secrets:
             if secret is None or len(secret.get_secret_value().encode()) < minimum_length:
                 raise ValueError(f"{name} must be at least {minimum_length} bytes when enabled")
+        assert self.revenuecat_api_key is not None
+        if self.revenuecat_api_key.get_secret_value().startswith("sk_"):
+            raise ValueError(
+                "RevenueCat API key must be an app public SDK key for the read-only "
+                "Customer Info endpoint, not a project secret key"
+            )
         return self
 
     @property

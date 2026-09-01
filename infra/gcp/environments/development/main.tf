@@ -3,6 +3,24 @@ locals {
   github_repository_id    = "1352030189"
   github_owner_id         = "309610265"
   database_password_epoch = 2
+  revenuecat_secrets = {
+    api_key = {
+      secret_id = "glidelingo-revenuecat-api-key"
+      env_name  = "GLIDELINGO_REVENUECAT_API_KEY"
+    }
+    pseudonym_key = {
+      secret_id = "glidelingo-revenuecat-pseudonym-key"
+      env_name  = "GLIDELINGO_REVENUECAT_PSEUDONYM_KEY"
+    }
+    webhook_authorization = {
+      secret_id = "glidelingo-revenuecat-webhook-authorization"
+      env_name  = "GLIDELINGO_REVENUECAT_WEBHOOK_AUTHORIZATION"
+    }
+    webhook_signing_secret = {
+      secret_id = "glidelingo-revenuecat-webhook-signing-secret"
+      env_name  = "GLIDELINGO_REVENUECAT_WEBHOOK_SIGNING_SECRET"
+    }
+  }
   labels = {
     application = "glidelingo"
     environment = "development"
@@ -231,6 +249,22 @@ resource "google_secret_manager_secret" "tutor_openai_key" {
   depends_on = [google_project_service.required]
 }
 
+resource "google_secret_manager_secret" "revenuecat" {
+  for_each = local.revenuecat_secrets
+
+  project   = var.project_id
+  secret_id = each.value.secret_id
+  labels    = local.labels
+
+  replication {
+    user_managed {
+      replicas { location = var.region }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
 resource "google_secret_manager_secret_iam_binding" "api_pseudonym_key" {
   project   = var.project_id
   secret_id = google_secret_manager_secret.tutor_pseudonym_key.secret_id
@@ -243,6 +277,15 @@ resource "google_secret_manager_secret_iam_binding" "tutor_openai_key" {
   secret_id = google_secret_manager_secret.tutor_openai_key.secret_id
   role      = "roles/secretmanager.secretAccessor"
   members   = ["serviceAccount:${google_service_account.tutor_runtime.email}"]
+}
+
+resource "google_secret_manager_secret_iam_member" "api_revenuecat" {
+  for_each = google_secret_manager_secret.revenuecat
+
+  project   = var.project_id
+  secret_id = each.value.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.api_runtime.email}"
 }
 
 resource "google_cloud_run_v2_service" "api" {
@@ -341,6 +384,34 @@ resource "google_cloud_run_v2_service" "api" {
       }
 
       env {
+        name  = "GLIDELINGO_REVENUECAT_ENABLED"
+        value = tostring(var.revenuecat_enabled)
+      }
+
+      env {
+        name  = "GLIDELINGO_REVENUECAT_ENVIRONMENT"
+        value = var.revenuecat_environment
+      }
+
+      dynamic "env" {
+        for_each = {
+          for key, spec in local.revenuecat_secrets : key => {
+            env_name = spec.env_name
+            version  = var.revenuecat_secret_versions[key]
+          } if var.revenuecat_secret_versions[key] != null
+        }
+        content {
+          name = env.value.env_name
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.revenuecat[env.key].secret_id
+              version = env.value.version
+            }
+          }
+        }
+      }
+
+      env {
         name  = "GLIDELINGO_DATABASE_POOL_SIZE"
         value = "3"
       }
@@ -400,6 +471,7 @@ resource "google_cloud_run_v2_service" "api" {
 
   depends_on = [
     google_project_iam_member.api_cloud_sql_client,
+    google_secret_manager_secret_iam_member.api_revenuecat,
     google_secret_manager_secret_iam_binding.api_pseudonym_key,
     google_secret_manager_secret_iam_member.api_database_url,
     google_secret_manager_secret_version.database_url,
@@ -416,6 +488,13 @@ resource "google_cloud_run_v2_service" "api" {
         length(var.clerk_jwks_url) > 0
       )
       error_message = "The public tutor gateway requires the private service, pseudonym key, and complete Clerk configuration."
+    }
+
+    precondition {
+      condition = !var.revenuecat_enabled || alltrue([
+        for key in keys(local.revenuecat_secrets) : var.revenuecat_secret_versions[key] != null
+      ])
+      error_message = "RevenueCat authorization requires immutable versions for every RevenueCat configuration value."
     }
   }
 }

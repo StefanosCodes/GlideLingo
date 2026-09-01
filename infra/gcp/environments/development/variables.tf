@@ -95,6 +95,42 @@ variable "clerk_authorized_parties" {
   }
 }
 
+variable "revenuecat_enabled" {
+  description = "Enable server-owned RevenueCat authorization only after every documented sandbox gate passes."
+  type        = bool
+  default     = false
+}
+
+variable "revenuecat_environment" {
+  description = "RevenueCat sandbox purchase environment accepted by the development entitlement boundary."
+  type        = string
+  default     = "SANDBOX"
+
+  validation {
+    condition     = var.revenuecat_environment == "SANDBOX"
+    error_message = "The development platform may only use the RevenueCat SANDBOX environment."
+  }
+}
+
+variable "revenuecat_secret_versions" {
+  description = "Immutable Secret Manager version numbers for RevenueCat configuration; null mounts no value."
+  type = object({
+    api_key                = optional(string)
+    pseudonym_key          = optional(string)
+    webhook_authorization  = optional(string)
+    webhook_signing_secret = optional(string)
+  })
+  default = {}
+
+  validation {
+    condition = alltrue([
+      for version in values(var.revenuecat_secret_versions) :
+      version == null || can(regex("^[1-9][0-9]*$", version))
+    ])
+    error_message = "RevenueCat secret versions must be immutable positive version numbers."
+  }
+}
+
 variable "lesson_tutor_enabled" {
   description = "Enable the public gateway only after every documented activation gate is satisfied."
   type        = bool

@@ -170,9 +170,13 @@ checked-in baseline is disabled with all four selectors explicitly `null`.
 
 Before changing `revenuecat_enabled` to `true`, independently verify:
 
-1. `backend/migrations/002_revenuecat_entitlements.sql` is applied and the runtime grants are exact.
-2. Daily bounded cleanup from `backend/migrations/maintenance_revenuecat_webhooks.sql` runs under a
-   separate delete-capable maintenance identity.
+1. `backend/migrations/002_revenuecat_entitlements.sql` and
+   `backend/migrations/003_revenuecat_webhook_maintenance.sql` are applied, the runtime grants are
+   exact, and the built-in `glidelingo_app` login no longer inherits `cloudsqlsuperuser`.
+2. Cloud SQL has both `cloudsql.enable_pg_cron=on` and `cron.database_name=glidelingo`. The named
+   `glidelingo-revenuecat-webhook-retention` job calls the bounded maintenance procedure hourly as the
+   passwordless `glidelingo_revenuecat_maintenance` role. Enabling these flags restarts the development
+   database once, so apply them together before activation.
 3. RevenueCat has a sandbox-only webhook pointing to
    `https://glidelingo-api-50843312405.us-west1.run.app/v1/billing/revenuecat/webhook`, with the exact
    Authorization value and HMAC signing enabled; the one-time signing secret is stored as its own
@@ -185,6 +189,53 @@ Before changing `revenuecat_enabled` to `true`, independently verify:
    reconcile, entitlement, and negative-auth checks before promotion. After promotion, a new real
    RevenueCat dashboard test must return `200` from the canonical webhook before provider delivery is
    considered accepted end to end.
+
+Apply the two database migrations and scheduling SQL through a short-lived built-in operator, never
+through `glidelingo_app`. Create that operator with the explicit `cloudsqlsuperuser` database role,
+use a local `PGPASSFILE` with mode `0600`, and run one `psql` process so `SET ROLE` remains active:
+
+```bash
+OPERATOR_USER=glidelingo_revenuecat_migrator
+gcloud sql users create "$OPERATOR_USER" \
+  --project=glidelingo-development \
+  --instance=glidelingo-development-db \
+  --type=BUILT_IN \
+  --database-roles=cloudsqlsuperuser
+gcloud sql users set-password "$OPERATOR_USER" \
+  --project=glidelingo-development \
+  --instance=glidelingo-development-db \
+  --prompt-for-password
+
+psql -X -h 127.0.0.1 -p 55433 -U "$OPERATOR_USER" -d glidelingo \
+  -v ON_ERROR_STOP=1 \
+  -c 'SET ROLE cloudsqlsuperuser' \
+  -c 'SET search_path = public' \
+  -c "SET statement_timeout = '30s'; SET lock_timeout = '5s'" \
+  -f backend/migrations/002_revenuecat_entitlements.sql \
+  -f backend/migrations/003_revenuecat_webhook_maintenance.sql \
+  -f infra/gcp/scripts/schedule-revenuecat-webhook-maintenance.sql
+```
+
+Before deleting the operator, prove both tables and the procedure are owned by
+`cloudsqlsuperuser`, the cron job is owned by `glidelingo_revenuecat_maintenance`, and the temporary
+operator owns no objects. Delete only that temporary login, then revoke all inherited database roles
+from the built-in API login with these explicit Cloud SQL operations:
+
+```bash
+gcloud sql users delete "$OPERATOR_USER" \
+  --project=glidelingo-development \
+  --instance=glidelingo-development-db
+
+gcloud sql users assign-roles glidelingo_app \
+  --project=glidelingo-development \
+  --instance=glidelingo-development-db \
+  --type=BUILT_IN \
+  --database-roles= \
+  --revoke-existing-roles
+```
+
+Reconnect as `glidelingo_app` and verify its exact grants and all negative capabilities before
+enabling billing.
 
 Terraform refuses an enabled configuration unless every version is pinned. For the development
 rollout, `revenuecat_environment` stays `SANDBOX`; production requires a separate future environment,

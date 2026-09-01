@@ -95,8 +95,18 @@ function resolveReleaseSelection(input, git = createGitAdapter()) {
 function expectedReleaseAssetNames(desktopVersion = version) {
   return [
     `GlideLingo-${desktopVersion}-universal.dmg`,
+    `GlideLingo-${desktopVersion}-universal.dmg.blockmap`,
     `GlideLingo-${desktopVersion}-universal.zip`,
+    `GlideLingo-${desktopVersion}-universal.zip.blockmap`,
+    'latest-mac.yml',
     'SHA256SUMS.txt',
+  ];
+}
+
+function distributableAssetNames(desktopVersion = version) {
+  return [
+    `GlideLingo-${desktopVersion}-universal.dmg`,
+    `GlideLingo-${desktopVersion}-universal.zip`,
   ];
 }
 
@@ -106,8 +116,8 @@ function sha256(filePath) {
 
 function writeChecksums(releaseDirectory, desktopVersion = version) {
   const directory = path.resolve(releaseDirectory);
-  const [dmgName, zipName, manifestName] = expectedReleaseAssetNames(desktopVersion);
-  const distributables = [dmgName, zipName];
+  const distributables = distributableAssetNames(desktopVersion);
+  const manifestName = 'SHA256SUMS.txt';
 
   for (const name of distributables) {
     const filePath = path.join(directory, name);
@@ -141,6 +151,8 @@ function inspectLocalAssets(releaseDirectory, desktopVersion = version) {
         entry.isFile() &&
         (entry.name.endsWith('.dmg') ||
           entry.name.endsWith('.zip') ||
+          entry.name.endsWith('.blockmap') ||
+          entry.name === 'latest-mac.yml' ||
           entry.name === 'SHA256SUMS.txt'),
     )
     .map((entry) => entry.name)
@@ -158,7 +170,10 @@ function inspectLocalAssets(releaseDirectory, desktopVersion = version) {
   });
 
   const expectedChecksums = new Map(
-    expectedNames.slice(0, 2).map((name) => [name, sha256(path.join(directory, name))]),
+    distributableAssetNames(desktopVersion).map((name) => [
+      name,
+      sha256(path.join(directory, name)),
+    ]),
   );
   const manifestLines = fs
     .readFileSync(path.join(directory, 'SHA256SUMS.txt'), 'utf8')
@@ -179,6 +194,22 @@ function inspectLocalAssets(releaseDirectory, desktopVersion = version) {
       throw new Error(`SHA256SUMS.txt does not match ${match[2]}.`);
     }
     seen.add(match[2]);
+  }
+
+  const updateManifest = fs.readFileSync(path.join(directory, 'latest-mac.yml'), 'utf8');
+  const versionMatch = /^version:\s*([^\s]+)$/m.exec(updateManifest);
+  const updateUrls = [...updateManifest.matchAll(/^\s*- url:\s*([^\s]+)$/gm)].map(
+    (match) => match[1],
+  );
+  const primaryPath = /^path:\s*([^\s]+)$/m.exec(updateManifest)?.[1];
+  const distributables = distributableAssetNames(desktopVersion);
+
+  if (versionMatch?.[1] !== desktopVersion) {
+    throw new Error('latest-mac.yml must match the packaged desktop version.');
+  }
+  assertExactNames(updateUrls, distributables);
+  if (primaryPath !== distributables[1]) {
+    throw new Error('latest-mac.yml must select the universal ZIP as its primary update.');
   }
 
   return assets;

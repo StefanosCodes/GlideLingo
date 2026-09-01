@@ -162,6 +162,12 @@ connected to live Stripe and its matching Web public SDK key. Never supply a pro
 key. Add the other three high-entropy values out of band so they never enter Terraform state,
 committed tfvars, shell history, or CI logs.
 
+`infra/gcp/environments/development/revenuecat.auto.tfvars.json` is the committed, automatically
+loaded desired-state contract for activation. It contains only the boolean activation flag and
+non-secret Secret Manager version selectors. Secret bytes—including the API key, pseudonym key,
+webhook Authorization value, and webhook signing secret—must never be written to that file. Its
+checked-in baseline is disabled with all four selectors explicitly `null`.
+
 Before changing `revenuecat_enabled` to `true`, independently verify:
 
 1. `backend/migrations/002_revenuecat_entitlements.sql` is applied and the runtime grants are exact.
@@ -173,13 +179,92 @@ Before changing `revenuecat_enabled` to `true`, independently verify:
    immutable version.
 4. `revenuecat_secret_versions` names all four exact positive version numbers and Terraform applies
    them while the flag remains false.
-5. A signed dashboard test webhook reaches the disabled deployment as expected, then a reviewed
-   enabled candidate passes webhook, reconcile, entitlement, and negative-auth smoke checks before
-   promotion.
+5. A RevenueCat dashboard test demonstrates provider delivery to the disabled canonical endpoint;
+   `503` is expected because disabled billing rejects before credential verification and therefore
+   does not prove signature acceptance. The enabled candidate must then pass local signed-webhook,
+   reconcile, entitlement, and negative-auth checks before promotion. After promotion, a new real
+   RevenueCat dashboard test must return `200` from the canonical webhook before provider delivery is
+   considered accepted end to end.
 
 Terraform refuses an enabled configuration unless every version is pinned. For the development
 rollout, `revenuecat_environment` stays `SANDBOX`; production requires a separate future environment,
 project, keys, secrets, and state.
+
+### Activate RevenueCat in development
+
+Traffic and billing-state transitions are deliberately separated from Terraform. Terraform ignores
+the API service's container image and `traffic` fields; GitHub Actions owns normal image promotion,
+and the interactive activation script owns the one-time disabled-to-enabled RevenueCat transition.
+An ordinary API deployment reads `GLIDELINGO_REVENUECAT_ENABLED` from the exact revision currently
+serving 100% and from its zero-traffic candidate. Both values must be exact literal `true` or `false`,
+and the workflow refuses promotion when they differ. It directs the operator to the activation script
+instead, so a routine image release cannot silently bypass the positive billing gate.
+
+Do not intentionally run this activation and the normal API deployment workflow concurrently. Both
+paths record the stable Cloud Run generation, require their single staging operation to create exactly
+the next generation, and re-check generation, traffic, candidate tag, URL, and activation state
+immediately before promotion. Any observed overlap therefore fails closed. There is not yet an atomic
+shared lock across the local operator and GitHub Actions; adding one is deferred until a lock can be
+introduced with reviewed infrastructure and IAM.
+
+Before running the script, submit a reviewed change to
+`infra/gcp/environments/development/revenuecat.auto.tfvars.json` that replaces all four `null`
+selectors with their exact positive Secret Manager version strings while leaving
+`revenuecat_enabled` false. Merge and apply that disabled configuration, then verify the service
+template exposes those exact immutable refs without moving traffic. Keep the 100%-serving revision
+and current service template explicitly disabled and complete all five gates above. In particular,
+retain RevenueCat dashboard delivery evidence for the configured sandbox endpoint. A `503` response
+from the disabled canonical service is expected and proves reachability only, not credential or HMAC
+acceptance. Also confirm that the Clerk user used for the smoke test currently has an active `pro`
+entitlement in the `SANDBOX` RevenueCat environment.
+
+Authenticate `gcloud`, select the exact development project, obtain a freshly issued short-lived
+Clerk session token for that test user, and run from an interactive terminal at the repository root:
+
+```bash
+gcloud config set project glidelingo-development
+./infra/gcp/scripts/activate-revenuecat-development.sh
+```
+
+The script is intentionally fixed to `glidelingo-development`, `us-west1`, and `glidelingo-api`. It
+records the sole 100%-serving disabled revision, stages only
+`GLIDELINGO_REVENUECAT_ENABLED=true` on a tagged zero-traffic candidate, and keeps the Clerk token in
+a mode-600 temporary curl configuration that is deleted on exit. Before staging, it fails closed
+unless the service template contains exactly one Secret Manager reference for each of the four
+expected RevenueCat environment variables, each pointing to its expected secret container and an
+immutable positive numeric version (never `latest`). It proves those refs and versions are unchanged
+and exactly equal the disabled durable config before staging, on the staged template, and on the exact
+candidate revision. For the enabled candidate only, it accesses the exact pinned webhook Authorization
+and signing-secret versions into mode-600 temporary files, locally signs a minimal `TEST`/`SANDBOX`
+payload, and proves missing and bad credentials return `401` while the valid request returns exact
+`{"status":"ignored"}` with `200`. Secret bytes are never printed or placed in arguments or
+environment variables, and every temporary credential file is deleted on exit. This proves the exact
+pinned candidate credential path; it does not prove RevenueCat provider delivery. The script also
+proves candidate liveness and readiness, invalid Clerk-token rejection, authenticated reconciliation,
+and the active sandbox Pro contract. Immediately before promotion it rejects any service generation,
+observed generation, traffic, tag, revision, URL, RevenueCat-flag, or secret-ref drift. After promoting
+the exact candidate, it repeats canonical health and authenticated entitlement checks.
+
+Any failure before promotion resets the service template to
+`GLIDELINGO_REVENUECAT_ENABLED=false`, verifies that the recorded previous revision still serves 100%,
+and removes the candidate tag. A post-promotion smoke failure routes 100% back to that exact previous
+revision, resets the template disabled, and removes the tag. If an automatic recovery command reports
+a warning, immediately inspect Cloud Run and manually route the recorded previous revision to 100%
+before making another deployment. The script never changes secret versions and never performs a
+Terraform apply.
+
+Immediately after successful promotion, send a new real RevenueCat dashboard sandbox test to the
+canonical webhook. Require HTTP `200` before treating external provider delivery as accepted. The
+local signed candidate test and a pre-activation disabled `503` are not substitutes for this
+post-promotion provider-delivery evidence.
+
+After successful promotion, submit a second reviewed update to
+`infra/gcp/environments/development/revenuecat.auto.tfvars.json` that changes only
+`revenuecat_enabled` from false to true and retains the same four exact positive version strings. Run
+Terraform plan and require that it proposes no Cloud Run template or traffic change before applying
+the now-durable enabled configuration. The activation script prints this exact follow-up but never
+edits the file or runs Terraform. Do not use ad hoc `-var` flags for this transition, and do not leave
+the live enabled service dependent on script drift from Terraform's declared billing state.
 
 ## Private tutor activation gates
 
@@ -261,8 +346,10 @@ The workflow:
 2. builds the production container;
 3. pushes a commit-addressed image to Artifact Registry;
 4. deploys that immutable image as a zero-traffic tagged candidate;
-5. verifies the candidate's `/health/live` and `/health/ready` endpoints;
-6. promotes the verified revision to 100% traffic and rolls back if the canonical smoke fails.
+5. refuses promotion if the exact live and candidate revisions have different normalized RevenueCat
+   activation states;
+6. verifies the candidate's `/health/live` and `/health/ready` endpoints;
+7. promotes the verified revision to 100% traffic and rolls back if the canonical smoke fails.
 
 Manual rollback remains available:
 

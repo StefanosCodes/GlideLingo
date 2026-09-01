@@ -82,11 +82,18 @@ jobs:
             --project="${GCP_PROJECT_ID}" \
             --region="${GCP_REGION}" \
             --format=json)"
-          previous_revision="$(jq -r '[.status.traffic[] | select(.percent == 100)][0].revisionName // empty' <<< "${service_json}")"
+          initial_generation="$(jq -r '.metadata.generation // empty' <<< "${service_json}")"
+          initial_observed_generation="$(jq -r '.status.observedGeneration // empty' <<< "${service_json}")"
+          previous_revision="$(jq -r \
+            '[.status.traffic[]? | select((.percent // 0) == 100)] | if length == 1 then (.[0].revisionName // "") else "" end' \
+            <<< "${service_json}")"
           service_url="$(jq -r '.status.url // empty' <<< "${service_json}")"
 
-          if [[ -z "${previous_revision}" || -z "${service_url}" ]]; then
-            echo "The Terraform-managed bootstrap revision must be serving 100% before deployment." >&2
+          if [[ ! "${initial_generation}" =~ ^[1-9][0-9]*$ \
+            || "${initial_observed_generation}" != "${initial_generation}" \
+            || -z "${previous_revision}" \
+            || -z "${service_url}" ]]; then
+            echo "The Cloud Run service must be stable with exactly one resolved revision serving 100% before deployment." >&2
             exit 1
           fi
 
@@ -136,16 +143,94 @@ jobs:
             --project="${GCP_PROJECT_ID}" \
             --region="${GCP_REGION}" \
             --format=json)"
-          candidate_traffic="$(jq -c --arg tag "${candidate_tag}" '[.status.traffic[] | select(.tag == $tag)][0] // empty' <<< "${candidate_json}")"
+          staged_generation="$(jq -r '.metadata.generation // empty' <<< "${candidate_json}")"
+          staged_observed_generation="$(jq -r '.status.observedGeneration // empty' <<< "${candidate_json}")"
+          staged_previous_revision="$(jq -r \
+            '[.status.traffic[]? | select((.percent // 0) == 100)] | if length == 1 then (.[0].revisionName // "") else "" end' \
+            <<< "${candidate_json}")"
+          candidate_traffic="$(jq -c --arg tag "${candidate_tag}" \
+            '[.status.traffic[]? | select(.tag == $tag)] | if length == 1 then .[0] else empty end' \
+            <<< "${candidate_json}")"
           candidate_revision="$(jq -r '.revisionName // empty' <<< "${candidate_traffic}")"
           candidate_url="$(jq -r '.url // empty' <<< "${candidate_traffic}")"
+          candidate_percent="$(jq -r '.percent // 0' <<< "${candidate_traffic}")"
+          expected_staged_generation="$((10#${initial_generation} + 1))"
 
-          if [[ -z "${candidate_revision}" || -z "${candidate_url}" ]]; then
-            echo "Cloud Run did not expose the candidate revision and tag URL." >&2
+          if [[ "${staged_generation}" != "${expected_staged_generation}" \
+            || "${staged_observed_generation}" != "${staged_generation}" \
+            || "${staged_previous_revision}" != "${previous_revision}" \
+            || -z "${candidate_revision}" \
+            || -z "${candidate_url}" \
+            || "${candidate_percent}" != "0" ]]; then
+            echo "Cloud Run did not produce exactly one stable zero-traffic candidate generation while preserving the previous 100% revision." >&2
+            exit 1
+          fi
+
+          previous_revision_json="$(gcloud run revisions describe "${previous_revision}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --format=json)"
+          candidate_revision_json="$(gcloud run revisions describe "${candidate_revision}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --format=json)"
+          previous_revenuecat_raw="$(jq -r \
+            '[.spec.containers[0].env[]? | select(.name == "GLIDELINGO_REVENUECAT_ENABLED")] | if length == 1 then (.[0].value // "") else "" end' \
+            <<< "${previous_revision_json}")"
+          candidate_revenuecat_raw="$(jq -r \
+            '[.spec.containers[0].env[]? | select(.name == "GLIDELINGO_REVENUECAT_ENABLED")] | if length == 1 then (.[0].value // "") else "" end' \
+            <<< "${candidate_revision_json}")"
+          if [[ "${previous_revenuecat_raw}" != "true" && "${previous_revenuecat_raw}" != "false" ]]; then
+            echo "Refusing deployment because the 100%-serving revision must explicitly set GLIDELINGO_REVENUECAT_ENABLED to literal true or false." >&2
+            exit 1
+          fi
+          if [[ "${candidate_revenuecat_raw}" != "true" && "${candidate_revenuecat_raw}" != "false" ]]; then
+            echo "Refusing deployment because the candidate revision must explicitly set GLIDELINGO_REVENUECAT_ENABLED to literal true or false." >&2
+            exit 1
+          fi
+          if [[ "${previous_revenuecat_raw}" != "${candidate_revenuecat_raw}" ]]; then
+            echo "Refusing ordinary deployment because the 100%-serving revision and candidate have different RevenueCat activation states." >&2
+            echo "Use ./infra/gcp/scripts/activate-revenuecat-development.sh for the reviewed billing activation procedure." >&2
             exit 1
           fi
 
           smoke "${candidate_url}"
+
+          prepromotion_json="$(gcloud run services describe "${GCP_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --format=json)"
+          prepromotion_generation="$(jq -r '.metadata.generation // empty' <<< "${prepromotion_json}")"
+          prepromotion_observed_generation="$(jq -r '.status.observedGeneration // empty' <<< "${prepromotion_json}")"
+          prepromotion_previous_revision="$(jq -r \
+            '[.status.traffic[]? | select((.percent // 0) == 100)] | if length == 1 then (.[0].revisionName // "") else "" end' \
+            <<< "${prepromotion_json}")"
+          prepromotion_service_url="$(jq -r '.status.url // empty' <<< "${prepromotion_json}")"
+          prepromotion_candidate_traffic="$(jq -c --arg tag "${candidate_tag}" \
+            '[.status.traffic[]? | select(.tag == $tag)] | if length == 1 then .[0] else empty end' \
+            <<< "${prepromotion_json}")"
+          prepromotion_candidate_revision="$(jq -r '.revisionName // empty' <<< "${prepromotion_candidate_traffic}")"
+          prepromotion_candidate_url="$(jq -r '.url // empty' <<< "${prepromotion_candidate_traffic}")"
+          prepromotion_candidate_percent="$(jq -r '.percent // 0' <<< "${prepromotion_candidate_traffic}")"
+          prepromotion_revenuecat_raw="$(jq -r \
+            '[(.spec.template.spec.containers[0].env // .spec.template.containers[0].env // [])[]? | select(.name == "GLIDELINGO_REVENUECAT_ENABLED")] | if length == 1 then (.[0].value // "") else "" end' \
+            <<< "${prepromotion_json}")"
+
+          if [[ "${prepromotion_revenuecat_raw}" != "true" && "${prepromotion_revenuecat_raw}" != "false" ]]; then
+            echo "Refusing promotion because the current service template has no exact literal true/false RevenueCat activation state." >&2
+            exit 1
+          fi
+          if [[ "${prepromotion_generation}" != "${staged_generation}" \
+            || "${prepromotion_observed_generation}" != "${staged_generation}" \
+            || "${prepromotion_previous_revision}" != "${previous_revision}" \
+            || "${prepromotion_service_url}" != "${service_url}" \
+            || "${prepromotion_candidate_revision}" != "${candidate_revision}" \
+            || "${prepromotion_candidate_url}" != "${candidate_url}" \
+            || "${prepromotion_candidate_percent}" != "0" \
+            || "${prepromotion_revenuecat_raw}" != "${candidate_revenuecat_raw}" ]]; then
+            echo "Refusing promotion because Cloud Run generation, traffic, candidate tag, URL, or RevenueCat state drifted after staging." >&2
+            exit 1
+          fi
 
           if ! gcloud run services update-traffic "${GCP_SERVICE}" \
             --project="${GCP_PROJECT_ID}" \

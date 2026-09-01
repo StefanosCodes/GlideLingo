@@ -222,3 +222,42 @@ test('user-confirmed download and install failures show a safe recovery message'
   assert.ok(failurePrompts.every((prompt) => /current version is unchanged/i.test(prompt.detail)));
   assert.ok(messages.every((message) => !/private|details/.test(message)));
 });
+
+test('an asynchronous native install error shows exactly one safe recovery message', async () => {
+  const updater = createUpdater();
+  const prompts = [];
+  const messages = [];
+  const dialog = {
+    async showMessageBox(...args) {
+      const options = args.at(-1);
+      prompts.push(options);
+      return { response: 0 };
+    },
+  };
+
+  installMacUpdater({
+    updater,
+    dialog,
+    parentWindow: { isDestroyed: () => false },
+    logger: { error(message) { messages.push(message); } },
+  });
+  await flushEvents();
+
+  updater.emit('update-downloaded');
+  await flushEvents();
+  assert.equal(updater.installs, 1);
+
+  updater.emit('error', new Error('private native install details'));
+  await flushEvents();
+  await flushEvents();
+  updater.emit('error', new Error('duplicate private native install details'));
+  await flushEvents();
+
+  const failurePrompts = prompts.filter(
+    (prompt) => prompt.title === 'GlideLingo update unavailable',
+  );
+  assert.equal(failurePrompts.length, 1);
+  assert.match(failurePrompts[0].detail, /current version is unchanged/i);
+  assert.equal(messages.length, 1);
+  assert.doesNotMatch(messages[0], /private|details/);
+});

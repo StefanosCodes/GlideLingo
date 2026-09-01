@@ -82,13 +82,28 @@ async function showUpdateFailure(dialog, parentWindow, logger, logMessage) {
 function installMacUpdater({ updater, dialog, parentWindow, logger = console }) {
   let downloadPromptOpen = false;
   let installPromptOpen = false;
+  let userOperation = null;
+  let failureReported = false;
 
   updater.logger = null;
   updater.autoDownload = false;
   updater.autoInstallOnAppQuit = false;
 
+  const reportUserOperationFailure = async (logMessage) => {
+    if (!userOperation || failureReported) return;
+    failureReported = true;
+    userOperation = null;
+    await showUpdateFailure(dialog, parentWindow, logger, logMessage);
+  };
+
   updater.on('error', () => {
-    logger.error('[desktop-update] Update operation failed. The current app remains installed.');
+    if (userOperation && !failureReported) {
+      void reportUserOperationFailure(
+        '[desktop-update] Update operation failed. The current app remains installed.',
+      );
+    } else if (!failureReported) {
+      logger.error('[desktop-update] Update operation failed. The current app remains installed.');
+    }
   });
 
   updater.on('update-available', async () => {
@@ -108,15 +123,16 @@ function installMacUpdater({ updater, dialog, parentWindow, logger = console }) 
       });
 
       if (response === 0) {
+        userOperation = 'download';
+        failureReported = false;
         try {
           await updater.downloadUpdate();
         } catch {
-          await showUpdateFailure(
-            dialog,
-            parentWindow,
-            logger,
+          await reportUserOperationFailure(
             '[desktop-update] The update could not be downloaded.',
           );
+        } finally {
+          if (userOperation === 'download') userOperation = null;
         }
       }
     } catch {
@@ -143,13 +159,12 @@ function installMacUpdater({ updater, dialog, parentWindow, logger = console }) 
       });
 
       if (response === 0) {
+        userOperation = 'install';
+        failureReported = false;
         try {
           updater.quitAndInstall(false, true);
         } catch {
-          await showUpdateFailure(
-            dialog,
-            parentWindow,
-            logger,
+          await reportUserOperationFailure(
             '[desktop-update] The update could not be installed.',
           );
         }

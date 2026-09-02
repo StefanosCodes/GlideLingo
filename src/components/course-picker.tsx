@@ -10,7 +10,7 @@ import { useLearning } from '@/providers/learning-provider';
 
 type PressState = { pressed: boolean; hovered?: boolean };
 
-export function CoursePicker() {
+export function CoursePicker({ compact = false }: { compact?: boolean }) {
   const router = useRouter();
   const theme = useTheme();
   const { language, languages, courses, enrolledCourse, switchCourse } = useLearning();
@@ -60,6 +60,7 @@ export function CoursePicker() {
         }}
         style={({ pressed, hovered }: PressState) => [
           styles.trigger,
+          compact && styles.triggerCompact,
           {
             backgroundColor: theme.surface,
             borderColor: open ? theme.text : theme.border,
@@ -67,12 +68,16 @@ export function CoursePicker() {
           (pressed || hovered) && { backgroundColor: theme.backgroundSelected },
         ]}>
         <ThemedText style={styles.flag}>{language.flag}</ThemedText>
-        <ThemedText numberOfLines={1} type="footnote" style={styles.triggerLabel}>
-          {displayedCourse?.title ?? language.name}
-        </ThemedText>
-        <ThemedText type="caption" themeColor="textTertiary" style={styles.caret}>
-          {open ? '▴' : '▾'}
-        </ThemedText>
+        {!compact ? (
+          <>
+            <ThemedText numberOfLines={1} type="footnote" style={styles.triggerLabel}>
+              {displayedCourse?.title ?? language.name}
+            </ThemedText>
+            <ThemedText type="caption" themeColor="textTertiary" style={styles.caret}>
+              {open ? '▴' : '▾'}
+            </ThemedText>
+          </>
+        ) : null}
       </Pressable>
 
       {open ? (
@@ -181,6 +186,7 @@ const styles = StyleSheet.create({
     ...webClickable,
   },
   triggerLabel: { flexShrink: 1, fontFamily: Fonts.sansMedium, fontSize: 13 },
+  triggerCompact: { height: 44, justifyContent: 'center', paddingHorizontal: 0, width: 44 },
   caret: { fontSize: 10, marginLeft: 2 },
   flag: { fontFamily: Fonts.sans, fontSize: 15, lineHeight: 18 },
   menu: {

@@ -7,24 +7,35 @@ import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { Spacing } from '@/constants/theme';
+import { LearningStateNotice } from '@/features/product-shell/learning-state-notice';
 import { useLearning } from '@/providers/learning-provider';
 
-export default function QuestsScreen() {
+export default function CourseScreen() {
   const router = useRouter();
-  const { language, courses, enrolledCourse, currentModule, nextLesson, completedLessonIds, openLesson } = useLearning();
+  const {
+    language,
+    courses,
+    enrolledCourse,
+    currentModule,
+    nextLesson,
+    completedLessonIds,
+    openLesson,
+    persistenceStatus,
+  } = useLearning();
 
   if (!language.available) {
     return (
       <ScreenFrame>
         <View style={styles.intro}>
           <ThemedText type="eyebrow" themeColor="textSecondary">
-            QUESTS · {language.name.toUpperCase()}
+            COURSE · {language.name.toUpperCase()}
           </ThemedText>
-          <ThemedText type="display">No quests are published yet.</ThemedText>
+          <ThemedText type="display">No course is published yet.</ThemedText>
           <ThemedText type="body" themeColor="textSecondary" style={styles.introCopy}>
-            Switch to an available course from the top-right menu. Unpublished languages never create placeholder quests.
+            Switch to an available course from the course menu. Unpublished languages never create placeholder units.
           </ThemedText>
         </View>
+        <LearningStateNotice status={persistenceStatus} />
       </ScreenFrame>
     );
   }
@@ -34,17 +45,18 @@ export default function QuestsScreen() {
       <ScreenFrame>
         <View style={styles.intro}>
           <ThemedText type="eyebrow" themeColor="textSecondary">
-            QUESTS · {language.name.toUpperCase()}
+            COURSE · {language.name.toUpperCase()}
           </ThemedText>
           <ThemedText type="display">Choose the journey you want to begin.</ThemedText>
           <ThemedText type="body" themeColor="textSecondary" style={styles.introCopy}>
-            Each quest ends in a concrete language ability. Preview the complete route before starting.
+            Each unit ends in a concrete language ability. Preview the complete route before starting.
           </ThemedText>
         </View>
+        <LearningStateNotice status={persistenceStatus} />
         {courses.map((course) => (
           <GlideSurface key={course.id} padding="roomy" style={styles.courseCard}>
             <ThemedText type="eyebrow" themeColor="textSecondary">
-              {course.levelLabel} · {course.modules.length} QUESTS
+              {course.levelLabel} · {course.modules.length} UNITS
             </ThemedText>
             <ThemedText type="title2">{course.title}</ThemedText>
             <ThemedText type="callout" themeColor="textSecondary">
@@ -57,10 +69,10 @@ export default function QuestsScreen() {
     );
   }
 
-  const currentQuest = currentModule ?? nextLesson?.module ?? null;
+  const currentUnit = currentModule ?? nextLesson?.module ?? null;
   const currentLesson = nextLesson?.lesson ?? null;
-  const questDone = currentQuest
-    ? currentQuest.lessons.filter((lesson) => completedLessonIds.includes(lesson.id)).length
+  const unitDone = currentUnit
+    ? currentUnit.lessons.filter((lesson) => completedLessonIds.includes(lesson.id)).length
     : 0;
 
   function beginLesson(lessonId: string) {
@@ -72,45 +84,47 @@ export default function QuestsScreen() {
     <ScreenFrame>
       <View style={styles.intro}>
         <ThemedText type="eyebrow" themeColor="textSecondary">
-          QUESTS · {enrolledCourse.title.toUpperCase()}
+          COURSE · {enrolledCourse.title.toUpperCase()}
         </ThemedText>
-        <ThemedText type="display">{enrolledCourse.modules.length} quests to your first conversations.</ThemedText>
+        <ThemedText type="display">{enrolledCourse.modules.length} units to your first conversations.</ThemedText>
         <ThemedText type="body" themeColor="textSecondary" style={styles.introCopy}>
-          Each quest has a visible finish: understand the pattern, practice it, then use it with less support.
+          Each unit has a visible outcome: understand the pattern, practice it, then use it with less support.
         </ThemedText>
       </View>
 
-      {currentQuest ? (
-        <GlideSurface padding="roomy" style={styles.currentQuest} variant="tinted">
+      <LearningStateNotice status={persistenceStatus} />
+
+      {currentUnit ? (
+        <GlideSurface padding="roomy" style={styles.currentUnit} variant="tinted">
           <ThemedText type="eyebrow" themeColor="textSecondary">
-            CURRENT QUEST · {questDone} OF {currentQuest.lessons.length} LESSONS
+            CURRENT UNIT · {unitDone} OF {currentUnit.lessons.length} LESSONS
           </ThemedText>
-          <ThemedText type="title2">{currentQuest.title}</ThemedText>
+          <ThemedText type="title2">{currentUnit.title}</ThemedText>
           <ThemedText type="callout" themeColor="textSecondary">
-            {currentQuest.canDo}
+            {currentUnit.canDo}
           </ThemedText>
           {currentLesson ? (
-            <GlideButton label={`Continue · ${currentLesson.title}`} onPress={() => beginLesson(currentLesson.id)} />
+            <GlideButton label={`Continue lesson · ${currentLesson.title}`} onPress={() => beginLesson(currentLesson.id)} />
           ) : null}
         </GlideSurface>
       ) : (
-        <GlideSurface padding="roomy" style={styles.currentQuest} variant="success">
+        <GlideSurface padding="roomy" style={styles.currentUnit} variant="success">
           <ThemedText type="eyebrow" themeColor="textSecondary">
-            COURSE PATH COMPLETE
+            PUBLISHED COURSE COMPLETE
           </ThemedText>
-          <ThemedText type="title2">Every published quest is behind you.</ThemedText>
+          <ThemedText type="title2">Every published unit is behind you.</ThemedText>
           <ThemedText type="callout" themeColor="textSecondary">
-            Profile shows what your attempts demonstrated. Completion alone is not presented as mastery.
+            Progress shows what your attempts demonstrated. Completion alone is not presented as mastery.
           </ThemedText>
         </GlideSurface>
       )}
 
-      <View style={styles.questList}>
+      <View style={styles.unitList}>
         <View style={styles.sectionHeading}>
           <ThemedText type="eyebrow" themeColor="textSecondary">
-            COURSE MAP
+            COURSE PATH
           </ThemedText>
-          <ThemedText type="title2">All quests</ThemedText>
+          <ThemedText type="title2">All units</ThemedText>
         </View>
         <ModuleTree density="page" onSelectLesson={beginLesson} />
       </View>
@@ -122,7 +136,7 @@ const styles = StyleSheet.create({
   intro: { gap: Spacing.two, paddingBottom: Spacing.one },
   introCopy: { maxWidth: 560 },
   courseCard: { gap: Spacing.two },
-  currentQuest: { gap: Spacing.twoHalf },
-  questList: { gap: Spacing.three },
+  currentUnit: { gap: Spacing.twoHalf },
+  unitList: { gap: Spacing.three },
   sectionHeading: { gap: Spacing.one },
 });

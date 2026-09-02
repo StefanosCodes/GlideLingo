@@ -57,12 +57,19 @@ class Settings(BaseSettings):
     revenuecat_environment: Literal["SANDBOX", "PRODUCTION"] = "SANDBOX"
     revenuecat_api_key: SecretStr | None = None
     revenuecat_pseudonym_key: SecretStr | None = None
+    revenuecat_webhook_app_id: str | None = Field(default=None, min_length=1, max_length=255)
     revenuecat_webhook_authorization: SecretStr | None = None
     revenuecat_webhook_signing_secret: SecretStr | None = None
     revenuecat_api_timeout_seconds: float = Field(default=2.5, gt=0, le=5)
     revenuecat_entitlement_freshness_seconds: int = Field(default=900, ge=60, le=3600)
     revenuecat_webhook_max_body_bytes: int = Field(default=65536, ge=1024, le=262144)
     revenuecat_webhook_signature_tolerance_seconds: int = Field(default=300, ge=30, le=600)
+    billing_event_intake_enabled: bool = False
+    billing_event_worker_poll_seconds: float = Field(default=1.0, gt=0, le=60)
+    billing_event_worker_lease_seconds: int = Field(default=30, ge=10, le=300)
+    billing_event_worker_maximum_attempts: int = Field(default=8, ge=1, le=20)
+    billing_event_worker_retry_base_seconds: int = Field(default=5, ge=1, le=300)
+    billing_event_worker_retry_max_seconds: int = Field(default=3600, ge=5, le=86400)
     clerk_issuer: str | None = None
     clerk_jwks_url: str | None = None
     clerk_audience: str | None = None
@@ -186,6 +193,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_revenuecat_configuration(self) -> Self:
+        if (
+            self.billing_event_worker_retry_base_seconds
+            > self.billing_event_worker_retry_max_seconds
+        ):
+            raise ValueError("Billing event retry base cannot exceed the retry maximum")
+        if self.billing_event_intake_enabled and not self.revenuecat_enabled:
+            raise ValueError("RevenueCat must be enabled before billing event intake")
         if not self.revenuecat_enabled:
             return self
         required_secrets = (
@@ -203,6 +217,8 @@ class Settings(BaseSettings):
                 "RevenueCat API key must be an app public SDK key for the read-only "
                 "Customer Info endpoint, not a project secret key"
             )
+        if self.billing_event_intake_enabled and self.revenuecat_webhook_app_id is None:
+            raise ValueError("RevenueCat webhook app ID is required for billing event intake")
         return self
 
     @property

@@ -99,3 +99,27 @@ Keep `GLIDELINGO_REVENUECAT_ENABLED=false` and `GLIDELINGO_LESSON_TUTOR_ENABLED=
 least-privileged app public SDK key used by the server's read-only Customer Info request, environment
 filter, and live sandbox evidence are all in place. The development Terraform contract must pin all
 four RevenueCat Secret Manager version numbers before the flag can be enabled.
+
+## Durable billing event intake
+
+`005_billing_event_intake.sql` is provisionally sequenced after the affiliate foundation's reserved
+`004` migration. It is additive and operator-run; the API and worker never execute DDL. Apply it only
+after the eventual `004` parent is present and through the versioned migration operator. Do not apply
+this feature branch's migration to a shared or deployed database. This branch intentionally does not
+add `005` to the production runner while `004` is absent; the stacked integration must add both files
+in numeric order without changing either reviewed migration body.
+
+The migration creates `billing_event_provider_actor`, `billing_event_inbox`, and
+`billing_event_delivery`. Provider actor identifiers required for a fresh entitlement read are stored
+only as authenticated ciphertext outside the inbox. Inbox identity is unique across provider,
+environment, provider app/account context, and provider event ID. Each reviewed consumer gets one
+delivery row with independent lease, retry, completion, and manual-review state. Inbox and delivery
+records are durable; this slice intentionally adds no deletion or retention procedure.
+
+`glidelingo_app` receives `SELECT`/`INSERT` on the provider-actor and inbox tables plus
+`SELECT`/`INSERT`/`UPDATE` on deliveries. It receives no `DELETE`, ownership, schema `CREATE`, or DDL
+capability. Both the request process and `npm run worker:billing` use that bounded contract. Keep
+`GLIDELINGO_BILLING_EVENT_INTAKE_ENABLED=false` everywhere until migration `005`, provider app/account
+configuration, duplicate/out-of-order/lease/concurrency tests, worker deployment, metrics, alerting,
+and recovery operations are reviewed. Enabling the flag without running the worker durably accepts
+events but leaves deliveries pending.

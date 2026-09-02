@@ -6,6 +6,7 @@ import hmac
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -26,10 +27,15 @@ from app.modules.billing.schemas import (
     RevenueCatEnvironment,
     RevenueCatWebhookResponse,
 )
+from app.modules.billing_events.crypto import ProviderActorCipher
+from app.modules.billing_events.intake import revenuecat_consumers
+from app.modules.billing_events.models import NormalizedBillingEvent
+from app.modules.billing_events.repository import BillingEventRepository
 
 EventId = Annotated[str, StringConstraints(min_length=1, max_length=255)]
 EventType = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 AppUserId = Annotated[str, StringConstraints(min_length=1, max_length=100)]
+ProviderObjectId = Annotated[str, StringConstraints(min_length=1, max_length=255)]
 
 
 class RevenueCatWebhookEvent(BaseModel):
@@ -41,7 +47,10 @@ class RevenueCatWebhookEvent(BaseModel):
     type: EventType
     event_timestamp_ms: int = Field(ge=0, le=4_102_444_800_000)
     environment: RevenueCatEnvironment | None = None
+    app_id: ProviderObjectId | None = None
     app_user_id: AppUserId | None = None
+    product_id: ProviderObjectId | None = None
+    new_product_id: ProviderObjectId | None = None
 
 
 class RevenueCatWebhookPayload(BaseModel):
@@ -68,6 +77,10 @@ class BillingService:
         webhook_authorization: str | None,
         webhook_signing_secret: str | None,
         webhook_signature_tolerance_seconds: int,
+        event_intake_enabled: bool = False,
+        event_repository: BillingEventRepository | None = None,
+        event_provider_account_ref: str | None = None,
+        provider_actor_cipher: ProviderActorCipher | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._enabled = enabled
@@ -79,6 +92,10 @@ class BillingService:
         self._webhook_authorization = webhook_authorization
         self._webhook_signing_secret = webhook_signing_secret
         self._signature_tolerance = webhook_signature_tolerance_seconds
+        self._event_intake_enabled = event_intake_enabled
+        self._event_repository = event_repository
+        self._event_provider_account_ref = event_provider_account_ref
+        self._provider_actor_cipher = provider_actor_cipher
         self._now = now or (lambda: datetime.now(UTC))
 
     async def status(self, *, principal: ClerkPrincipal) -> ProEntitlementStatus:
@@ -172,8 +189,15 @@ class BillingService:
         if abs(int(self._now().timestamp()) - timestamp) > self._signature_tolerance:
             raise InvalidRevenueCatWebhookError
 
-    async def process_webhook(self, payload: RevenueCatWebhookPayload) -> RevenueCatWebhookResponse:
+    async def process_webhook(
+        self,
+        payload: RevenueCatWebhookPayload,
+        *,
+        raw_body: bytes | None = None,
+    ) -> RevenueCatWebhookResponse:
         event = payload.event
+        if self._event_intake_enabled:
+            return await self._accept_webhook_event(payload=payload, raw_body=raw_body)
         if (
             event.type == "TEST"
             or event.environment != self._environment
@@ -215,6 +239,81 @@ class BillingService:
             expires_at=snapshot.expires_at,
         )
         return RevenueCatWebhookResponse(status=result)
+
+    async def _accept_webhook_event(
+        self,
+        *,
+        payload: RevenueCatWebhookPayload,
+        raw_body: bytes | None,
+    ) -> RevenueCatWebhookResponse:
+        event = payload.event
+        if (
+            raw_body is None
+            or self._event_repository is None
+            or self._provider_actor_cipher is None
+            or self._pseudonym_key is None
+            or self._event_provider_account_ref is None
+        ):
+            raise DependencyUnavailableError
+        if (
+            event.environment != self._environment
+            or event.app_id != self._event_provider_account_ref
+        ):
+            return RevenueCatWebhookResponse(status="ignored")
+        event_at = datetime.fromtimestamp(event.event_timestamp_ms / 1000, tz=UTC)
+        if event_at < datetime(2000, 1, 1, tzinfo=UTC) or event_at > self._now() + timedelta(
+            minutes=5
+        ):
+            return RevenueCatWebhookResponse(status="ignored")
+
+        consumers = revenuecat_consumers(
+            event_type=event.type,
+            has_provider_actor=event.app_user_id is not None,
+        )
+        actor_ref = None
+        provider_actor_ciphertext = None
+        if event.app_user_id is not None:
+            actor_ref = derive_billing_actor_ref(
+                key=self._pseudonym_key,
+                app_user_id=event.app_user_id,
+            )
+            if consumers:
+                provider_actor_ciphertext = self._provider_actor_cipher.encrypt(
+                    provider_actor_id=event.app_user_id,
+                    provider="revenuecat",
+                    environment=self._environment,
+                    provider_account_ref=self._event_provider_account_ref,
+                    actor_ref=actor_ref,
+                )
+        object_refs = {
+            key: value
+            for key, value in (
+                ("product", event.product_id),
+                ("new_product", event.new_product_id),
+            )
+            if value is not None
+        }
+        normalized = NormalizedBillingEvent(
+            event_ref=uuid4(),
+            provider="revenuecat",
+            environment=self._environment,
+            provider_account_ref=self._event_provider_account_ref,
+            provider_event_id=event.id,
+            event_type=event.type,
+            occurred_at=event_at,
+            received_at=self._now(),
+            actor_ref=actor_ref,
+            provider_actor_ciphertext=provider_actor_ciphertext,
+            object_refs=object_refs,
+            schema_version=1,
+            payload_sha256=hashlib.sha256(raw_body).hexdigest(),
+        )
+        receipt = await asyncio.to_thread(
+            self._event_repository.accept,
+            event=normalized,
+            consumers=consumers,
+        )
+        return RevenueCatWebhookResponse(status=receipt.status)
 
     def _parse_signature(self, header: str | None) -> tuple[int, str]:
         if header is None or len(header) > 256:

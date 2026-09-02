@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "modules": [
+    {
+      "schemaVersion": 1,
+      "id": "portable-first-contact",
+      "version": "1.0.0",
+      "courseId": "en-x-glide-portability",
+      "stageId": "access",
+      "transformation": "I can complete one bounded interaction in a non-Greek fixture.",
+      "targetCapabilityIds": ["portable-request-item"],
+      "supportingCapabilityIds": [],
+      "prerequisiteModuleIds": [],
+      "newResources": ["sipa", "na"],
+      "recycledResources": [],
+      "likelyLearnerErrors": ["Selecting the distractor token instead of sipa"],
+      "culturalPragmaticFocus": ["No real-world cultural claim is made"],
+      "missionIds": ["portable-request-mission"],
+      "checkpointActivityId": "portable-checkpoint",
+      "delayedReviewCapabilityIds": ["portable-request-item"],
+      "estimatedMinutes": 5,
+      "recommendedScenarioIds": ["portable-service-scenario"]
+    }
+  ]
+}

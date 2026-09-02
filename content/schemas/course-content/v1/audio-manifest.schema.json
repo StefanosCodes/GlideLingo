@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glidelingo.app/schemas/course-content/v1/audio-manifest.schema.json",
+  "title": "GlideLingo authored audio manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "clips"],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "clips": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "lessonId", "profile", "text"],
+        "properties": {
+          "id": { "$ref": "common.schema.json#/$defs/id" },
+          "lessonId": { "$ref": "common.schema.json#/$defs/id" },
+          "profile": { "$ref": "common.schema.json#/$defs/id" },
+          "text": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+        }
+      }
+    }
+  }
+}

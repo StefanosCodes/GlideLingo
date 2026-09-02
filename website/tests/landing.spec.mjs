@@ -171,6 +171,14 @@ test('renders the complete landing page without third-party requests or horizont
       expect(dimensions.width).toBeLessThanOrEqual(370);
     }
   }
+  const pricingClosingSpacing = await page.locator('.plan-closing').evaluateAll((closings) =>
+    closings.map((closing) => {
+      const note = closing.querySelector('.plan-note')?.getBoundingClientRect();
+      const cta = closing.querySelector('.plan-cta')?.getBoundingClientRect();
+      return note && cta ? Math.round(cta.top - note.bottom) : 0;
+    }),
+  );
+  expect(pricingClosingSpacing).toEqual([32, 32]);
   await expect(page.getByRole('heading', { name: 'Ready to speak a new language?' })).toBeVisible();
   await expect(page.locator('.final-cta-inner > p')).toHaveText(
     'Start learning, start speaking, and keep progressing toward real mastery.',

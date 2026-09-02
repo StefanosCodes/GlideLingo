@@ -666,8 +666,15 @@ h3 {
   font-weight: 700;
 }
 
+.plan-closing {
+  display: grid;
+  margin-top: auto;
+  padding-top: 28px;
+  gap: 32px;
+}
+
 .plan-note {
-  margin: 28px 0 0;
+  margin: 0;
   padding-top: 20px;
   border-top: 1px solid var(--line);
   color: var(--ink-faint);
@@ -676,7 +683,6 @@ h3 {
 
 .plan-cta {
   width: 100%;
-  margin-top: auto;
 }
 
 .final-cta {
@@ -1273,8 +1279,8 @@ h3 {
     padding: 30px;
   }
 
-  .plan-cta {
-    margin-top: 30px;
+  .plan-closing {
+    margin-top: 0;
   }
 
   .final-cta {

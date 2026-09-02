@@ -198,12 +198,29 @@ Acceptance:
 - Signed/notarized desktop packages pass clean-install Gatekeeper checks.
 - Production deployment has backups, readiness, monitoring, and rollback strategy.
 
+## Post-core growth: Affiliate and creator program
+
+Status: later; not a blocker for the initial learning-product release or Slice 8 acceptance.
+
+The [affiliate and creator program](../product/AFFILIATE-CREATOR-PROGRAM.md) may proceed only after the core learning product is validated. Keep every future runtime slice disabled by default and deliver it in this order:
+
+1. policy approvals and RevenueCat/Stripe/Connect sandbox evidence;
+2. server-owned identity, authorization, cross-origin handoff, and attribution;
+3. owner-approved discounted checkout;
+4. durable minimized financial intake with independently retryable entitlement/affiliate consumers and a shadow ledger;
+5. creator and operations dashboards;
+6. distinct Stripe Connect transfers and connected-account external payouts;
+7. separately approved staged enablement.
+
+The growth lane must not redefine RevenueCat beyond its exact `pro` entitlement authority, reuse the current 30-day webhook receipt as a financial ledger, assume cookies cross the marketing/web/Electron boundaries, or enable offers or money movement before its full gates pass.
+
 ## What not to parallelize prematurely
 
 - Do not build the entire database schema before the golden mission establishes real data needs.
 - Do not add workers before a durable long-running operation exists.
 - Do not implement offline sync before the online idempotency contract works.
 - Do not integrate billing before the learning loop is validated.
+- Do not treat affiliate or creator growth work as a prerequisite for the initial learning-product release.
 - Do not extract microservices while one transaction protects core learning invariants.
 - Do not build a content studio before the file-based authoring and review workflow is understood.
 

@@ -976,6 +976,10 @@ Build vertical slices that are independently testable and useful.
 
 Do not begin photoreal avatars, public leaderboards, social features, or additional languages before the complete Greek course + learning loop + reliable voice path meet their gates.
 
+### Post-core growth — affiliate and creator program
+
+The [affiliate and creator growth program](docs/product/AFFILIATE-CREATOR-PROGRAM.md) is `LATER`, not a V1 release gate or blocker for the initial learning-product release. Its documentation and small disabled foundations may be reviewed independently, but referral offers, attribution, commission ledger effects, creator dashboards, Stripe Connect transfers, and public acquisition must remain off until the provider, financial, legal/tax, identity/authorization, reconciliation, privacy, and operational gates in that contract pass. RevenueCat remains authoritative only for the exact `pro` entitlement; affiliate financial accounting must not grant or revoke learning access.
+
 ---
 
 ## 24. V1 end-to-end acceptance scenarios

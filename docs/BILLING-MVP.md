@@ -1,9 +1,9 @@
 # RevenueCat billing MVP
 
 This slice establishes an account-scoped subscription boundary for **lesson tutor assistance** without committing store
-credentials or prices. Clerk owns authentication. RevenueCat owns purchases and the exact `pro` entitlement. RevenueCat
-Billing uses Stripe as its web payment gateway; GlideLingo does not embed a Stripe SDK or Stripe secret. Do not enable
-Clerk Billing for the same subscription.
+credentials or prices. Clerk owns authentication. RevenueCat manages the existing purchase flow and is authoritative for
+only the exact `pro` entitlement. RevenueCat Billing uses Stripe as its web payment gateway; GlideLingo does not embed a
+Stripe SDK or Stripe secret in this MVP. Do not enable Clerk Billing for the same subscription.
 
 ## Integration contract
 
@@ -164,6 +164,10 @@ The paid tutor route returns `403 pro_required` only for a fresh, verified inact
 disabled, provider-unavailable, or database-unavailable billing state returns `503 billing_unavailable`.
 Tutor availability is checked first, so an unavailable tutor remains `503 lesson_tutor_unavailable`
 without performing billing or provider work.
+
+## Future affiliate-consumer boundary
+
+The current webhook path is intentionally an entitlement implementation, not a reusable financial ledger. It fetches current RevenueCat state and writes `revenuecat_webhook_event` plus the exact `pro` snapshot synchronously; maintenance later prunes those webhook receipts after 30 days. Future affiliate work must follow the [post-core affiliate and creator contract](product/AFFILIATE-CREATOR-PROGRAM.md): first add a durable minimized billing inbox and independently retryable `pro_entitlement` and `affiliate_finance` deliveries, then process any shadow ledger. RevenueCat remains authoritative only for `pro`; Stripe financial resources are the proposed authority for RevenueCat Web Billing charges, refunds, disputes/chargebacks, fees, and balance effects after deterministic sandbox correlation is proven. Affiliate failure must never withhold or invent a valid entitlement, and no affiliate flag, offer, ledger effect, transfer, or payout is enabled by this MVP.
 
 Apply `backend/migrations/002_revenuecat_entitlements.sql` with the migration operator and schedule
 `maintenance_revenuecat_webhooks.sql` with a separate delete-capable maintenance identity before

@@ -1,8 +1,9 @@
 locals {
-  production_identity  = jsondecode(file("${path.module}/identity.json"))
-  github_repository    = "StefanosCodes/GlideLingo"
-  github_repository_id = "1352030189"
-  github_owner_id      = "309610265"
+  production_identity        = jsondecode(file("${path.module}/identity.json"))
+  github_oidc_subject_prefix = local.production_identity.github_oidc_subject_prefix
+  github_repository          = "StefanosCodes/GlideLingo"
+  github_repository_id       = "1352030189"
+  github_owner_id            = "309610265"
   labels = {
     application = "glidelingo"
     environment = "production"
@@ -81,6 +82,17 @@ resource "google_project_service" "required" {
   project            = var.project_id
   service            = each.value
   disable_on_destroy = false
+
+  lifecycle {
+    precondition {
+      condition = (
+        local.production_identity.project_id == var.project_id &&
+        local.production_identity.project_number == tostring(data.google_project.current.number) &&
+        local.production_identity.github_oidc_subject_prefix == "repo:StefanosCodes@309610265/GlideLingo@1352030189"
+      )
+      error_message = "The committed production project identity and immutable GitHub OIDC subject prefix must match the reviewed contract."
+    }
+  }
 }
 
 resource "google_artifact_registry_repository" "containers" {
@@ -483,7 +495,7 @@ resource "google_iam_workload_identity_pool_provider" "deploy" {
     "attribute.repository_owner_id" = "assertion.repository_owner_id"
     "attribute.ref"                 = "assertion.ref"
   }
-  attribute_condition = "assertion.repository == '${local.github_repository}' && assertion.repository_id == '${local.github_repository_id}' && assertion.repository_owner_id == '${local.github_owner_id}' && assertion.sub in ['repo:${local.github_repository}:environment:production-staging', 'repo:${local.github_repository}:environment:production'] && assertion.ref == 'refs/heads/main'"
+  attribute_condition = "assertion.repository == '${local.github_repository}' && assertion.repository_id == '${local.github_repository_id}' && assertion.repository_owner_id == '${local.github_owner_id}' && assertion.sub in ['${local.github_oidc_subject_prefix}:environment:production-staging', '${local.github_oidc_subject_prefix}:environment:production'] && assertion.ref == 'refs/heads/main'"
   oidc { issuer_uri = "https://token.actions.githubusercontent.com/" }
 }
 
@@ -499,7 +511,7 @@ resource "google_iam_workload_identity_pool_provider" "release" {
     "attribute.repository_owner_id" = "assertion.repository_owner_id"
     "attribute.ref"                 = "assertion.ref"
   }
-  attribute_condition = "assertion.repository == '${local.github_repository}' && assertion.repository_id == '${local.github_repository_id}' && assertion.repository_owner_id == '${local.github_owner_id}' && assertion.sub == 'repo:${local.github_repository}:environment:desktop-release-signing' && assertion.ref.startsWith('refs/tags/desktop-v')"
+  attribute_condition = "assertion.repository == '${local.github_repository}' && assertion.repository_id == '${local.github_repository_id}' && assertion.repository_owner_id == '${local.github_owner_id}' && assertion.sub == '${local.github_oidc_subject_prefix}:environment:desktop-release-signing' && assertion.ref.startsWith('refs/tags/desktop-v')"
   oidc { issuer_uri = "https://token.actions.githubusercontent.com/" }
 }
 
@@ -519,8 +531,8 @@ resource "google_service_account" "desktop_releaser" {
 
 resource "google_service_account_iam_member" "github_deploy_identity" {
   for_each = toset([
-    "repo:${local.github_repository}:environment:production-staging",
-    "repo:${local.github_repository}:environment:production",
+    "${local.github_oidc_subject_prefix}:environment:production-staging",
+    "${local.github_oidc_subject_prefix}:environment:production",
   ])
 
   service_account_id = google_service_account.github_deployer.name
@@ -531,17 +543,7 @@ resource "google_service_account_iam_member" "github_deploy_identity" {
 resource "google_service_account_iam_member" "github_release_identity" {
   service_account_id = google_service_account.desktop_releaser.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/subject/repo:${local.github_repository}:environment:desktop-release-signing"
-}
-
-check "production_identity" {
-  assert {
-    condition = (
-      local.production_identity.project_id == var.project_id &&
-      local.production_identity.project_number == tostring(data.google_project.current.number)
-    )
-    error_message = "The committed production project ID and numeric project number must match the resolved GCP project."
-  }
+  member             = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/subject/${local.github_oidc_subject_prefix}:environment:desktop-release-signing"
 }
 
 resource "google_artifact_registry_repository_iam_member" "deployer_writer" {

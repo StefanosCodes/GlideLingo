@@ -22,7 +22,10 @@ out of band, then select immutable positive versions in `activation.auto.tfvars.
 
 `identity.json` is the shared fail-closed identity contract for Terraform and the desktop release
 validator. The pinned project number is `738451432773`. Terraform refuses an apply if the resolved
-project ID or numeric project number differs from that committed identity.
+project ID, numeric project number, or immutable GitHub OIDC subject prefix differs from that
+committed identity. An apply-blocking lifecycle precondition runs on required API enablement before
+Terraform can create the production database or other paid resources; this is not an advisory
+Terraform `check`.
 
 Run the one-time database bootstrap only after the production instance exists:
 
@@ -53,8 +56,11 @@ GCP_DEPLOY_SERVICE_ACCOUNT
 
 Require approval on `production`. The WIF provider accepts the exact repository identity only from
 those two GitHub environments on `main`; service-account impersonation is bound to each exact
-`google.subject`, never a repository-wide principal set, and no service-account key is stored in GitHub. The deployment
-workflow accepts an exact 40-character commit reachable from `main`, stages a zero-traffic
+`google.subject`, never a repository-wide principal set, and no service-account key is stored in
+GitHub. This repository customizes GitHub's OIDC subject with immutable owner and repository IDs,
+so the accepted prefix is exactly
+`repo:StefanosCodes@309610265/GlideLingo@1352030189`; the default name-only subject cannot
+impersonate either service account. The deployment workflow accepts an exact 40-character commit reachable from `main`, stages a zero-traffic
 candidate, proves health/auth and unchanged activation state, then pauses at `production` before
 promotion. It rolls back to the recorded revision if canonical smoke tests fail.
 

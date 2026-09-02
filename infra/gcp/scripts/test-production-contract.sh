@@ -21,6 +21,7 @@ jq -e '
 jq -e '
   .project_id == "glidelingo-prod-50843312405"
   and .project_number == "738451432773"
+  and .github_oidc_subject_prefix == "repo:StefanosCodes@309610265/GlideLingo@1352030189"
   and .workload_identity_pool_id == "github-actions"
   and .deploy_provider_id == "production-deploy"
   and .deploy_service_account_id == "glidelingo-prod-deployer"
@@ -40,15 +41,28 @@ grep -Fq 'desktop-release-signing' "${production}/main.tf"
 grep -Fq 'production-staging' "${production}/main.tf"
 grep -Fq 'jsondecode(file("${path.module}/identity.json"))' "${production}/main.tf"
 grep -Fq 'local.production_identity.project_number == tostring(data.google_project.current.number)' "${production}/main.tf"
+grep -Fq 'precondition {' "${production}/main.tf"
+if grep -Fq 'check "production_identity"' "${production}/main.tf"; then
+  echo "Production identity mismatch must block apply; advisory Terraform checks are insufficient." >&2
+  exit 1
+fi
 grep -Fq 'expected_project_number="738451432773"' "${root}/infra/gcp/scripts/bootstrap-production.sh"
 if grep -Fq 'principalSet://iam.googleapis.com/' "${production}/main.tf"; then
   echo "Workload Identity impersonation must never use a broad principalSet binding." >&2
   exit 1
 fi
 grep -Fq '/subject/${each.value}' "${production}/main.tf"
-grep -Fq '"repo:${local.github_repository}:environment:production-staging"' "${production}/main.tf"
-grep -Fq '"repo:${local.github_repository}:environment:production"' "${production}/main.tf"
-grep -Fq 'subject/repo:${local.github_repository}:environment:desktop-release-signing' "${production}/main.tf"
+grep -Fq 'github_oidc_subject_prefix = local.production_identity.github_oidc_subject_prefix' "${production}/main.tf"
+grep -Fq "'\${local.github_oidc_subject_prefix}:environment:production-staging'" "${production}/main.tf"
+grep -Fq "'\${local.github_oidc_subject_prefix}:environment:production'" "${production}/main.tf"
+grep -Fq '"${local.github_oidc_subject_prefix}:environment:production-staging"' "${production}/main.tf"
+grep -Fq '"${local.github_oidc_subject_prefix}:environment:production"' "${production}/main.tf"
+grep -Fq "'\${local.github_oidc_subject_prefix}:environment:desktop-release-signing'" "${production}/main.tf"
+grep -Fq 'subject/${local.github_oidc_subject_prefix}:environment:desktop-release-signing' "${production}/main.tf"
+if grep -REn --include='*.tf' --include='*.json' 'repo:StefanosCodes/GlideLingo:environment:' "${production}"; then
+  echo "Production WIF must use the repository's immutable-ID OIDC subject customization." >&2
+  exit 1
+fi
 for secret_resource in database_url revenuecat desktop_public_config desktop_signing; do
   if ! sed -n "/resource \"google_secret_manager_secret\" \"${secret_resource}\"/,/^}/p" "${production}/main.tf" \
     | grep -Fq 'prevent_destroy = true'; then
@@ -87,6 +101,13 @@ grep -Fq 'classify-production-candidate-cleanup.sh' "${workflow}"
 grep -Fq 'if: ${{ always() && needs.stage.result == '\''success'\'' }}' "${workflow}"
 grep -Fq 'classify-production-candidate-cleanup.sh' "${cleanup_operator}"
 grep -Fq -- '--remove-tags="${candidate_tag}"' "${cleanup_operator}"
+grep -Fq 'TARGET_COMMIT_SHA: ${{ inputs.commit_sha }}' "${workflow}"
+grep -Fq '[[ "${TARGET_COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]]' "${workflow}"
+if grep -F '${{ inputs.commit_sha }}' "${workflow}" \
+  | grep -Ev '^[[:space:]]+(ref|TARGET_COMMIT_SHA):[[:space:]]+\$\{\{ inputs\.commit_sha \}\}$'; then
+  echo "Manual deploy input must enter shell steps only through TARGET_COMMIT_SHA." >&2
+  exit 1
+fi
 if grep -Fn '${{ secrets.' "${workflow}"; then
   echo "Production deployment must use WIF and must not read GitHub long-lived secrets." >&2
   exit 1

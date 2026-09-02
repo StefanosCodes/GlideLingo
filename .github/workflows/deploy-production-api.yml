@@ -30,6 +30,7 @@ jobs:
     env:
       GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION || 'us-west1' }}
+      TARGET_COMMIT_SHA: ${{ inputs.commit_sha }}
     outputs:
       candidate_tag: ${{ steps.stage.outputs.candidate_tag }}
       candidate_revision: ${{ steps.stage.outputs.candidate_revision }}
@@ -52,10 +53,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "${{ inputs.commit_sha }}" =~ ^[0-9a-f]{40}$ ]]
-          test "$(git rev-parse HEAD)" = "${{ inputs.commit_sha }}"
+          [[ "${TARGET_COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "${TARGET_COMMIT_SHA}"
           git fetch --no-tags origin main
-          git merge-base --is-ancestor "${{ inputs.commit_sha }}" origin/main
+          git merge-base --is-ancestor "${TARGET_COMMIT_SHA}" origin/main
 
       - name: Install uv and Python
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -95,7 +96,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          image_tag="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_REPOSITORY}/${IMAGE_NAME}:${{ inputs.commit_sha }}"
+          image_tag="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_REPOSITORY}/${IMAGE_NAME}:${TARGET_COMMIT_SHA}"
           docker build --file backend/Dockerfile --tag "${image_tag}" .
           docker push "${image_tag}"
           digest="$(gcloud artifacts docker images describe "${image_tag}" --format='value(image_summary.digest)')"
@@ -107,7 +108,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          candidate_tag="candidate-${{ inputs.commit_sha }}"
+          candidate_tag="candidate-${TARGET_COMMIT_SHA}"
           initial_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
           initial_state="$(./infra/gcp/scripts/read-production-deploy-state.sh <<< "${initial_json}")"
           initial_generation="$(jq -r .generation <<< "${initial_state}")"

@@ -75,13 +75,15 @@ For a hard workflow cancellation where GitHub cannot start the final cleanup job
 
 ```bash
 ./infra/gcp/scripts/cleanup-production-candidate.sh \
-  candidate-0123456789abcdef0123456789abcdef01234567 \
+  c-0123456789abcdef012 \
   glidelingo-api-production-00001-abc
 ```
 
 The operator script applies the same generation, zero-traffic, tag, and exact-revision checks. It
 returns successfully when the tag is absent and refuses to remove a tag that moved to a different
-revision.
+revision. Candidate tags use `c-` plus the first 19 characters of the already verified full
+commit SHA so the tag and production service name remain within Cloud Run's 46-character combined
+limit. The workflow still builds, verifies, and records the exact 40-character commit.
 
 Create `desktop-release-signing` with the release WIF provider and service-account outputs. The
 provider accepts only a protected `desktop-v*` tag event or a manual workflow dispatch whose

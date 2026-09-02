@@ -4,7 +4,7 @@ set -euo pipefail
 expected_tag="${1:-}"
 expected_revision="${2:-}"
 
-if [[ ! "${expected_tag}" =~ ^candidate-[0-9a-f]{40}$ || -z "${expected_revision}" ]]; then
+if [[ ! "${expected_tag}" =~ ^c-[0-9a-f]{19}$ || -z "${expected_revision}" ]]; then
   echo "Expected one exact candidate tag and revision." >&2
   exit 2
 fi

@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "id": "el-foundations-publication",
+  "version": "1.0.0",
+  "courseId": "el-from-zero",
+  "courseVersion": "1.0.0",
+  "status": "draft",
+  "sourceRevision": "slice-1-loader-migration",
+  "schemaVersions": {
+    "course": 1,
+    "languageProfile": 1,
+    "capabilities": 1,
+    "modules": 1,
+    "mission": 1,
+    "lesson": 1,
+    "activity": 1,
+    "scenario": 1,
+    "pronunciationTargets": 1,
+    "publication": 1
+  },
+  "contentHash": "sha256:f84f100cc318c2982e5ad15ea4d5181b89712ed097bb1f0b90128baa8b1d5dea",
+  "provenance": [
+    {
+      "kind": "adapted",
+      "description": "Mechanical migration of the existing el-letters-1 prototype into the versioned course contract."
+    }
+  ],
+  "validatorReport": {
+    "command": "npm run course:validate",
+    "status": "pending",
+    "validatedAt": null
+  },
+  "reviews": {
+    "curriculum": {
+      "status": "pending",
+      "reviewer": "unassigned",
+      "evidence": "Required before publication.",
+      "reviewedAt": null
+    },
+    "instructionalDesign": {
+      "status": "pending",
+      "reviewer": "unassigned",
+      "evidence": "Required before publication.",
+      "reviewedAt": null
+    },
+    "languagePragmatics": {
+      "status": "pending",
+      "reviewer": "unassigned",
+      "evidence": "Required before publication.",
+      "reviewedAt": null
+    },
+    "independentAssessment": {
+      "status": "pending",
+      "reviewer": "unassigned",
+      "evidence": "Required before publication.",
+      "reviewedAt": null
+    },
+    "audioPlatformQa": {
+      "status": "pending",
+      "reviewer": "unassigned",
+      "evidence": "Existing saved audio remains locally validated; publication review is still required.",
+      "reviewedAt": null
+    },
+    "accessibility": {
+      "status": "pending",
+      "reviewer": "unassigned",
+      "evidence": "Required before publication.",
+      "reviewedAt": null
+    },
+    "learnerPilot": {
+      "status": "pending",
+      "reviewer": "unassigned",
+      "evidence": "Required before publication.",
+      "reviewedAt": null
+    }
+  },
+  "knownLimitations": ["Only el-letters-1 is represented; the remaining catalog stays on the compatibility path."],
+  "migrationCompatibility": "The temporary catalog adapter preserves the existing lesson ID, blocks, beats, evidence mapping, and saved audio IDs.",
+  "publishedAt": null,
+  "retiredAt": null
+}

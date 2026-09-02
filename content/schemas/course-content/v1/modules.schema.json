@@ -55,7 +55,7 @@
         "checkpointActivityId": { "$ref": "common.schema.json#/$defs/id" },
         "delayedReviewCapabilityIds": { "$ref": "common.schema.json#/$defs/nonEmptyIdList" },
         "estimatedMinutes": { "type": "integer", "minimum": 1 },
-        "recommendedScenarioIds": { "$ref": "common.schema.json#/$defs/nonEmptyIdList" }
+        "recommendedScenarioIds": { "$ref": "common.schema.json#/$defs/idList" }
       }
     }
   }

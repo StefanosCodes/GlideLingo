@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "modules": [
+    {
+      "schemaVersion": 1,
+      "id": "el-letters",
+      "version": "1.0.0",
+      "courseId": "el-from-zero",
+      "stageId": "access",
+      "transformation": "I can recognize core Greek letters and sound patterns.",
+      "targetCapabilityIds": ["el-script-vowels-a-e-i"],
+      "supportingCapabilityIds": [],
+      "prerequisiteModuleIds": [],
+      "newResources": ["α", "ε", "ι", "να", "με"],
+      "recycledResources": [],
+      "likelyLearnerErrors": ["Confusing the visual forms of α, ε, and ι"],
+      "culturalPragmaticFocus": ["No cultural or pragmatic claim is assessed in this access module"],
+      "missionIds": ["el-letters-sound-map"],
+      "checkpointActivityId": "el-syllable-na-check",
+      "delayedReviewCapabilityIds": ["el-script-vowels-a-e-i"],
+      "estimatedMinutes": 8,
+      "recommendedScenarioIds": []
+    }
+  ]
+}

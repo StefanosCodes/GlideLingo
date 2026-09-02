@@ -138,7 +138,14 @@ async function readRequiredJson(packageDirectory, relativePath, root, schemaName
   return readJsonDocument(filename, root, schemaName, diagnostics);
 }
 
-async function readJsonDirectory(packageDirectory, relativeDirectory, root, schemaName, diagnostics) {
+async function readJsonDirectory(
+  packageDirectory,
+  relativeDirectory,
+  root,
+  schemaName,
+  diagnostics,
+  { required = true } = {},
+) {
   const directory = path.join(packageDirectory, relativeDirectory);
   let entries;
   try {
@@ -147,10 +154,11 @@ async function readJsonDirectory(packageDirectory, relativeDirectory, root, sche
       .map((entry) => entry.name)
       .sort();
   } catch (error) {
+    if (!required && error.code === 'ENOENT') return [];
     diagnostics.push(diagnostic(displayPath(directory, root), '/', 'missing-directory', `required directory is unavailable: ${error.message}`));
     return [];
   }
-  if (entries.length === 0) {
+  if (required && entries.length === 0) {
     diagnostics.push(diagnostic(displayPath(directory, root), '/', 'missing-file', 'at least one JSON record is required'));
     return [];
   }
@@ -169,7 +177,14 @@ async function loadPackage(packageDirectory, root) {
   const capabilities = await readRequiredJson(packageDirectory, 'capabilities.json', root, 'capabilities', diagnostics);
   const modules = await readRequiredJson(packageDirectory, 'modules.json', root, 'modules', diagnostics);
   const missions = await readJsonDirectory(packageDirectory, 'missions', root, 'mission', diagnostics);
-  const scenarios = await readJsonDirectory(packageDirectory, 'scenarios', root, 'scenario', diagnostics);
+  const scenarios = await readJsonDirectory(
+    packageDirectory,
+    'scenarios',
+    root,
+    'scenario',
+    diagnostics,
+    { required: false },
+  );
   const pronunciationTargets = await readRequiredJson(
     packageDirectory,
     path.join('pronunciation', 'targets.json'),
@@ -562,10 +577,12 @@ async function validateRelationships(loaded) {
     checkReferences(mission.record.reviewActivityIds, missionActivities, mission, '/reviewActivityIds', 'activity in this mission', loaded.diagnostics);
     checkReferences(mission.record.offline.unavailableActivityIds, missionActivities, mission, '/offline/unavailableActivityIds', 'activity in this mission', loaded.diagnostics);
 
-    const phases = new Set(locations.activities.filter((activity) => activity.mission === mission).map((activity) => activity.record.phase));
-    for (const phase of ['encounter', 'notice', 'retrieve', 'produce', 'perform', 'revisit']) {
-      if (phases.has(phase)) continue;
-      loaded.diagnostics.push(diagnostic(mission.file, '/lessons', 'missing-phase', `mission does not cover the ${phase} phase`));
+    if (locations.publication.record.status !== 'draft') {
+      const phases = new Set(locations.activities.filter((activity) => activity.mission === mission).map((activity) => activity.record.phase));
+      for (const phase of ['encounter', 'notice', 'retrieve', 'produce', 'perform', 'revisit']) {
+        if (phases.has(phase)) continue;
+        loaded.diagnostics.push(diagnostic(mission.file, '/lessons', 'missing-phase', `mission does not cover the ${phase} phase`));
+      }
     }
 
     const reviewIds = new Set(mission.record.reviewActivityIds);

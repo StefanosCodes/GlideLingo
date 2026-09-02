@@ -10,6 +10,10 @@ const PRODUCTION_CLERK_ORIGIN = 'https://clerk.glidelingo.com';
 const REVENUECAT_WEB_SDK_ORIGIN = 'https://sdk.revenuecat-static.com';
 const REVENUECAT_BRANDING_ORIGIN = 'https://da08ctfrofx1b.cloudfront.net';
 const AUTH_CALLBACK_PATHS = new Set(['/sign-in', '/sso-callback']);
+const AUTH_CALLBACK_DESTINATIONS = new Set([
+  `${APP_SCHEME}://${APP_HOST}/sign-in`,
+  `${APP_SCHEME}://${APP_HOST}/sso-callback`,
+]);
 const STATIC_AUTH_PROVIDER_ORIGINS = new Set([
   'https://accounts.google.com',
   'https://appleid.apple.com',
@@ -43,6 +47,7 @@ function isExactPackagedRendererUrl(value) {
   }
 
   return (
+    url.protocol === 'https:' &&
     url.origin === PACKAGED_RENDERER_ORIGIN &&
     !url.port &&
     !url.username &&
@@ -222,6 +227,7 @@ function isAllowedNavigation(targetUrl, rendererUrl) {
     }
 
     return (
+      target.protocol === renderer.protocol &&
       target.origin === renderer.origin &&
       !target.username &&
       !target.password
@@ -330,18 +336,70 @@ function parseAuthCallbackUrl(targetUrl) {
     return null;
   }
 
-  const parameters = [...url.searchParams.entries()];
+  const parameters = authCallbackParameters(url);
   if (parameters.length > 32) return null;
-  if (new Set(parameters.map(([name]) => name)).size !== parameters.length) return null;
+  const normalizedParameterNames = parameters.map(([name]) => normalizeAuthParameterName(name));
+  if (new Set(normalizedParameterNames).size !== parameters.length) return null;
   if (
     parameters.some(
-      ([name, value]) => !/^[A-Za-z0-9_.-]{1,80}$/.test(name) || value.length > 2048,
+      ([name, value]) =>
+        !/^[A-Za-z0-9_.-]{1,80}$/.test(name) ||
+        value.length > 2048 ||
+        (isAuthRedirectParameter(name) && !isExactAuthCallbackDestination(value)),
     )
   ) {
     return null;
   }
 
   return url.toString();
+}
+
+function authCallbackParameters(url) {
+  const parameters = [...url.searchParams.entries()];
+  const hash = url.hash.slice(1);
+  const queryStart = hash.indexOf('?');
+  const hashQuery =
+    queryStart >= 0
+      ? hash.slice(queryStart + 1)
+      : !hash.startsWith('/') && hash.includes('=')
+        ? hash
+        : null;
+
+  if (hashQuery !== null) {
+    parameters.push(...new URLSearchParams(hashQuery).entries());
+  }
+  return parameters;
+}
+
+function normalizeAuthParameterName(name) {
+  return name.replaceAll(/[^A-Za-z0-9]/g, '').toLowerCase();
+}
+
+function isAuthRedirectParameter(name) {
+  const normalized = normalizeAuthParameterName(name);
+  return (
+    (normalized.includes('redirect') && normalized.includes('url')) ||
+    (normalized.startsWith('after') && normalized.endsWith('url'))
+  );
+}
+
+function isExactAuthCallbackDestination(value) {
+  let decoded = value;
+
+  // URLSearchParams has already decoded the query value once. Decode any
+  // remaining nested encoding before comparing the complete destination.
+  for (let depth = 0; depth < 16; depth += 1) {
+    let next;
+    try {
+      next = decodeURIComponent(decoded);
+    } catch {
+      return false;
+    }
+    if (next === decoded) return AUTH_CALLBACK_DESTINATIONS.has(decoded);
+    decoded = next;
+  }
+
+  return false;
 }
 
 function findAuthCallbackUrl(argv) {

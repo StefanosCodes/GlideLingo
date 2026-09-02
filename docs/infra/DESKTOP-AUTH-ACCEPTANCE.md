@@ -1,16 +1,19 @@
 # Desktop authentication acceptance
 
 This checklist is the evidence contract for GlideLingo desktop authentication. Automated checks prove code-level
-contracts; they do not prove that Clerk, Google, Apple, email delivery, phone delivery, macOS protocol registration, or a
+contracts; they do not prove that Clerk, Google, Apple, email delivery, macOS protocol registration, or a
 signed installed build is configured correctly. Record real observations for live steps and leave them unchecked until
 they have actually run.
+
+Desktop MVP sign-in is Google, Apple, and email verification code. Phone SMS authentication is explicitly deferred to
+the mobile release and is not a desktop activation gate.
 
 ## Preconditions
 
 1. Use an ignored root `.env` or `.env.local` with `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` and
    `EXPO_PUBLIC_API_BASE_URL`. Configure the backend Clerk issuer, JWKS URL, and authorized parties as documented in
    [`../AUTH-MVP.md`](../AUTH-MVP.md). Never put a Clerk secret key in an `EXPO_PUBLIC_*` variable.
-2. In Clerk, confirm the same development instance enables Google, Apple, email verification code, and phone SMS code.
+2. In Clerk, confirm the same development instance enables Google, Apple, and email verification code.
 3. Confirm the API is using that Clerk instance and accepts the development renderer origins. Do not paste session
    tokens into this checklist, screenshots, terminal output, or PR comments.
 4. Install exact dependencies with `npm ci` and `npm run setup:backend`.
@@ -29,7 +32,7 @@ npm run desktop:export
 
 Expected evidence:
 
-- the sign-in copy contract names Google, Apple, email, and phone;
+- the sign-in copy contract names Google, Apple, and email, and does not advertise phone;
 - callback parsing still accepts only `glidelingo://app/sign-in` and `glidelingo://app/sso-callback` with bounded
   parameters;
 - packaged navigation remains on the virtual local origin `https://desktop.glidelingo.com`, while unrelated HTTPS
@@ -54,7 +57,7 @@ Expected evidence:
    npm run desktop
    ```
 
-3. Confirm the signed-out screen says **Continue with Google, Apple, email, or phone** and Clerk renders the enabled
+3. Confirm the signed-out screen says **Continue with Google, Apple, or email** and Clerk renders the enabled
    choices.
 4. Open each configured provider once. Confirm the OAuth popup remains inside the Electron auth child while it is on
    Clerk, Google, or Apple. Confirm an unrelated HTTPS link opens in the system browser instead of navigating the auth
@@ -76,7 +79,6 @@ Live development evidence to record:
 - [ ] Google sign-in completed and returned to Electron.
 - [ ] Apple sign-in completed and returned to Electron.
 - [ ] Email verification-code sign-in completed.
-- [ ] Phone SMS-code sign-in completed.
 - [ ] New users were stopped at first-name completion before learning content.
 - [ ] Diagnostics reported an authenticated subject match for each exercised account.
 
@@ -106,7 +108,7 @@ Then use the DMG produced under `release/`:
    callback test.
 4. Cancel a provider flow and confirm the installed app returns to an actionable sign-in state without authenticating or
    becoming stuck on the callback screen.
-5. Complete email-code and phone-code sign-in in the installed app.
+5. Complete email-code sign-in in the installed app. Phone SMS remains deferred to mobile.
 6. Open **Prompt Kit → Open system diagnostics** and confirm **Authenticated session verified** against the production
    API. Capture only the result and request ID; never capture the token or raw user ID.
 7. Quit and relaunch. Confirm the intended Clerk session persists, sign-out clears it, and a second account cannot see
@@ -121,7 +123,6 @@ Live packaged evidence to record:
 - [ ] Apple cold callback passed.
 - [ ] Provider cancellation recovery passed.
 - [ ] Email verification-code sign-in passed.
-- [ ] Phone SMS-code sign-in passed.
 - [ ] First-name completion, session persistence, sign-out, account isolation, and diagnostics proof passed.
 
 Do not mark these packaged gates complete from unit tests, an Expo web session, a dry-run package, or an unsigned local

@@ -15,8 +15,8 @@ import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { FirstNameCompletionGate } from '@/features/auth/first-name-completion-gate';
 import {
-  ALLOWED_AUTH_REDIRECT_ORIGINS,
   ALLOWED_AUTH_REDIRECT_PROTOCOLS,
+  CLERK_ALLOWED_OPAQUE_REDIRECT_ORIGINS,
 } from '@/features/auth/oauth-flow';
 import { useTheme, useThemeController } from '@/hooks/use-theme';
 import { AppThemeProvider } from '@/providers/app-theme-provider';
@@ -39,7 +39,7 @@ export default function RootLayout() {
     <AppThemeProvider>
       {publishableKey ? (
         <ClerkProvider
-          allowedRedirectOrigins={ALLOWED_AUTH_REDIRECT_ORIGINS}
+          allowedRedirectOrigins={CLERK_ALLOWED_OPAQUE_REDIRECT_ORIGINS}
           allowedRedirectProtocols={ALLOWED_AUTH_REDIRECT_PROTOCOLS}
           publishableKey={publishableKey}
           tokenCache={tokenCache}>

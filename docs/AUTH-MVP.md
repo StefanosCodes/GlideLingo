@@ -9,15 +9,14 @@ only Clerk's stable `userId`; email addresses and phone numbers are never used a
 - Frontend API / issuer: `https://vast-gator-9531.clerk.accounts.dev`
 - Native identifier: `com.stefanoscodes.glidelingo`
 - Android development signing certificate: registered in Clerk from the signed EAS development build
-- Configured development sign-in methods: Google, Apple, email verification code, and phone SMS code.
+- Configured desktop development sign-in methods: Google, Apple, and email verification code.
 - Profile requirement: first name only, collected by the app immediately after authentication
-- Email and phone are alternatives; neither contact method is required when another sign-in method is used
+- Email is not required when a social sign-in method is used.
 - MFA strategies and mandatory MFA are disabled for the MVP
 
 Google and web Apple use Clerk's shared OAuth credentials in the development instance. Production requires custom Google
 and Apple provider credentials plus installed-build callback testing on each shipping platform. Phone authentication is
-free to exercise in development but is a Clerk Pro feature in production. The development SMS allowlist starts with
-Clerk's two Tier A countries and is capped at 20 messages per month.
+deferred to the mobile release and is not part of desktop development or production acceptance.
 
 ## Local configuration
 
@@ -53,7 +52,7 @@ to import or reject it; importing moves the legacy data into that Clerk user's s
 3. Before production, register the Google Play app-signing SHA-256 fingerprint in Clerk, replace Clerk's shared Google
    credentials with platform-owned OAuth credentials, and pass installed-build callback tests on Android and iOS.
 4. Replace Clerk's shared web Apple credentials with production OAuth credentials.
-5. Choose the production SMS country allowlist and accept Clerk Pro pricing before shipping phone authentication.
+5. Configure SMS countries and Clerk phone-auth pricing only when the separate mobile release adds phone authentication.
 6. Inject production keys through EAS environments. Keep the Clerk secret key and RevenueCat secret API keys server-only.
 7. In Clerk's production Native application, allowlist both exact desktop redirect URLs:
    `glidelingo://app/sign-in` and `glidelingo://app/sso-callback`. Do not allowlist a wildcard host,
@@ -84,7 +83,8 @@ to import or reject it; importing moves the legacy data into that Clerk user's s
 
 ## Verification checklist
 
-- Sign up separately with Google, Apple, email code, and phone code on every shipping platform.
+- On desktop, sign up separately with Google, Apple, and email code. Exercise phone only in the later mobile acceptance
+  plan.
 - Confirm each new user is stopped at the one-field first-name screen before seeing learning content.
 - Confirm sign-out returns to `/sign-in`, and another account cannot see the first account's browser learning state or Pro
   entitlement.

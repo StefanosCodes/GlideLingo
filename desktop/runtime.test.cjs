@@ -159,9 +159,25 @@ test('auth popup navigation and redirect events enforce the same origin allowlis
 
 test('OS authentication callbacks require the exact app origin, route, and bounded parameters', () => {
   const valid = 'glidelingo://app/sign-in?__clerk_status=verified&state=opaque';
+  const exactSignIn = encodeURIComponent('glidelingo://app/sign-in');
+  const exactCallback = encodeURIComponent('glidelingo://app/sso-callback');
 
   assert.equal(parseAuthCallbackUrl(valid), valid);
   assert.equal(findAuthCallbackUrl(['/Applications/GlideLingo.app', valid]), valid);
+  assert.equal(
+    parseAuthCallbackUrl(
+      `glidelingo://app/sign-in?after_sign_in_url=${exactSignIn}` +
+        `&after_sign_up_url=${exactCallback}&redirect_url=${exactCallback}&state=opaque`,
+    ),
+    `glidelingo://app/sign-in?after_sign_in_url=${exactSignIn}` +
+      `&after_sign_up_url=${exactCallback}&redirect_url=${exactCallback}&state=opaque`,
+  );
+  assert.equal(
+    parseAuthCallbackUrl(
+      `glidelingo://app/sign-in?redirect_url=${encodeURIComponent(exactSignIn)}&state=opaque`,
+    ),
+    `glidelingo://app/sign-in?redirect_url=${encodeURIComponent(exactSignIn)}&state=opaque`,
+  );
   assert.equal(parseAuthCallbackUrl('glidelingo://other/sign-in?state=opaque'), null);
   assert.equal(parseAuthCallbackUrl('glidelingo://app:123/sign-in?state=opaque'), null);
   assert.equal(parseAuthCallbackUrl('glidelingo://user:pass@app/sign-in?state=opaque'), null);
@@ -169,6 +185,82 @@ test('OS authentication callbacks require the exact app origin, route, and bound
   assert.equal(parseAuthCallbackUrl('https://app/sign-in?state=opaque'), null);
   assert.equal(parseAuthCallbackUrl('glidelingo://app/sign-in?state=one&state=two'), null);
   assert.equal(parseAuthCallbackUrl(`glidelingo://app/sign-in?state=${'x'.repeat(3000)}`), null);
+});
+
+test('OS callbacks reject ambiguous or attacker-controlled Clerk redirect destinations', () => {
+  const callback = 'glidelingo://app/sso-callback';
+  const redirect = (name, destination) =>
+    `${callback}?${name}=${encodeURIComponent(destination)}&state=opaque`;
+  const redirectControls = [
+    'sign_in_force_redirect_url',
+    'sign_up_force_redirect_url',
+    'sign_in_fallback_redirect_url',
+    'sign_up_fallback_redirect_url',
+    'after_sign_in_url',
+    'after_sign_up_url',
+    'redirect_url',
+    'signInForceRedirectUrl',
+    'signUpForceRedirectUrl',
+    'signInFallbackRedirectUrl',
+    'signUpFallbackRedirectUrl',
+    'afterSignInUrl',
+    'afterSignUpUrl',
+    'redirectUrl',
+  ];
+
+  for (const name of redirectControls) {
+    assert.equal(parseAuthCallbackUrl(redirect(name, 'glidelingo://other/sign-in')), null);
+    assert.equal(parseAuthCallbackUrl(redirect(name, 'glidelingo://app/other')), null);
+    assert.equal(parseAuthCallbackUrl(redirect(name, 'glidelingo://app/sign-in?next=evil')), null);
+    assert.equal(parseAuthCallbackUrl(redirect(name, 'glidelingo://app/sign-in#evil')), null);
+    assert.equal(
+      parseAuthCallbackUrl(redirect(name, encodeURIComponent('glidelingo://other/sign-in'))),
+      null,
+    );
+    assert.equal(
+      parseAuthCallbackUrl(
+        redirect(name, encodeURIComponent(encodeURIComponent('glidelingo://app/other'))),
+      ),
+      null,
+    );
+  }
+
+  const exact = encodeURIComponent('glidelingo://app/sign-in');
+  assert.equal(
+    parseAuthCallbackUrl(
+      `${callback}?redirect_url=${exact}&redirectUrl=${exact}&state=opaque`,
+    ),
+    null,
+  );
+
+  const provenExploit = encodeURIComponent('https://attacker.example/steal-session');
+  assert.equal(
+    parseAuthCallbackUrl(
+      `${callback}?sign_in_force_redirect_url=${provenExploit}&state=opaque`,
+    ),
+    null,
+  );
+  assert.equal(
+    parseAuthCallbackUrl(
+      `${callback}#/complete?sign_in_force_redirect_url=${provenExploit}&state=opaque`,
+    ),
+    null,
+  );
+});
+
+test('safe Clerk hash-router callback state is preserved after redirect validation', () => {
+  const exact = encodeURIComponent('glidelingo://app/sso-callback');
+  const callback =
+    `glidelingo://app/sso-callback#/complete?sign_in_force_redirect_url=${exact}` +
+    '&__clerk_status=verified&state=opaque';
+
+  assert.equal(parseAuthCallbackUrl(callback), callback);
+  assert.equal(
+    mapAuthCallbackToRendererUrl(callback),
+    `${PACKAGED_RENDERER_ORIGIN}/sso-callback` +
+      `#/complete?sign_in_force_redirect_url=${exact}` +
+      '&__clerk_status=verified&state=opaque',
+  );
 });
 
 test('accepted OS callbacks translate to the exact packaged HTTPS renderer', () => {
@@ -190,6 +282,7 @@ test('accepted OS callbacks translate to the exact packaged HTTPS renderer', () 
 
 test('packaged renderer URLs require the exact virtual HTTPS origin', () => {
   assert.equal(isExactPackagedRendererUrl(`${PACKAGED_RENDERER_ORIGIN}/sign-in`), true);
+  assert.equal(isExactPackagedRendererUrl('http://desktop.glidelingo.com/sign-in'), false);
   assert.equal(isExactPackagedRendererUrl('https://desktop.glidelingo.com:444/sign-in'), false);
   assert.equal(isExactPackagedRendererUrl('https://user:pass@desktop.glidelingo.com/sign-in'), false);
   assert.equal(isExactPackagedRendererUrl('https://desktop.glidelingo.com.attacker.example/sign-in'), false);
@@ -248,6 +341,20 @@ test('navigation stays in the renderer and only HTTPS links may open externally'
   assert.equal(
     isAllowedNavigation('http://127.0.0.1:8081/explore', 'http://127.0.0.1:8081/'),
     true,
+  );
+  assert.equal(
+    isAllowedNavigation(
+      `blob:${PACKAGED_RENDERER_ORIGIN}/adversarial-id`,
+      `${PACKAGED_RENDERER_ORIGIN}/`,
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedNavigation(
+      `filesystem:${PACKAGED_RENDERER_ORIGIN}/temporary/adversarial.html`,
+      `${PACKAGED_RENDERER_ORIGIN}/`,
+    ),
+    false,
   );
   assert.equal(isSafeExternalUrl('https://docs.expo.dev/'), true);
   assert.equal(isSafeExternalUrl('http://example.com/'), false);

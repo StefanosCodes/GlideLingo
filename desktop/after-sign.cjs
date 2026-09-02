@@ -75,7 +75,6 @@ function selectDeveloperIdIdentity(securityOutput) {
 function buildFinalCodesignArgs(appPath, identity, keychainFile) {
   const args = [
     '--force',
-    '--deep',
     '--timestamp',
     '--preserve-metadata=identifier,requirements,flags,entitlements',
     '--sign',
@@ -117,6 +116,9 @@ async function afterSign(context) {
   );
 
   console.log('[desktop-release] Applying final universal-bundle signature.');
+  // electron-builder has already signed every nested code object. Re-sign only the
+  // merged outer bundle: --deep can place signatures on ordinary resources in
+  // extended attributes that are not portable through the updater ZIP.
   execFileSync(
     '/usr/bin/codesign',
     buildFinalCodesignArgs(appPath, identity, signingInfo?.keychainFile),

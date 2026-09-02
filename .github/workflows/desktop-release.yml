@@ -148,6 +148,15 @@ jobs:
           ARCHITECTURES="$(lipo -archs release/mac-universal/GlideLingo.app/Contents/MacOS/GlideLingo)"
           grep -qw x86_64 <<< "$ARCHITECTURES"
           grep -qw arm64 <<< "$ARCHITECTURES"
+          EXTRACTED_ZIP_APP="${RUNNER_TEMP}/glidelingo-updater-zip"
+          mkdir -p "$EXTRACTED_ZIP_APP"
+          ditto -x -k "release/GlideLingo-${{ needs.validate.outputs.version }}-universal.zip" "$EXTRACTED_ZIP_APP"
+          codesign --verify --deep --strict --verbose=2 "$EXTRACTED_ZIP_APP/GlideLingo.app"
+          spctl --assess --type execute --verbose=4 "$EXTRACTED_ZIP_APP/GlideLingo.app"
+          xcrun stapler validate "$EXTRACTED_ZIP_APP/GlideLingo.app"
+          ZIP_ARCHITECTURES="$(lipo -archs "$EXTRACTED_ZIP_APP/GlideLingo.app/Contents/MacOS/GlideLingo")"
+          grep -qw x86_64 <<< "$ZIP_ARCHITECTURES"
+          grep -qw arm64 <<< "$ZIP_ARCHITECTURES"
       - name: Create and verify the exact release assets
         run: |
           node desktop/release-workflow.cjs write-checksums release

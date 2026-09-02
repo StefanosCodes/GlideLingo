@@ -81,3 +81,11 @@ Before considering changes complete:
 - [ ] Electron changes pass `npm run test:desktop` and `npm run desktop:export`.
 - [ ] Full pre-merge check passes `npm run verify:full`.
 - [ ] Tested on target runtimes (mobile simulator/emulator and Electron desktop).
+
+For a desktop release, treat each published format as a separate consumer boundary:
+
+- Prefer electron-builder's supported signing, notarization, and target configuration over recursive post-processing of a signed `.app`.
+- Verify both the DMG installer and ZIP updater payload; success of one does not prove the other.
+- After upload, download the exact immutable artifacts through the consumer path, verify their published digests, extract or install them normally, and re-run signature, notarization, architecture, launch, and update checks.
+- Keep the release private until the downloaded artifacts pass. Revoke temporary privileges in guaranteed cleanup even when a build fails; retain source credentials until the release is independently verified.
+- Reject macOS release apps containing `com.apple.cs.*` extended-attribute signatures because ZIP transport does not preserve them reliably.

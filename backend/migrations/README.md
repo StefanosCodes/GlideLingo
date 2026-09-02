@@ -99,3 +99,50 @@ Keep `GLIDELINGO_REVENUECAT_ENABLED=false` and `GLIDELINGO_LESSON_TUTOR_ENABLED=
 least-privileged app public SDK key used by the server's read-only Customer Info request, environment
 filter, and live sandbox evidence are all in place. The development Terraform contract must pin all
 four RevenueCat Secret Manager version numbers before the flag can be enabled.
+
+## Affiliate identity and attribution foundation
+
+`004_affiliate_identity_attribution.sql` is the additive, operator-run foundation for the affiliate
+program's server-owned identity, authorization, and attribution boundary. Apply it only after migrations
+`001`–`003`, with the same short-lived DDL operator pattern and `psql --set ON_ERROR_STOP=1`. The API
+does not run this migration at startup. The migration creates no creator, program, version, campaign,
+link, code, membership, offer, commission, ledger, transfer, or payout defaults and makes no provider
+call.
+
+The migration stores Clerk identities only as keyed `affusr_v1_` pseudonymous references. It creates
+explicit creator roles and individually scoped staff capabilities with validity and revocation fields;
+authorization reads those rows on each request, so revocation is effective immediately without waiting
+for the Clerk session to expire. The initial platform `membership_admin` capability must be inserted by
+an authorized migration operator after deriving the principal reference with the same environment-
+specific server key. The public API cannot bootstrap an administrator.
+
+Published program versions are immutable and overlapping published effective intervals are rejected.
+There is no default policy document: an operator-created draft must contain explicit policy, and a
+published version must include every required policy section and a reviewed SHA-256 policy hash. Active
+traffic also requires an explicitly active program, published effective version, active campaign,
+active link, and active creator.
+
+Referral resolution stores only link/campaign/program references and timestamps. It does not store an
+IP address, user agent, email, phone, raw Clerk subject, or raw handoff token. Handoff tokens contain
+256 random bits, are stored only as SHA-256 digests, expire exactly 15 minutes after issuance, and can
+be consumed once. Locked attribution evidence is protected from identifier or lock mutation by a
+database trigger. Membership grants, revocations, attribution binds, and denied capability checks append
+audit records; the runtime role receives no `DELETE`, DDL, program-policy mutation, creator mutation, or
+audit-update privilege.
+
+All four server switches remain false by default:
+
+```dotenv
+GLIDELINGO_AFFILIATES_ENABLED=false
+GLIDELINGO_AFFILIATE_REFERRAL_RESOLUTION_ENABLED=false
+GLIDELINGO_AFFILIATE_ATTRIBUTION_BINDING_ENABLED=false
+GLIDELINGO_AFFILIATE_MEMBERSHIP_ADMIN_ENABLED=false
+GLIDELINGO_AFFILIATE_PRINCIPAL_PSEUDONYM_KEY=
+```
+
+Do not enable any switch until migration `004` is applied through the approved operator, the
+environment-specific pseudonym key is pinned through the server secret mechanism, the exact Clerk
+issuer is configured for authenticated routes, the bootstrap administrator is reviewed, privacy
+retention/rate controls are approved, and the authorization, expiry, replay, locking, and cross-principal
+negative tests pass in that environment. This migration does not authorize offers, discounts, financial
+intake, commission, ledger entries, provider credentials, transfers, or payouts.

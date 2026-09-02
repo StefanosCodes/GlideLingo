@@ -598,6 +598,10 @@ test('workflow uses protected WIF configuration and only pinned GCP secret versi
     path.resolve(__dirname, '../.github/workflows/desktop-release.yml'),
     'utf8',
   );
+  const builderConfig = fs.readFileSync(
+    path.resolve(__dirname, 'electron-builder.yml'),
+    'utf8',
+  );
   const validationJob = workflow.split('\n  sign:')[0];
   assert.doesNotMatch(validationJob, /secrets\./);
   assert.match(workflow, /needs: validate/);
@@ -626,6 +630,12 @@ test('workflow uses protected WIF configuration and only pinned GCP secret versi
   assert.match(workflow, /release\/GlideLingo-\$\{\{ needs\.validate\.outputs\.version \}\}-universal\.zip\.blockmap/);
   assert.match(workflow, /release\/GlideLingo-\$\{\{ needs\.validate\.outputs\.version \}\}-universal\.dmg\.blockmap/);
   assert.match(workflow, /GLIDELINGO_RELEASE_VERSION: \$\{\{ needs\.validate\.outputs\.version \}\}/);
+  assert.match(workflow, /xattr -lr release\/mac-universal\/GlideLingo\.app/);
+  assert.match(workflow, /grep -a -F 'com\.apple\.cs\.'/);
+  assert.match(
+    builderConfig,
+    /signIgnore: '\/Resources\/\.\*\\\.\(\?:asar\|bin\|dat\|ico\|icns\|mp3\|nib\|pak\|png\|ttf\)\$'/,
+  );
   assert.match(workflow, /ditto -x -k "release\/GlideLingo-\$\{GLIDELINGO_RELEASE_VERSION\}-universal\.zip"/);
   assert.match(workflow, /codesign --verify --deep --strict --verbose=2 "\$EXTRACTED_ZIP_APP\/GlideLingo\.app"/);
   assert.match(workflow, /spctl --assess --type execute --verbose=4 "\$EXTRACTED_ZIP_APP\/GlideLingo\.app"/);

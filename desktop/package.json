@@ -1,6 +1,6 @@
 {
   "name": "glidelingo-desktop",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "GlideLingo desktop application shell.",
   "private": true,
   "main": "main.cjs",

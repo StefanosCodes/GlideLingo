@@ -144,6 +144,10 @@ jobs:
         env:
           GLIDELINGO_RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
+          if LC_ALL=C xattr -lr release/mac-universal/GlideLingo.app 2>/dev/null | LC_ALL=C grep -a -F 'com.apple.cs.'; then
+            echo 'Non-portable extended-attribute signatures remain in the release app.' >&2
+            exit 1
+          fi
           codesign --verify --deep --strict --verbose=2 release/mac-universal/GlideLingo.app
           spctl --assess --type execute --verbose=4 release/mac-universal/GlideLingo.app
           xcrun stapler validate release/mac-universal/GlideLingo.app

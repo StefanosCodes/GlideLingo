@@ -182,6 +182,44 @@ test('GitHub draft creation exhausts bounded lookup retries without recreating',
   assert.equal(waits, 9);
 });
 
+test('GitHub draft assets upload by immutable release id instead of tag lookup', async () => {
+  const calls = [];
+  const adapter = createGitHubAdapter('StefanosCodes/GlideLingo', (args) => {
+    calls.push(args);
+    return { status: 0, stdout: '{}', stderr: '' };
+  });
+
+  await adapter.uploadAssets(42, [
+    '/tmp/GlideLingo 1.0.0.dmg',
+    '/tmp/latest-mac.yml',
+  ]);
+
+  assert.deepEqual(calls, [
+    [
+      '--method',
+      'POST',
+      '--hostname',
+      'uploads.github.com',
+      '--header',
+      'Content-Type: application/octet-stream',
+      '--input',
+      '/tmp/GlideLingo 1.0.0.dmg',
+      'repos/StefanosCodes/GlideLingo/releases/42/assets?name=GlideLingo%201.0.0.dmg',
+    ],
+    [
+      '--method',
+      'POST',
+      '--hostname',
+      'uploads.github.com',
+      '--header',
+      'Content-Type: application/octet-stream',
+      '--input',
+      '/tmp/latest-mac.yml',
+      'repos/StefanosCodes/GlideLingo/releases/42/assets?name=latest-mac.yml',
+    ],
+  ]);
+});
+
 function gitAdapter({ onMain = true, taggedCommit = commitSha } = {}) {
   return {
     resolveCommit(reference) {
@@ -354,8 +392,8 @@ test('partial and rerun drafts converge by replacing every existing asset', asyn
     async deleteAsset(id) {
       calls.push(['delete', id]);
     },
-    async uploadAssets(tag, paths) {
-      calls.push(['upload', tag, paths.map((filePath) => path.basename(filePath))]);
+    async uploadAssets(releaseId, paths) {
+      calls.push(['upload', releaseId, paths.map((filePath) => path.basename(filePath))]);
       release = {
         id: 10,
         tag_name: releaseTag,
@@ -378,7 +416,11 @@ test('partial and rerun drafts converge by replacing every existing asset', asyn
     ['delete', 2],
     ['delete', 3],
   ]);
-  assert.deepEqual(calls[4][0], 'upload');
+  assert.deepEqual(calls[4], [
+    'upload',
+    10,
+    localAssets.map((asset) => asset.name),
+  ]);
 
   calls.length = 0;
   await convergeDraftRelease(

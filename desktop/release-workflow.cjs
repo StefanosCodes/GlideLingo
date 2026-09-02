@@ -325,7 +325,7 @@ async function convergeDraftRelease(selection, localAssets, github) {
     await github.deleteAsset(asset.id);
   }
 
-  await github.uploadAssets(selection.releaseTag, localAssets.map((asset) => asset.path));
+  await github.uploadAssets(release.id, localAssets.map((asset) => asset.path));
   const converged = await github.getRelease(selection.releaseTag);
   assertRemoteDraft(converged, localAssets, selection);
   return converged;
@@ -417,8 +417,21 @@ function createGitHubAdapter(
     async deleteAsset(assetId) {
       api(['--method', 'DELETE', `repos/${repository}/releases/assets/${assetId}`]);
     },
-    async uploadAssets(tag, assetPaths) {
-      execute(['release', 'upload', tag, '--repo', repository, '--clobber', ...assetPaths]);
+    async uploadAssets(releaseId, assetPaths) {
+      for (const assetPath of assetPaths) {
+        const assetName = path.basename(assetPath);
+        api([
+          '--method',
+          'POST',
+          '--hostname',
+          'uploads.github.com',
+          '--header',
+          'Content-Type: application/octet-stream',
+          '--input',
+          assetPath,
+          `repos/${repository}/releases/${releaseId}/assets?name=${encodeURIComponent(assetName)}`,
+        ]);
+      }
     },
   };
 }

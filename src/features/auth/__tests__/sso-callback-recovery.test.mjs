@@ -14,6 +14,16 @@ test('SSO callback recovery recognizes provider cancellation in query or hash pa
     ),
     true,
   );
+  assert.equal(
+    wasSsoCallbackCancelled('glidelingo://app/sso-callback?error=user_cancelled'),
+    true,
+  );
+  assert.equal(
+    wasSsoCallbackCancelled(
+      'glidelingo://app/sso-callback#/complete?error_description=Provider%20cancelled',
+    ),
+    true,
+  );
 });
 
 test('SSO callback recovery does not misclassify ordinary errors or malformed URLs', () => {

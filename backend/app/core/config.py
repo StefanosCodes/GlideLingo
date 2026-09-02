@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DEFAULT_DATABASE_URL = (
     "postgresql+psycopg://glidelingo:glidelingo_dev_only@127.0.0.1:55433/glidelingo"
 )
-DESKTOP_APP_ORIGIN = "glidelingo://app"
+DESKTOP_APP_ORIGIN = "https://desktop.glidelingo.com"
 
 
 class Settings(BaseSettings):
@@ -162,8 +162,8 @@ class Settings(BaseSettings):
                 or parsed_party.fragment
             ):
                 raise ValueError(
-                    "Clerk authorized parties must be HTTP(S) origins or the exact packaged "
-                    "desktop origin without credentials, paths, queries, or fragments"
+                    "Clerk authorized parties must be HTTP(S) origins without "
+                    "credentials, paths, queries, or fragments"
                 )
 
         assert self.clerk_issuer is not None

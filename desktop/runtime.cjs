@@ -2,12 +2,18 @@ const path = require('node:path');
 
 const APP_SCHEME = 'glidelingo';
 const APP_HOST = 'app';
+const PACKAGED_RENDERER_ORIGIN = 'https://desktop.glidelingo.com';
 const DEVELOPMENT_PORT = '8081';
-const PRODUCTION_API_ORIGIN = 'https://glidelingo-api-50843312405.us-west1.run.app';
-const PRODUCTION_CLERK_ORIGIN = 'https://vast-gator-9531.clerk.accounts.dev';
+const DEVELOPMENT_CLERK_ORIGIN = 'https://vast-gator-9531.clerk.accounts.dev';
+const PRODUCTION_API_ORIGIN = 'https://glidelingo-api-production-50843312405.us-west1.run.app';
+const PRODUCTION_CLERK_ORIGIN = 'https://clerk.glidelingo.com';
 const REVENUECAT_WEB_SDK_ORIGIN = 'https://sdk.revenuecat-static.com';
 const REVENUECAT_BRANDING_ORIGIN = 'https://da08ctfrofx1b.cloudfront.net';
 const AUTH_CALLBACK_PATHS = new Set(['/sign-in', '/sso-callback']);
+const AUTH_CALLBACK_DESTINATIONS = new Set([
+  `${APP_SCHEME}://${APP_HOST}/sign-in`,
+  `${APP_SCHEME}://${APP_HOST}/sso-callback`,
+]);
 const STATIC_AUTH_PROVIDER_ORIGINS = new Set([
   'https://accounts.google.com',
   'https://appleid.apple.com',
@@ -25,6 +31,24 @@ function isExactAppUrl(value) {
   return (
     url.protocol === `${APP_SCHEME}:` &&
     url.hostname === APP_HOST &&
+    !url.port &&
+    !url.username &&
+    !url.password
+  );
+}
+
+function isExactPackagedRendererUrl(value) {
+  let url;
+
+  try {
+    url = value instanceof URL ? value : new URL(value);
+  } catch {
+    return false;
+  }
+
+  return (
+    url.protocol === 'https:' &&
+    url.origin === PACKAGED_RENDERER_ORIGIN &&
     !url.port &&
     !url.username &&
     !url.password
@@ -159,7 +183,7 @@ function resolveRendererPath(distDirectory, requestUrl) {
     return null;
   }
 
-  if (!isExactAppUrl(url)) {
+  if (!isExactPackagedRendererUrl(url)) {
     return null;
   }
 
@@ -202,10 +226,37 @@ function isAllowedNavigation(targetUrl, rendererUrl) {
       return isExactAppUrl(renderer) && isExactAppUrl(target);
     }
 
-    return target.origin === renderer.origin;
+    return (
+      target.protocol === renderer.protocol &&
+      target.origin === renderer.origin &&
+      !target.username &&
+      !target.password
+    );
   } catch {
     return false;
   }
+}
+
+function mapAuthCallbackToRendererUrl(
+  targetUrl,
+  rendererOrigin = PACKAGED_RENDERER_ORIGIN,
+) {
+  const callbackUrl = parseAuthCallbackUrl(targetUrl);
+  if (!callbackUrl) return null;
+
+  let renderer;
+  try {
+    renderer = new URL(rendererOrigin);
+  } catch {
+    return null;
+  }
+  if (!isExactPackagedRendererUrl(renderer)) return null;
+
+  const callback = new URL(callbackUrl);
+  const translated = new URL(callback.pathname, renderer);
+  translated.search = callback.search;
+  translated.hash = callback.hash;
+  return translated.toString();
 }
 
 function isSafeExternalUrl(targetUrl) {
@@ -285,18 +336,70 @@ function parseAuthCallbackUrl(targetUrl) {
     return null;
   }
 
-  const parameters = [...url.searchParams.entries()];
+  const parameters = authCallbackParameters(url);
   if (parameters.length > 32) return null;
-  if (new Set(parameters.map(([name]) => name)).size !== parameters.length) return null;
+  const normalizedParameterNames = parameters.map(([name]) => normalizeAuthParameterName(name));
+  if (new Set(normalizedParameterNames).size !== parameters.length) return null;
   if (
     parameters.some(
-      ([name, value]) => !/^[A-Za-z0-9_.-]{1,80}$/.test(name) || value.length > 2048,
+      ([name, value]) =>
+        !/^[A-Za-z0-9_.-]{1,80}$/.test(name) ||
+        value.length > 2048 ||
+        (isAuthRedirectParameter(name) && !isExactAuthCallbackDestination(value)),
     )
   ) {
     return null;
   }
 
   return url.toString();
+}
+
+function authCallbackParameters(url) {
+  const parameters = [...url.searchParams.entries()];
+  const hash = url.hash.slice(1);
+  const queryStart = hash.indexOf('?');
+  const hashQuery =
+    queryStart >= 0
+      ? hash.slice(queryStart + 1)
+      : !hash.startsWith('/') && hash.includes('=')
+        ? hash
+        : null;
+
+  if (hashQuery !== null) {
+    parameters.push(...new URLSearchParams(hashQuery).entries());
+  }
+  return parameters;
+}
+
+function normalizeAuthParameterName(name) {
+  return name.replaceAll(/[^A-Za-z0-9]/g, '').toLowerCase();
+}
+
+function isAuthRedirectParameter(name) {
+  const normalized = normalizeAuthParameterName(name);
+  return (
+    (normalized.includes('redirect') && normalized.includes('url')) ||
+    (normalized.startsWith('after') && normalized.endsWith('url'))
+  );
+}
+
+function isExactAuthCallbackDestination(value) {
+  let decoded = value;
+
+  // URLSearchParams has already decoded the query value once. Decode any
+  // remaining nested encoding before comparing the complete destination.
+  for (let depth = 0; depth < 16; depth += 1) {
+    let next;
+    try {
+      next = decodeURIComponent(decoded);
+    } catch {
+      return false;
+    }
+    if (next === decoded) return AUTH_CALLBACK_DESTINATIONS.has(decoded);
+    decoded = next;
+  }
+
+  return false;
 }
 
 function findAuthCallbackUrl(argv) {
@@ -310,6 +413,8 @@ function findAuthCallbackUrl(argv) {
 module.exports = {
   APP_HOST,
   APP_SCHEME,
+  DEVELOPMENT_CLERK_ORIGIN,
+  PACKAGED_RENDERER_ORIGIN,
   PRODUCTION_API_ORIGIN,
   PRODUCTION_CLERK_ORIGIN,
   REVENUECAT_BRANDING_ORIGIN,
@@ -320,8 +425,10 @@ module.exports = {
   isAllowedAuthWindowUrl,
   isAllowedNavigation,
   isExactAppUrl,
+  isExactPackagedRendererUrl,
   isSafeExternalUrl,
   installAuthPopupNavigationSecurity,
+  mapAuthCallbackToRendererUrl,
   parseAuthCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,

@@ -9,7 +9,7 @@ tfvars_file="${script_dir}/../environments/development/revenuecat.auto.tfvars.js
 workflow_file="${script_dir}/../../../.github/workflows/deploy-development-api.yml"
 for workflow_assertion in \
   'expected_staged_generation="$((10#${initial_generation} + 1))"' \
-  '"${previous_revenuecat_raw}" != "true" && "${previous_revenuecat_raw}" != "false"' \
+  'resolved_revenuecat_flag="$(./infra/gcp/scripts/resolve-revenuecat-deploy-flag.sh' \
   'prepromotion_observed_generation' \
   'prepromotion_candidate_percent' \
   'prepromotion_revenuecat_raw'; do

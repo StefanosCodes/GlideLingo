@@ -13,6 +13,8 @@ migration_files=(
   "backend/migrations/001_lesson_tutor_guard.sql"
   "backend/migrations/002_revenuecat_entitlements.sql"
   "backend/migrations/003_revenuecat_webhook_maintenance.sql"
+  "backend/migrations/004_affiliate_identity_attribution.sql"
+  "backend/migrations/005_billing_event_intake.sql"
 )
 
 checksum_file() {

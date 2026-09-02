@@ -53,6 +53,8 @@ from app.modules.affiliates.service import AffiliateService
 from app.modules.billing.repository import PostgresEntitlementRepository
 from app.modules.billing.router import router as billing_router
 from app.modules.billing.service import BillingService
+from app.modules.billing_events.crypto import ProviderActorCipher
+from app.modules.billing_events.repository import PostgresBillingEventRepository
 from app.modules.lesson_tutor.guard import GuardLimits, PostgresLessonTutorGuard
 from app.modules.lesson_tutor.router import router as lesson_tutor_router
 from app.modules.lesson_tutor.service import LessonTutorService
@@ -139,6 +141,16 @@ def create_app(
         ),
         webhook_signature_tolerance_seconds=(
             settings.revenuecat_webhook_signature_tolerance_seconds
+        ),
+        event_intake_enabled=settings.billing_event_intake_enabled,
+        event_repository=PostgresBillingEventRepository(engine=database_engine),
+        event_provider_account_ref=settings.revenuecat_webhook_app_id,
+        provider_actor_cipher=(
+            ProviderActorCipher(
+                secret=settings.revenuecat_pseudonym_key.get_secret_value().encode()
+            )
+            if settings.revenuecat_pseudonym_key is not None
+            else None
         ),
     )
     application.state.affiliate_service = affiliate_service or AffiliateService(

@@ -77,7 +77,8 @@ if find "${state_dir}" -name '*.applied' -print -quit | grep -q .; then
 fi
 
 run_fixture >/dev/null
-test "$(wc -l < "${state_dir}/apply-log" | tr -d ' ')" = "3"
+test "$(wc -l < "${state_dir}/apply-log" | tr -d ' ')" = "5"
+test "$(< "${state_dir}/apply-log")" = $'1\n2\n3\n4\n5'
 before="$(< "${state_dir}/apply-log")"
 run_fixture >/dev/null
 test "$(< "${state_dir}/apply-log")" = "${before}"

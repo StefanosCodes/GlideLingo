@@ -170,8 +170,19 @@ jobs:
     timeout-minutes: 15
     environment: production
     env:
+      CANDIDATE_REVISION: ${{ needs.stage.outputs.candidate_revision }}
+      CANDIDATE_TAG: ${{ needs.stage.outputs.candidate_tag }}
+      EXPECTED_CANDIDATE_URL: ${{ needs.stage.outputs.candidate_url }}
+      EXPECTED_CORS_ORIGINS: ${{ needs.stage.outputs.cors_origins }}
+      EXPECTED_PROJECT_ID: ${{ needs.stage.outputs.project_id }}
+      EXPECTED_REGION: ${{ needs.stage.outputs.region }}
+      EXPECTED_REVENUECAT_ENABLED: ${{ needs.stage.outputs.revenuecat_enabled }}
+      EXPECTED_REVENUECAT_ENVIRONMENT: ${{ needs.stage.outputs.revenuecat_environment }}
+      EXPECTED_SERVICE_URL: ${{ needs.stage.outputs.service_url }}
+      EXPECTED_STAGED_GENERATION: ${{ needs.stage.outputs.staged_generation }}
       GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION || 'us-west1' }}
+      PREVIOUS_REVISION: ${{ needs.stage.outputs.previous_revision }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -195,38 +206,38 @@ jobs:
             glidelingo-prod-50843312405) ;;
             *) echo "Refusing non-production project ${GCP_PROJECT_ID}." >&2; exit 1 ;;
           esac
-          test "${GCP_PROJECT_ID}" = "${{ needs.stage.outputs.project_id }}"
-          test "${GCP_REGION}" = "${{ needs.stage.outputs.region }}"
+          test "${GCP_PROJECT_ID}" = "${EXPECTED_PROJECT_ID}"
+          test "${GCP_REGION}" = "${EXPECTED_REGION}"
           test "$(gcloud config get-value project 2>/dev/null)" = "${GCP_PROJECT_ID}"
           current_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
-          current_state="$(./infra/gcp/scripts/read-production-deploy-state.sh "${{ needs.stage.outputs.candidate_tag }}" <<< "${current_json}")"
-          test "$(jq -r .generation <<< "${current_state}")" = "${{ needs.stage.outputs.staged_generation }}"
-          test "$(jq -r .live_revision <<< "${current_state}")" = "${{ needs.stage.outputs.previous_revision }}"
-          test "$(jq -r .service_url <<< "${current_state}")" = "${{ needs.stage.outputs.service_url }}"
-          test "$(jq -r .candidate_revision <<< "${current_state}")" = "${{ needs.stage.outputs.candidate_revision }}"
-          test "$(jq -r .candidate_url <<< "${current_state}")" = "${{ needs.stage.outputs.candidate_url }}"
-          test "$(jq -r .revenuecat_enabled <<< "${current_state}")" = "${{ needs.stage.outputs.revenuecat_enabled }}"
-          test "$(jq -r .revenuecat_environment <<< "${current_state}")" = "${{ needs.stage.outputs.revenuecat_environment }}"
-          test "$(jq -r .cors_origins <<< "${current_state}")" = "${{ needs.stage.outputs.cors_origins }}"
+          current_state="$(./infra/gcp/scripts/read-production-deploy-state.sh "${CANDIDATE_TAG}" <<< "${current_json}")"
+          test "$(jq -r .generation <<< "${current_state}")" = "${EXPECTED_STAGED_GENERATION}"
+          test "$(jq -r .live_revision <<< "${current_state}")" = "${PREVIOUS_REVISION}"
+          test "$(jq -r .service_url <<< "${current_state}")" = "${EXPECTED_SERVICE_URL}"
+          test "$(jq -r .candidate_revision <<< "${current_state}")" = "${CANDIDATE_REVISION}"
+          test "$(jq -r .candidate_url <<< "${current_state}")" = "${EXPECTED_CANDIDATE_URL}"
+          test "$(jq -r .revenuecat_enabled <<< "${current_state}")" = "${EXPECTED_REVENUECAT_ENABLED}"
+          test "$(jq -r .revenuecat_environment <<< "${current_state}")" = "${EXPECTED_REVENUECAT_ENVIRONMENT}"
+          test "$(jq -r .cors_origins <<< "${current_state}")" = "${EXPECTED_CORS_ORIGINS}"
 
           rollback() {
-            gcloud run services update-traffic "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --to-revisions="${{ needs.stage.outputs.previous_revision }}=100" --quiet || true
+            gcloud run services update-traffic "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --to-revisions="${PREVIOUS_REVISION}=100" --quiet || true
           }
-          if ! gcloud run services update-traffic "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --to-revisions="${{ needs.stage.outputs.candidate_revision }}=100" --quiet; then
+          if ! gcloud run services update-traffic "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --to-revisions="${CANDIDATE_REVISION}=100" --quiet; then
             rollback
             exit 1
           fi
-          if ! curl --fail --retry 6 --retry-all-errors --retry-delay 5 "${{ needs.stage.outputs.service_url }}/health/live" || \
-             ! curl --fail --retry 6 --retry-all-errors --retry-delay 5 "${{ needs.stage.outputs.service_url }}/health/ready"; then
+          if ! curl --fail --retry 6 --retry-all-errors --retry-delay 5 "${EXPECTED_SERVICE_URL}/health/live" || \
+             ! curl --fail --retry 6 --retry-all-errors --retry-delay 5 "${EXPECTED_SERVICE_URL}/health/ready"; then
             rollback
             exit 1
           fi
-          auth_status="$(curl --silent --show-error --output /dev/null --header 'Authorization: Bearer invalid-deployment-smoke-token' --write-out '%{http_code}' "${{ needs.stage.outputs.service_url }}/v1/auth/session")"
+          auth_status="$(curl --silent --show-error --output /dev/null --header 'Authorization: Bearer invalid-deployment-smoke-token' --write-out '%{http_code}' "${EXPECTED_SERVICE_URL}/v1/auth/session")"
           if [[ "${auth_status}" != "401" ]]; then
             rollback
             exit 1
           fi
-          gcloud run services update-traffic "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --remove-tags="${{ needs.stage.outputs.candidate_tag }}" --quiet
+          gcloud run services update-traffic "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --remove-tags="${CANDIDATE_TAG}" --quiet
 
   cleanup:
     name: Clean abandoned candidate tag
@@ -236,6 +247,10 @@ jobs:
     timeout-minutes: 10
     environment: production-staging
     env:
+      CANDIDATE_REVISION: ${{ needs.stage.outputs.candidate_revision }}
+      CANDIDATE_TAG: ${{ needs.stage.outputs.candidate_tag }}
+      EXPECTED_PROJECT_ID: ${{ needs.stage.outputs.project_id }}
+      EXPECTED_REGION: ${{ needs.stage.outputs.region }}
       GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION || 'us-west1' }}
     steps:
@@ -257,26 +272,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "${GCP_PROJECT_ID}" = "${{ needs.stage.outputs.project_id }}"
-          test "${GCP_REGION}" = "${{ needs.stage.outputs.region }}"
+          test "${GCP_PROJECT_ID}" = "${EXPECTED_PROJECT_ID}"
+          test "${GCP_REGION}" = "${EXPECTED_REGION}"
           service_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
           cleanup_generation="$(jq -r '.metadata.generation // empty' <<< "${service_json}")"
           action="$(./infra/gcp/scripts/classify-production-candidate-cleanup.sh \
-            "${{ needs.stage.outputs.candidate_tag }}" \
-            "${{ needs.stage.outputs.candidate_revision }}" <<< "${service_json}")"
+            "${CANDIDATE_TAG}" \
+            "${CANDIDATE_REVISION}" <<< "${service_json}")"
           if [[ "${action}" == "absent" ]]; then exit 0; fi
           test "${action}" = "remove"
           precleanup_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
           test "$(jq -r '.metadata.generation // empty' <<< "${precleanup_json}")" = "${cleanup_generation}"
           test "$(./infra/gcp/scripts/classify-production-candidate-cleanup.sh \
-            "${{ needs.stage.outputs.candidate_tag }}" \
-            "${{ needs.stage.outputs.candidate_revision }}" <<< "${precleanup_json}")" = "remove"
+            "${CANDIDATE_TAG}" \
+            "${CANDIDATE_REVISION}" <<< "${precleanup_json}")" = "remove"
           gcloud run services update-traffic "${GCP_SERVICE}" \
             --project="${GCP_PROJECT_ID}" \
             --region="${GCP_REGION}" \
-            --remove-tags="${{ needs.stage.outputs.candidate_tag }}" \
+            --remove-tags="${CANDIDATE_TAG}" \
             --quiet
           updated_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
           test "$(./infra/gcp/scripts/classify-production-candidate-cleanup.sh \
-            "${{ needs.stage.outputs.candidate_tag }}" \
-            "${{ needs.stage.outputs.candidate_revision }}" <<< "${updated_json}")" = "absent"
+            "${CANDIDATE_TAG}" \
+            "${CANDIDATE_REVISION}" <<< "${updated_json}")" = "absent"

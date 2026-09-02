@@ -59,6 +59,16 @@ grep -Fq '"${local.github_oidc_subject_prefix}:environment:production-staging"' 
 grep -Fq '"${local.github_oidc_subject_prefix}:environment:production"' "${production}/main.tf"
 grep -Fq "'\${local.github_oidc_subject_prefix}:environment:desktop-release-signing'" "${production}/main.tf"
 grep -Fq 'subject/${local.github_oidc_subject_prefix}:environment:desktop-release-signing' "${production}/main.tf"
+release_ref_contract="(assertion.ref == 'refs/heads/main' || assertion.ref.startsWith('refs/tags/desktop-v'))"
+grep -Fq "${release_ref_contract}" "${production}/main.tf"
+release_provider_condition="$(sed -n '/resource "google_iam_workload_identity_pool_provider" "release"/,/oidc {/p' "${production}/main.tf" | grep -F 'attribute_condition = ')"
+[[ "${release_provider_condition}" == *"assertion.sub == '\${local.github_oidc_subject_prefix}:environment:desktop-release-signing' && ${release_ref_contract}"* ]]
+for denied_release_ref in refs/heads/feature refs/heads/main-malicious refs/tags/v1.0.0 refs/tags/desktop-release; do
+  if grep -Fq "${denied_release_ref}" <<< "${release_provider_condition}"; then
+    echo "Release WIF condition unexpectedly permits ${denied_release_ref}." >&2
+    exit 1
+  fi
+done
 if grep -REn --include='*.tf' --include='*.json' 'repo:StefanosCodes/GlideLingo:environment:' "${production}"; then
   echo "Production WIF must use the repository's immutable-ID OIDC subject customization." >&2
   exit 1
@@ -73,6 +83,11 @@ done
 grep -Fq 'for_each = var.revenuecat_enabled ? local.selected_revenuecat_secrets : {}' "${production}/main.tf"
 grep -Fq 'name  = "GLIDELINGO_CORS_ORIGINS"' "${production}/main.tf"
 grep -Fq 'value = jsonencode(["https://desktop.glidelingo.com"])' "${production}/main.tf"
+if ! sed -n '/resource "google_sql_database" "application"/,/^}/p' "${production}/main.tf" \
+  | grep -Fq 'prevent_destroy = true'; then
+  echo "Production application database lacks destruction protection." >&2
+  exit 1
+fi
 if grep -REn --include='*.tf' --include='*.json' 'glidelingo-prod-50843312405-1|glidelingo-prod-\*' "${production}" \
   || grep -En 'glidelingo-prod-50843312405-1|glidelingo-prod-\*' \
     "${root}/infra/gcp/scripts/bootstrap-production.sh" \
@@ -108,6 +123,22 @@ if grep -F '${{ inputs.commit_sha }}' "${workflow}" \
   echo "Manual deploy input must enter shell steps only through TARGET_COMMIT_SHA." >&2
   exit 1
 fi
+if grep -F '${{ needs.stage.outputs.' "${workflow}" \
+  | grep -Ev '^[[:space:]]+[A-Z][A-Z0-9_]*:[[:space:]]+\$\{\{ needs\.stage\.outputs\.[a-z_]+ \}\}$'; then
+  echo "Stage outputs must enter promotion and cleanup shells only through named environment variables." >&2
+  exit 1
+fi
+grep -Fq 'EXPECTED_CORS_ORIGINS: ${{ needs.stage.outputs.cors_origins }}' "${workflow}"
+grep -Fq 'test "$(jq -r .cors_origins <<< "${current_state}")" = "${EXPECTED_CORS_ORIGINS}"' "${workflow}"
+cors_round_trip_fixture='["https://desktop.glidelingo.com"]'
+shell_sentinel='$(printf should-not-execute)'
+round_trip="$(
+  EXPECTED_CORS_ORIGINS="${cors_round_trip_fixture}" \
+  CANDIDATE_TAG="${shell_sentinel}" \
+    bash -c 'printf "%s\n%s" "${EXPECTED_CORS_ORIGINS}" "${CANDIDATE_TAG}"'
+)"
+expected_round_trip="$(printf '%s\n%s' "${cors_round_trip_fixture}" "${shell_sentinel}")"
+[[ "${round_trip}" == "${expected_round_trip}" ]]
 if grep -Fn '${{ secrets.' "${workflow}"; then
   echo "Production deployment must use WIF and must not read GitHub long-lived secrets." >&2
   exit 1

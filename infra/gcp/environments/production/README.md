@@ -83,8 +83,11 @@ The operator script applies the same generation, zero-traffic, tag, and exact-re
 returns successfully when the tag is absent and refuses to remove a tag that moved to a different
 revision.
 
-Create `desktop-release-signing` for protected `desktop-v*` tags with the release WIF provider and
-service-account outputs. Apple and versioned public build inputs are fetched from the production
+Create `desktop-release-signing` with the release WIF provider and service-account outputs. The
+provider accepts only a protected `desktop-v*` tag event or a manual workflow dispatch whose
+workflow ref is exactly `main`; feature branches and other tags cannot authenticate. The workflow
+separately proves the selected existing protected tag points to the exact requested, main-reachable
+commit before signing. Apple and versioned public build inputs are fetched from the production
 project by exact Secret Manager version; GitHub should contain no long-lived signing credentials.
 
 ## Billing activation

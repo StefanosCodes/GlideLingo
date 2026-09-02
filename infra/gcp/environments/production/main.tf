@@ -195,6 +195,10 @@ resource "google_sql_database" "application" {
   name     = "glidelingo"
   instance = google_sql_database_instance.postgres.name
   charset  = "UTF8"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "random_password" "database" {
@@ -511,7 +515,7 @@ resource "google_iam_workload_identity_pool_provider" "release" {
     "attribute.repository_owner_id" = "assertion.repository_owner_id"
     "attribute.ref"                 = "assertion.ref"
   }
-  attribute_condition = "assertion.repository == '${local.github_repository}' && assertion.repository_id == '${local.github_repository_id}' && assertion.repository_owner_id == '${local.github_owner_id}' && assertion.sub == '${local.github_oidc_subject_prefix}:environment:desktop-release-signing' && assertion.ref.startsWith('refs/tags/desktop-v')"
+  attribute_condition = "assertion.repository == '${local.github_repository}' && assertion.repository_id == '${local.github_repository_id}' && assertion.repository_owner_id == '${local.github_owner_id}' && assertion.sub == '${local.github_oidc_subject_prefix}:environment:desktop-release-signing' && (assertion.ref == 'refs/heads/main' || assertion.ref.startsWith('refs/tags/desktop-v'))"
   oidc { issuer_uri = "https://token.actions.githubusercontent.com/" }
 }
 

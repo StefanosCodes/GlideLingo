@@ -158,6 +158,15 @@ grep -Fq 'classify-production-candidate-cleanup.sh' "${cleanup_operator}"
 grep -Fq -- '--remove-tags="${candidate_tag}"' "${cleanup_operator}"
 grep -Fq 'TARGET_COMMIT_SHA: ${{ inputs.commit_sha }}' "${workflow}"
 grep -Fq '[[ "${TARGET_COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]]' "${workflow}"
+grep -Fq 'candidate_tag="c-${TARGET_COMMIT_SHA:0:19}"' "${workflow}"
+grep -Fq 'if (( ${#GCP_SERVICE} + ${#candidate_tag} > 46 )); then' "${workflow}"
+production_service="glidelingo-api-production"
+full_sha="0123456789abcdef0123456789abcdef01234567"
+old_candidate_tag="candidate-${full_sha}"
+cleanup_tag="c-${full_sha:0:19}"
+(( ${#production_service} + ${#old_candidate_tag} > 46 ))
+(( ${#production_service} + ${#cleanup_tag} <= 46 ))
+test "${#cleanup_tag}" -eq 21
 if grep -F '${{ inputs.commit_sha }}' "${workflow}" \
   | grep -Ev '^[[:space:]]+(ref|TARGET_COMMIT_SHA):[[:space:]]+\$\{\{ inputs\.commit_sha \}\}$'; then
   echo "Manual deploy input must enter shell steps only through TARGET_COMMIT_SHA." >&2
@@ -207,10 +216,22 @@ if "${state_reader}" candidate-deadbeef <<< "$(jq '.status.observedGeneration = 
   exit 1
 fi
 
-cleanup_tag="candidate-0123456789abcdef0123456789abcdef01234567"
 cleanup_fixture="$(jq --arg tag "${cleanup_tag}" '.status.traffic[1].tag = $tag' <<< "${fixture}")"
 [[ "$("${cleanup_classifier}" "${cleanup_tag}" api-00002 <<< "${cleanup_fixture}")" == "remove" ]]
 [[ "$("${cleanup_classifier}" "${cleanup_tag}" api-00002 <<< "$(jq '.status.traffic |= map(select(.tag == null))' <<< "${cleanup_fixture}")")" == "absent" ]]
+if "${cleanup_classifier}" "${old_candidate_tag}" api-00002 <<< "${cleanup_fixture}" >/dev/null 2>&1; then
+  echo "Cleanup classifier accepted the Cloud Run-incompatible full-SHA tag." >&2
+  exit 1
+fi
+for malformed_cleanup_tag in \
+  c-0123456789abcdef01 \
+  c-0123456789abcdef0123 \
+  c-0123456789abcdef01G; do
+  if "${cleanup_classifier}" "${malformed_cleanup_tag}" api-00002 <<< "${cleanup_fixture}" >/dev/null 2>&1; then
+    echo "Cleanup classifier accepted malformed tag ${malformed_cleanup_tag}." >&2
+    exit 1
+  fi
+done
 if "${cleanup_classifier}" "${cleanup_tag}" api-99999 <<< "${cleanup_fixture}" >/dev/null 2>&1; then
   echo "Cleanup classifier would delete a tag attached to a different revision." >&2
   exit 1

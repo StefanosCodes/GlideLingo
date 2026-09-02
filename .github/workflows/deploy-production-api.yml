@@ -108,7 +108,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          candidate_tag="candidate-${TARGET_COMMIT_SHA}"
+          candidate_tag="c-${TARGET_COMMIT_SHA:0:19}"
+          if (( ${#GCP_SERVICE} + ${#candidate_tag} > 46 )); then
+            echo "Cloud Run service and candidate tag exceed the 46-character combined limit." >&2
+            exit 1
+          fi
           initial_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
           initial_state="$(./infra/gcp/scripts/read-production-deploy-state.sh <<< "${initial_json}")"
           initial_generation="$(jq -r .generation <<< "${initial_state}")"

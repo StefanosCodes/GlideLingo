@@ -13,8 +13,8 @@ if [[ "$(gcloud config get-value project 2>/dev/null)" != "${expected_project}" 
   echo "Active gcloud project must be exactly ${expected_project}." >&2
   exit 1
 fi
-if [[ ! "${candidate_tag}" =~ ^candidate-[0-9a-f]{40}$ || -z "${candidate_revision}" ]]; then
-  echo "Usage: $0 candidate-FORTY_CHARACTER_COMMIT EXACT_CLOUD_RUN_REVISION" >&2
+if [[ ! "${candidate_tag}" =~ ^c-[0-9a-f]{19}$ || -z "${candidate_revision}" ]]; then
+  echo "Usage: $0 c-NINETEEN_CHARACTER_COMMIT_PREFIX EXACT_CLOUD_RUN_REVISION" >&2
   exit 2
 fi
 

@@ -32,7 +32,7 @@ export function ModuleTree({
   onSelectLesson,
 }: ModuleTreeProps) {
   const theme = useTheme();
-  const { enrolledCourse, completedLessonIds, currentModule, activeLessonId } = useLearning();
+  const { enrolledCourse, completedLessonIds, currentModule, activeLessonId, nextLesson } = useLearning();
   const currentId = selectedModuleId ?? currentModule?.id ?? enrolledCourse?.modules[0]?.id ?? null;
   const [openId, setOpenId] = useState<string | null>(currentId);
   const activeLesson = propSelectedLessonId ?? activeLessonId;
@@ -128,13 +128,15 @@ export function ModuleTree({
           ? module.lessons.map((lesson, lessonIndex) => {
               const isLessonActive = activeLesson === lesson.id;
               const lessonDone = completedLessonIds.includes(lesson.id);
-              const lessonMeta = lessonDone ? 'Done' : `${lesson.durationMin} min`;
+              const lessonLocked = !lessonDone && nextLesson?.lesson.id !== lesson.id;
+              const lessonMeta = lessonDone ? 'Done' : lessonLocked ? 'Locked' : `${lesson.durationMin} min`;
               return rail ? (
                 <Pressable
                   key={lesson.id}
                   accessibilityLabel={`${lesson.title}. ${lessonMeta}`}
                   accessibilityRole="button"
-                  accessibilityState={{ selected: isLessonActive }}
+                  accessibilityState={{ disabled: lessonLocked, selected: isLessonActive }}
+                  disabled={lessonLocked}
                   onPress={() => {
                     setOpenId(module.id);
                     onSelectLesson?.(lesson.id);
@@ -144,6 +146,7 @@ export function ModuleTree({
                     (isLessonActive || pressed || hovered) && {
                       backgroundColor: theme.backgroundSelected,
                     },
+                    lessonLocked && styles.locked,
                   ]}>
                   <ThemedText
                     type="footnote"
@@ -161,13 +164,15 @@ export function ModuleTree({
                   key={lesson.id}
                   accessibilityLabel={`${lesson.title}. ${lessonMeta}`}
                   accessibilityRole="button"
-                  accessibilityState={{ selected: isLessonActive }}
+                  accessibilityState={{ disabled: lessonLocked, selected: isLessonActive }}
+                  disabled={lessonLocked}
                   onPress={() => onSelectLesson?.(lesson.id)}
                   style={[
                     styles.pageLesson,
                     isLessonActive && { backgroundColor: theme.backgroundSelected },
                     { borderTopColor: theme.separator },
                     lessonIndex === 0 && { borderTopWidth: StyleSheet.hairlineWidth },
+                    lessonLocked && styles.locked,
                   ]}>
                   <ThemedText type="footnote" style={isLessonActive ? styles.railLessonTitleActive : undefined}>
                     {lesson.title}
@@ -246,4 +251,5 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
   },
   pressed: { opacity: 0.58 },
+  locked: { opacity: 0.48 },
 });

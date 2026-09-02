@@ -9,7 +9,7 @@ import { useLearning } from '@/providers/learning-provider';
 
 type PressState = { pressed: boolean; hovered?: boolean };
 
-export function RhythmStatusButton() {
+export function RhythmStatusButton({ compact = false }: { compact?: boolean }) {
   const router = useRouter();
   const theme = useTheme();
   const { rhythmSummary } = useLearning();
@@ -30,6 +30,7 @@ export function RhythmStatusButton() {
       onPress={() => router.push('/rhythm')}
       style={({ pressed, hovered }: PressState) => [
         styles.button,
+        compact && styles.buttonCompact,
         {
           backgroundColor: theme.warningSoft,
           borderColor: theme.warning,
@@ -42,9 +43,11 @@ export function RhythmStatusButton() {
         size={16}
         tintColor={theme.warning}
       />
-      <ThemedText numberOfLines={1} style={styles.label}>
-        {label}
-      </ThemedText>
+      {!compact ? (
+        <ThemedText numberOfLines={1} style={styles.label}>
+          {label}
+        </ThemedText>
+      ) : null}
     </Pressable>
   );
 }
@@ -63,4 +66,5 @@ const styles = StyleSheet.create({
     ...webClickable,
   },
   label: { fontFamily: Fonts.sansMedium, fontSize: 13, lineHeight: 18 },
+  buttonCompact: { height: 44, justifyContent: 'center', paddingHorizontal: 0, width: 44 },
 });

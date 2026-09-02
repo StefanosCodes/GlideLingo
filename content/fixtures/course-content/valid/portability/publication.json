@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "id": "portable-publication",
+  "version": "1.0.0",
+  "courseId": "en-x-glide-portability",
+  "courseVersion": "1.0.0",
+  "status": "draft",
+  "sourceRevision": "fixture-only",
+  "schemaVersions": {
+    "course": 1,
+    "languageProfile": 1,
+    "capabilities": 1,
+    "modules": 1,
+    "mission": 1,
+    "lesson": 1,
+    "activity": 1,
+    "scenario": 1,
+    "pronunciationTargets": 1,
+    "publication": 1
+  },
+  "contentHash": "sha256:550a3fe963024cbbaccfb707593bdaff814d466d77d4ba2a07fdb0fcc80d6c73",
+  "provenance": [
+    {
+      "kind": "authored",
+      "description": "Maintainer-authored fictional data for deterministic schema portability tests."
+    }
+  ],
+  "validatorReport": {
+    "command": "npm run course:validate",
+    "status": "pending",
+    "validatedAt": null
+  },
+  "reviews": {
+    "curriculum": {
+      "status": "pending",
+      "reviewer": "unassigned",
+      "evidence": "Required before publication.",
+      "reviewedAt": null
+    },
+    "instructionalDesign": {
+      "status": "pending",
+      "reviewer": "unassigned",
+      "evidence": "Required before publication.",
+      "reviewedAt": null
+    },
+    "languagePragmatics": {
+      "status": "pending",
+      "reviewer": "unassigned",
+      "evidence": "Required before publication.",
+      "reviewedAt": null
+    },
+    "independentAssessment": {
+      "status": "pending",
+      "reviewer": "unassigned",
+      "evidence": "Required before publication.",
+      "reviewedAt": null
+    },
+    "audioPlatformQa": {
+      "status": "pending",
+      "reviewer": "unassigned",
+      "evidence": "Required before publication.",
+      "reviewedAt": null
+    },
+    "accessibility": {
+      "status": "pending",
+      "reviewer": "unassigned",
+      "evidence": "Required before publication.",
+      "reviewedAt": null
+    },
+    "learnerPilot": {
+      "status": "pending",
+      "reviewer": "unassigned",
+      "evidence": "Required before publication.",
+      "reviewedAt": null
+    }
+  },
+  "knownLimitations": ["Fixture-only content; never eligible for learner publication."],
+  "migrationCompatibility": "No prior fixture version exists.",
+  "publishedAt": null,
+  "retiredAt": null
+}

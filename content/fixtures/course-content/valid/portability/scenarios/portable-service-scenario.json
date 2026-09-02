@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "portable-service-scenario",
+  "version": "1.0.0",
+  "courseId": "en-x-glide-portability",
+  "moduleId": "portable-first-contact",
+  "targetCapabilityIds": ["portable-request-item"],
+  "supportingCapabilityIds": [],
+  "setting": "A fictional counter with one fictional item",
+  "learnerGoal": "Make the authored request and acknowledge the item.",
+  "role": {
+    "name": "Fixture attendant",
+    "persona": "Neutral, brief, and limited to the authored fixture exchange"
+  },
+  "languageLevel": "One authored two-token request",
+  "allowedResources": ["sipa", "na", "the authored English fallback"],
+  "authoredOpening": "The fixture attendant indicates that the interaction may begin.",
+  "hintLadder": ["Recall the item token.", "Use sipa na."],
+  "correctionPolicy": "Observe the learner turn first; provide one authored correction afterward.",
+  "targetTurnRange": {
+    "minimum": 1,
+    "maximum": 2
+  },
+  "maximumDurationSeconds": 120,
+  "successObservations": [
+    {
+      "id": "request-observed",
+      "description": "The learner communicates the authored request intent."
+    }
+  ],
+  "completionRule": {
+    "type": "all-required-observations",
+    "requiredObservationIds": ["request-observed"]
+  },
+  "evidenceMapping": [
+    {
+      "observationId": "request-observed",
+      "capabilityId": "portable-request-item",
+      "level": "demonstration"
+    }
+  ],
+  "safeExits": ["End without completion", "Use the authored typed alternative"],
+  "conversationProfileId": "fixture-bounded-turns"
+}

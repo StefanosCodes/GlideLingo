@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glidelingo.app/schemas/course-content/v1/lesson.schema.json",
+  "title": "GlideLingo lesson record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "version",
+    "missionId",
+    "title",
+    "immediateOutcome",
+    "primaryLearnerAction",
+    "entryState",
+    "durationMinutes",
+    "activities",
+    "newMaterial",
+    "recycledMaterial",
+    "feedbackRetryBehavior",
+    "completionCondition",
+    "safeResumeActivityIds",
+    "assetIds"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "version": {
+      "$ref": "common.schema.json#/$defs/version"
+    },
+    "missionId": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "title": {
+      "$ref": "common.schema.json#/$defs/nonEmptyString"
+    },
+    "immediateOutcome": {
+      "$ref": "common.schema.json#/$defs/nonEmptyString"
+    },
+    "primaryLearnerAction": {
+      "$ref": "common.schema.json#/$defs/nonEmptyString"
+    },
+    "entryState": {
+      "$ref": "common.schema.json#/$defs/nonEmptyString"
+    },
+    "durationMinutes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 120
+    },
+    "activities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "activity.schema.json"
+      }
+    },
+    "newMaterial": {
+      "$ref": "common.schema.json#/$defs/stringList"
+    },
+    "recycledMaterial": {
+      "$ref": "common.schema.json#/$defs/stringList"
+    },
+    "feedbackRetryBehavior": {
+      "$ref": "common.schema.json#/$defs/nonEmptyString"
+    },
+    "completionCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "requiredActivityIds"],
+      "properties": {
+        "type": {
+          "const": "all-required-activities"
+        },
+        "requiredActivityIds": {
+          "$ref": "common.schema.json#/$defs/nonEmptyIdList"
+        }
+      }
+    },
+    "safeResumeActivityIds": {
+      "$ref": "common.schema.json#/$defs/nonEmptyIdList"
+    },
+    "assetIds": {
+      "$ref": "common.schema.json#/$defs/idList"
+    }
+  }
+}

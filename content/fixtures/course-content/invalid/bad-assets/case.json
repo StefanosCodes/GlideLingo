@@ -1,0 +1,14 @@
+{
+  "description": "A declared local asset points to a file that is not in the package.",
+  "operations": [
+    {
+      "op": "replace",
+      "file": "missions/portable-request-mission.json",
+      "path": "/assets/0/path",
+      "value": "assets/missing-card.svg"
+    }
+  ],
+  "expectedCode": "missing-asset",
+  "expectedFile": "missions/portable-request-mission.json",
+  "expectedPointer": "/assets/0/path"
+}

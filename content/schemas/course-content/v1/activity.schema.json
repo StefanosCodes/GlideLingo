@@ -1,0 +1,356 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glidelingo.app/schemas/course-content/v1/activity.schema.json",
+  "title": "GlideLingo activity record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "version",
+    "rendererType",
+    "phase",
+    "instruction",
+    "prompt",
+    "targetCapabilityIds",
+    "supportingCapabilityIds",
+    "communicationMode",
+    "usage",
+    "assessmentEligible",
+    "evidenceEligibility",
+    "supportLevel",
+    "hints",
+    "feedbackContrasts",
+    "retryPolicy",
+    "accessibility",
+    "assetIds"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "version": {
+      "$ref": "common.schema.json#/$defs/version"
+    },
+    "rendererType": {
+      "enum": [
+        "explain",
+        "listen_choose",
+        "match",
+        "order_phrase",
+        "type_response",
+        "script_recognition",
+        "listen_repeat",
+        "controlled_speak",
+        "mini_roleplay",
+        "checkpoint_item",
+        "reflection"
+      ]
+    },
+    "phase": {
+      "enum": ["encounter", "notice", "retrieve", "produce", "perform", "revisit"]
+    },
+    "instruction": {
+      "$ref": "common.schema.json#/$defs/nonEmptyString"
+    },
+    "prompt": {
+      "$ref": "common.schema.json#/$defs/nonEmptyString"
+    },
+    "targetCapabilityIds": {
+      "$ref": "common.schema.json#/$defs/nonEmptyIdList"
+    },
+    "supportingCapabilityIds": {
+      "$ref": "common.schema.json#/$defs/idList"
+    },
+    "communicationMode": {
+      "$ref": "common.schema.json#/$defs/communicationMode"
+    },
+    "usage": {
+      "enum": ["teaching", "practice", "assessment", "review"]
+    },
+    "assessmentEligible": {
+      "type": "boolean"
+    },
+    "evidenceEligibility": {
+      "enum": ["none", "practice", "demonstration", "retention", "pronunciation"]
+    },
+    "supportLevel": {
+      "enum": ["high", "medium", "fading", "bounded", "low"]
+    },
+    "hints": {
+      "$ref": "common.schema.json#/$defs/stringList"
+    },
+    "feedbackContrasts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["when", "feedback"],
+        "properties": {
+          "when": {
+            "$ref": "common.schema.json#/$defs/nonEmptyString"
+          },
+          "feedback": {
+            "$ref": "common.schema.json#/$defs/nonEmptyString"
+          }
+        }
+      }
+    },
+    "retryPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxAttempts", "canSkip"],
+      "properties": {
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "canSkip": {
+          "type": "boolean"
+        }
+      }
+    },
+    "accessibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instruction"],
+      "properties": {
+        "instruction": {
+          "$ref": "common.schema.json#/$defs/nonEmptyString"
+        },
+        "nonAudioAlternative": {
+          "$ref": "common.schema.json#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "assetIds": {
+      "$ref": "common.schema.json#/$defs/idList"
+    },
+    "text": {
+      "$ref": "common.schema.json#/$defs/nonEmptyString"
+    },
+    "audioId": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "choices": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "text"],
+        "properties": {
+          "id": {
+            "$ref": "common.schema.json#/$defs/id"
+          },
+          "text": {
+            "$ref": "common.schema.json#/$defs/nonEmptyString"
+          }
+        }
+      }
+    },
+    "acceptedChoiceIds": {
+      "$ref": "common.schema.json#/$defs/nonEmptyIdList"
+    },
+    "pairs": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["left", "right"],
+        "properties": {
+          "left": {
+            "$ref": "common.schema.json#/$defs/nonEmptyString"
+          },
+          "right": {
+            "$ref": "common.schema.json#/$defs/nonEmptyString"
+          }
+        }
+      }
+    },
+    "tokens": {
+      "$ref": "common.schema.json#/$defs/nonEmptyStringList"
+    },
+    "acceptedOrders": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "common.schema.json#/$defs/nonEmptyStringList"
+      }
+    },
+    "acceptedResponses": {
+      "$ref": "common.schema.json#/$defs/nonEmptyStringList"
+    },
+    "pronunciationTargetId": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "rubric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criteria", "minimumMet"],
+      "properties": {
+        "criteria": {
+          "$ref": "common.schema.json#/$defs/nonEmptyStringList"
+        },
+        "minimumMet": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "scenarioId": {
+      "$ref": "common.schema.json#/$defs/id"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "usage": {
+            "enum": ["teaching", "practice"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "assessmentEligible": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "usage": {
+            "enum": ["assessment", "review"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "assessmentEligible": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "rendererType": {
+            "enum": ["explain", "reflection"]
+          }
+        }
+      },
+      "then": {
+        "required": ["text"],
+        "properties": {
+          "assessmentEligible": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "rendererType": {
+            "enum": ["listen_choose", "script_recognition"]
+          }
+        }
+      },
+      "then": {
+        "required": ["choices", "acceptedChoiceIds"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "rendererType": {
+            "const": "listen_choose"
+          }
+        }
+      },
+      "then": {
+        "required": ["audioId"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "rendererType": {
+            "const": "match"
+          }
+        }
+      },
+      "then": {
+        "required": ["pairs"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "rendererType": {
+            "const": "order_phrase"
+          }
+        }
+      },
+      "then": {
+        "required": ["tokens", "acceptedOrders"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "rendererType": {
+            "const": "type_response"
+          }
+        }
+      },
+      "then": {
+        "required": ["acceptedResponses"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "rendererType": {
+            "const": "listen_repeat"
+          }
+        }
+      },
+      "then": {
+        "required": ["audioId", "pronunciationTargetId"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "rendererType": {
+            "enum": ["controlled_speak", "checkpoint_item"]
+          }
+        }
+      },
+      "then": {
+        "required": ["rubric"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "rendererType": {
+            "const": "mini_roleplay"
+          }
+        }
+      },
+      "then": {
+        "required": ["scenarioId", "rubric"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "description": "A module references a capability that does not exist in the package.",
+  "operations": [
+    {
+      "op": "replace",
+      "file": "modules.json",
+      "path": "/modules/0/targetCapabilityIds/0",
+      "value": "missing-capability"
+    }
+  ],
+  "expectedCode": "missing-reference",
+  "expectedFile": "modules.json",
+  "expectedPointer": "/modules/0/targetCapabilityIds/0"
+}

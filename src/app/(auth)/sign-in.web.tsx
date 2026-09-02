@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
+import { getDesktopOAuthTransport } from '@/features/auth/desktop-oauth-transport';
 import { DESKTOP_AUTH_CALLBACK_URL, selectWebOauthFlow } from '@/features/auth/oauth-flow';
 import { SIGN_IN_METHODS_COPY } from '@/features/auth/sign-in-copy';
 import { useTheme } from '@/hooks/use-theme';
@@ -16,6 +17,7 @@ export default function SignInRoute() {
   const desktopCallbackUrl = oauthFlow === 'redirect'
     ? DESKTOP_AUTH_CALLBACK_URL
     : undefined;
+  const usesDesktopOAuthTransport = Boolean(getDesktopOAuthTransport());
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]} testID="auth-sign-in">
@@ -32,11 +34,11 @@ export default function SignInRoute() {
       </View>
       <SignIn
         fallbackRedirectUrl="/"
-        forceRedirectUrl={desktopCallbackUrl}
+        forceRedirectUrl={usesDesktopOAuthTransport ? undefined : desktopCallbackUrl}
         oauthFlow={oauthFlow}
         routing="hash"
         signUpFallbackRedirectUrl="/"
-        signUpForceRedirectUrl={desktopCallbackUrl}
+        signUpForceRedirectUrl={usesDesktopOAuthTransport ? undefined : desktopCallbackUrl}
         withSignUp
       />
     </View>

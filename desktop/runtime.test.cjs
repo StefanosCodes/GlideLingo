@@ -17,6 +17,7 @@ const {
   installAuthPopupNavigationSecurity,
   mapAuthCallbackToRendererUrl,
   parseAuthCallbackUrl,
+  parseOAuthTransportCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
   validateProductionApiOrigin,
@@ -278,6 +279,30 @@ test('accepted OS callbacks translate to the exact packaged HTTPS renderer', () 
     ),
     null,
   );
+});
+
+test('accepted OS callbacks translate to the exact active loopback development renderer', () => {
+  assert.equal(
+    mapAuthCallbackToRendererUrl(
+      'glidelingo://app/sso-callback?rotating_token_nonce=nonce',
+      'http://127.0.0.1:8081/',
+    ),
+    'http://127.0.0.1:8081/sso-callback?rotating_token_nonce=nonce',
+  );
+  assert.equal(
+    mapAuthCallbackToRendererUrl(
+      'glidelingo://app/sso-callback?rotating_token_nonce=nonce',
+      'http://localhost:9000/',
+    ),
+    null,
+  );
+});
+
+test('OAuth transport callbacks require the exact dedicated SSO route', () => {
+  const callback = 'glidelingo://app/sso-callback?rotating_token_nonce=nonce';
+  assert.equal(parseOAuthTransportCallbackUrl(callback), callback);
+  assert.equal(parseOAuthTransportCallbackUrl('glidelingo://app/sign-in?state=opaque'), null);
+  assert.equal(parseOAuthTransportCallbackUrl('glidelingo://other/sso-callback'), null);
 });
 
 test('packaged renderer URLs require the exact virtual HTTPS origin', () => {

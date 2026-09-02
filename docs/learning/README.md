@@ -10,9 +10,10 @@ These documents describe the intended product contract. They do **not** claim th
 
 1. [Learning standard](./LEARNING-STANDARD.md) defines the evidence-backed principles and non-negotiable product invariants.
 2. [Course outline template](./COURSE-OUTLINE-TEMPLATE.md) defines the reusable structure for a course, stage, module, mission, lesson, activity, and checkpoint.
-3. [Execution plan](./EXECUTION-PLAN.md) turns the standard into small vertical slices with acceptance gates.
-4. [Calm-momentum slice](./CALM-MOMENTUM-SLICE.md) records the first implemented evidence, review, and weekly-consistency behavior contract.
-5. [Calm-momentum visual](./CALM-MOMENTUM-VISUAL.md) records the black/white canvas plus a light-blue accent and a narrow gradient exception.
+3. [Course skeleton implementation](./COURSE-SKELETON-IMPLEMENTATION.md) defines the executable boundary between the reusable course engine and language-specific substance, including live-versus-authored behavior and the Greek population handoff.
+4. [Execution plan](./EXECUTION-PLAN.md) turns the standard into small vertical slices with acceptance gates.
+5. [Calm-momentum slice](./CALM-MOMENTUM-SLICE.md) records the first implemented evidence, review, and weekly-consistency behavior contract.
+6. [Calm-momentum visual](./CALM-MOMENTUM-VISUAL.md) records the black/white canvas plus a light-blue accent and a narrow gradient exception.
 
 The infrastructure and application delivery direction remains in [`../infra/`](../infra/README.md). The learning documents own curriculum and learner-evidence meaning; the infrastructure documents own application and system boundaries.
 

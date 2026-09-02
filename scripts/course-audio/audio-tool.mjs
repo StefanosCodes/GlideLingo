@@ -53,6 +53,43 @@ async function readJson(filename) {
   }
 }
 
+async function readOptionalJsonDirectory(directory) {
+  let names;
+  try {
+    names = (await readdir(directory)).filter((name) => name.endsWith('.json')).sort();
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+  return Promise.all(names.map((name) => readJson(path.join(directory, name))));
+}
+
+export function normalizeAudioLessons(missions, presentations) {
+  const byLessonId = new Map();
+  function add(lessonId, blocks) {
+    if (!lessonId) return;
+    const current = byLessonId.get(lessonId) ?? { lessonId, blocks: [] };
+    current.blocks.push(...blocks);
+    byLessonId.set(lessonId, current);
+  }
+  for (const mission of missions) {
+    if (Array.isArray(mission.lessons)) {
+      for (const lesson of mission.lessons) {
+        const activityAudio = Array.isArray(lesson.activities)
+          ? lesson.activities.filter((activity) => activity && typeof activity === 'object' && activity.audioId)
+          : [];
+        add(lesson.id, activityAudio);
+      }
+    } else {
+      add(mission.lessonId, Array.isArray(mission.blocks) ? mission.blocks : []);
+    }
+  }
+  for (const presentation of presentations) {
+    add(presentation.lessonId, Array.isArray(presentation.blocks) ? presentation.blocks : []);
+  }
+  return [...byLessonId.values()].sort((left, right) => left.lessonId.localeCompare(right.lessonId));
+}
+
 async function readLock(lockPath) {
   try {
     return await readJson(lockPath);
@@ -95,9 +132,9 @@ export async function loadProject(root, env = process.env, courseDirectory = 'en
       applyEnvironmentOverrides(profile, env, courseLocale),
     ]),
   );
-  const missionDir = path.join(courseDir, 'missions');
-  const missionNames = (await readdir(missionDir)).filter((name) => name.endsWith('.json')).sort();
-  const missions = await Promise.all(missionNames.map((name) => readJson(path.join(missionDir, name))));
+  const missionDocuments = await readOptionalJsonDirectory(path.join(courseDir, 'missions'));
+  const presentations = await readOptionalJsonDirectory(path.join(courseDir, 'compatibility'));
+  const missions = normalizeAudioLessons(missionDocuments, presentations);
 
   return {
     root,

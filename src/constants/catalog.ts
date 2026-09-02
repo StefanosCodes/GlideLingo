@@ -1,10 +1,16 @@
-import elLettersOne from '../../content/courses/en-el-GR/missions/el-letters-1.json';
-
 import type {
   CommunicationMode,
   EvidenceLevel,
   LessonCapability,
 } from '@/features/learning-progress/evidence-policy';
+import {
+  bridgeCoursePackageLesson,
+  type CompatibilityPresentation,
+} from '@/features/course-catalog/compat/catalog-adapter';
+import {
+  enElGrCompatibilityPresentation,
+  enElGrPackageSource,
+} from '@/features/course-catalog/loader/course-packages.generated';
 
 export type LanguageId = 'el' | 'es' | 'fr';
 
@@ -75,7 +81,7 @@ export const languages: Language[] = [
   { id: 'fr', name: 'French', region: 'France', flag: '🇫🇷', code: 'FR', available: false },
 ];
 
-export const courses: Course[] = [
+const compatibilityCatalog: Course[] = [
   {
     id: 'el-from-zero',
     languageId: 'el',
@@ -97,11 +103,6 @@ export const courses: Course[] = [
             id: 'el-letters-1',
             title: 'The sound of Greek',
             durationMin: 8,
-            blocks: elLettersOne.blocks as LessonBlock[],
-            beats: elLettersOne.beats as SittingBeat[],
-            reviewBeats: elLettersOne.reviewBeats as SittingBeat[],
-            capability: elLettersOne.capability as LessonCapability,
-            introducedModes: elLettersOne.introducedModes as CommunicationMode[],
           },
           { id: 'el-letters-2', title: 'The alphabet', durationMin: 10 },
           { id: 'el-letters-3', title: 'First words', durationMin: 8 },
@@ -210,6 +211,12 @@ export const courses: Course[] = [
     ],
   },
 ];
+
+export const courses = bridgeCoursePackageLesson(
+  compatibilityCatalog,
+  enElGrPackageSource,
+  enElGrCompatibilityPresentation as CompatibilityPresentation,
+);
 
 export function getLanguage(id: LanguageId) {
   const language = languages.find((item) => item.id === id);

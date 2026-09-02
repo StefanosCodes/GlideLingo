@@ -15,6 +15,7 @@ import {
 } from './validator.mjs';
 
 const validFixture = path.join(workspaceRoot, 'content', 'fixtures', 'course-content', 'valid', 'portability');
+const greekMigrationPackage = path.join(workspaceRoot, 'content', 'courses', 'en-el-GR');
 const invalidFixtures = path.join(workspaceRoot, 'content', 'fixtures', 'course-content', 'invalid');
 
 function decodePointerPart(value) {
@@ -94,6 +95,23 @@ test('the portability package validates deterministically with an exact content 
   });
   const publication = JSON.parse(await readFile(path.join(validFixture, 'publication.json'), 'utf8'));
   assert.equal(publication.contentHash, await computeContentHash(validFixture));
+});
+
+test('the draft Greek migration package validates without inventing a guided scenario', async () => {
+  const result = await validateCoursePackage(greekMigrationPackage);
+  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(result.stats, {
+    capabilities: 1,
+    modules: 1,
+    missions: 1,
+    lessons: 1,
+    activities: 9,
+    scenarios: 0,
+    pronunciationTargets: 1,
+  });
+  const publication = JSON.parse(await readFile(path.join(greekMigrationPackage, 'publication.json'), 'utf8'));
+  assert.equal(publication.status, 'draft');
+  assert.equal(publication.contentHash, await computeContentHash(greekMigrationPackage));
 });
 
 test('the universal schema set covers every logical record in section 6', async () => {

@@ -10,9 +10,13 @@ Run the deterministic repository validator with:
 npm run course:validate
 ```
 
-The default command validates schema-based packages under `content/courses/` and the valid portability fixture. Course
-directories without `course.json` remain on the explicit legacy bridge and are reported without being migrated. Pass
-one or more package directories after `--` to validate only those paths.
+The default command validates schema-based packages under `content/courses/` and the valid portability fixture. Draft
+packages may be structurally incomplete, but they remain hidden from the production loader until their publication
+record and review gates pass. Pass one or more package directories after `--` to validate only those paths.
+
+`content/courses/en-el-GR` is the first migration package. Its publication record remains `draft`; the temporary catalog
+adapter opts into that package explicitly so the existing `el-letters-1` lesson and saved audio keep working without
+claiming that the Greek course has passed publication review.
 
 Intentional invalid cases under `content/fixtures/course-content/invalid/` are small mutation fixtures applied to the
 valid fictional package by `npm run test:course`. They cover duplicate IDs, missing references, prerequisite cycles,

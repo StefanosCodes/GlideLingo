@@ -10,6 +10,7 @@ import {
   loadDevelopmentContract,
   renderManagedBlock,
   replaceManagedBlock,
+  validateLocalValues,
   writeEnvironmentAtomic,
 } from './development-env.mjs';
 
@@ -22,8 +23,13 @@ try {
   const secretValues = Object.fromEntries(
     Object.entries(contract).map(([envName, spec]) => [envName, accessSecret(spec)]),
   );
+  const managedValues = buildManagedValues(secretValues);
+  const validationErrors = validateLocalValues(managedValues);
+  if (validationErrors.length > 0) {
+    throw new Error(`Refusing to write an invalid development environment: ${validationErrors.join(' ')}`);
+  }
   const existing = existsSync(environmentPath) ? readFileSync(environmentPath, 'utf8') : '';
-  const next = replaceManagedBlock(existing, renderManagedBlock(buildManagedValues(secretValues)));
+  const next = replaceManagedBlock(existing, renderManagedBlock(managedValues));
   writeEnvironmentAtomic(environmentPath, next);
   console.log('Development .env synchronized from pinned glidelingo-development Secret Manager versions.');
   console.log('Secret values were not printed. Run npm run env:check for provenance verification.');

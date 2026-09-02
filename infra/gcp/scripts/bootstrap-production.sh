@@ -3,13 +3,14 @@ set -euo pipefail
 
 expected_project="glidelingo-prod-50843312405"
 project_id="${GLIDELINGO_GCP_PROJECT_ID:-${expected_project}}"
+expected_project_number="738451432773"
 region="${GLIDELINGO_GCP_REGION:-us-west1}"
 
 if [[ "${project_id}" != "${expected_project}" ]]; then
   echo "Production bootstrap accepts only ${expected_project}." >&2
   exit 1
 fi
-for command in gcloud terraform; do
+for command in gcloud jq terraform; do
   if ! command -v "${command}" >/dev/null 2>&1; then
     echo "${command} is required." >&2
     exit 1
@@ -25,6 +26,13 @@ fi
 described_project="$(gcloud projects describe "${project_id}" --format='value(projectId)')"
 if [[ "${described_project}" != "${project_id}" ]]; then
   echo "Unable to verify the isolated production project." >&2
+  exit 1
+fi
+described_project_number="$(gcloud projects describe "${project_id}" --format='value(projectNumber)')"
+committed_project_number="$(jq -r '.project_number' infra/gcp/environments/production/identity.json)"
+if [[ "${described_project_number}" != "${expected_project_number}" \
+  || "${committed_project_number}" != "${expected_project_number}" ]]; then
+  echo "Resolved and committed production project numbers must both be ${expected_project_number}." >&2
   exit 1
 fi
 

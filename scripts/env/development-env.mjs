@@ -80,7 +80,21 @@ export function parseEnv(content) {
     if (!line || line.startsWith('#')) continue;
     const separator = line.indexOf('=');
     if (separator <= 0) continue;
-    values[line.slice(0, separator).trim()] = line.slice(separator + 1);
+    const key = line.slice(0, separator).trim();
+    const encoded = line.slice(separator + 1).trim();
+    if (encoded.startsWith("'") && encoded.endsWith("'")) {
+      values[key] = encoded.slice(1, -1);
+      continue;
+    }
+    if (encoded.startsWith('"')) {
+      try {
+        values[key] = JSON.parse(encoded);
+        continue;
+      } catch {
+        // Validation reports malformed or missing values without printing their contents.
+      }
+    }
+    values[key] = encoded;
   }
   return values;
 }
@@ -143,7 +157,11 @@ export function buildManagedValues(secretValues) {
 }
 
 export function renderManagedBlock(values) {
-  const lines = Object.entries(values).map(([key, value]) => `${key}=${value}`);
+  const lines = Object.entries(values).map(([key, value]) => {
+    if (typeof value !== 'string') throw new Error(`${key} must be a string.`);
+    if (/[\0\r\n']/.test(value)) throw new Error(`${key} contains a forbidden dotenv character.`);
+    return `${key}='${value}'`;
+  });
   return `${MANAGED_START}\n${lines.join('\n')}\n${MANAGED_END}`;
 }
 
@@ -185,8 +203,11 @@ export function validateLocalValues(values) {
   if (values.EXPO_PUBLIC_API_BASE_URL !== 'http://localhost:8123') {
     errors.push('EXPO_PUBLIC_API_BASE_URL must be http://localhost:8123.');
   }
-  if (!values.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.startsWith('pk_test_')) {
-    errors.push('The Clerk publishable key must be a development pk_test_ key.');
+  if (
+    !values.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.startsWith('pk_test_') ||
+    Buffer.byteLength(values.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '') < 16
+  ) {
+    errors.push('The Clerk publishable key must be a development pk_test_ key of at least 16 bytes.');
   }
   if (values.GLIDELINGO_CLERK_ISSUER !== DEVELOPMENT_CLERK_ISSUER) {
     errors.push('The Clerk issuer must be the pinned development instance.');
@@ -219,8 +240,8 @@ export function validateLocalValues(values) {
     errors.push('RevenueCat must be explicitly enabled for the verified local sandbox.');
   }
   for (const key of ['EXPO_PUBLIC_REVENUECAT_WEB_API_KEY', 'GLIDELINGO_REVENUECAT_API_KEY']) {
-    if (!values[key]?.startsWith('rcb_sb_')) {
-      errors.push(`${key} must be a RevenueCat Billing sandbox key.`);
+    if (!values[key]?.startsWith('rcb_sb_') || Buffer.byteLength(values[key] ?? '') < 8) {
+      errors.push(`${key} must be a RevenueCat Billing sandbox key of at least 8 bytes.`);
     }
   }
   if (values.EXPO_PUBLIC_ENABLE_MOCK_BILLING !== 'false') {
@@ -228,6 +249,23 @@ export function validateLocalValues(values) {
   }
   for (const key of Object.keys(secretSpecs)) {
     if (!values[key]) errors.push(`${key} is required.`);
+    if (/[\0\r\n']/.test(values[key] ?? '')) errors.push(`${key} contains a forbidden dotenv character.`);
+  }
+  for (const [key, minimumBytes] of [
+    ['GLIDELINGO_REVENUECAT_PSEUDONYM_KEY', 32],
+    ['GLIDELINGO_REVENUECAT_WEBHOOK_AUTHORIZATION', 16],
+    ['GLIDELINGO_REVENUECAT_WEBHOOK_SIGNING_SECRET', 32],
+  ]) {
+    if (Buffer.byteLength(values[key] ?? '') < minimumBytes) {
+      errors.push(`${key} must be at least ${minimumBytes} bytes.`);
+    }
+  }
+  if (
+    values.EXPO_PUBLIC_REVENUECAT_WEB_API_KEY &&
+    values.GLIDELINGO_REVENUECAT_API_KEY &&
+    values.EXPO_PUBLIC_REVENUECAT_WEB_API_KEY !== values.GLIDELINGO_REVENUECAT_API_KEY
+  ) {
+    errors.push('The RevenueCat desktop and server sandbox keys must match exactly.');
   }
   const serialized = JSON.stringify(values);
   if (/pk_live_|revenuecat_environment["']?\s*[:=]\s*["']?production|https:\/\/api\.glidelingo\.com/i.test(serialized)) {

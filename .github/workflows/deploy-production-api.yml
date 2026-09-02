@@ -41,6 +41,7 @@ jobs:
       revenuecat_environment: ${{ steps.stage.outputs.revenuecat_environment }}
       project_id: ${{ steps.stage.outputs.project_id }}
       region: ${{ steps.stage.outputs.region }}
+      cors_origins: ${{ steps.stage.outputs.cors_origins }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -114,6 +115,7 @@ jobs:
           service_url="$(jq -r .service_url <<< "${initial_state}")"
           revenuecat_enabled="$(jq -r .revenuecat_enabled <<< "${initial_state}")"
           revenuecat_environment="$(jq -r .revenuecat_environment <<< "${initial_state}")"
+          cors_origins="$(jq -r .cors_origins <<< "${initial_state}")"
 
           cleanup() {
             if [[ "${staged_successfully:-false}" != true ]]; then
@@ -140,6 +142,7 @@ jobs:
           test "$(jq -r .service_url <<< "${staged_state}")" = "${service_url}"
           test "$(jq -r .revenuecat_enabled <<< "${staged_state}")" = "${revenuecat_enabled}"
           test "$(jq -r .revenuecat_environment <<< "${staged_state}")" = "${revenuecat_environment}"
+          test "$(jq -r .cors_origins <<< "${staged_state}")" = "${cors_origins}"
 
           curl --fail --retry 6 --retry-all-errors --retry-delay 5 "${candidate_url}/health/live"
           curl --fail --retry 6 --retry-all-errors --retry-delay 5 "${candidate_url}/health/ready"
@@ -157,6 +160,7 @@ jobs:
           echo "revenuecat_environment=${revenuecat_environment}" >> "${GITHUB_OUTPUT}"
           echo "project_id=${GCP_PROJECT_ID}" >> "${GITHUB_OUTPUT}"
           echo "region=${GCP_REGION}" >> "${GITHUB_OUTPUT}"
+          echo "cors_origins=${cors_origins}" >> "${GITHUB_OUTPUT}"
 
   promote:
     name: Approve, detect drift, and promote
@@ -202,6 +206,7 @@ jobs:
           test "$(jq -r .candidate_url <<< "${current_state}")" = "${{ needs.stage.outputs.candidate_url }}"
           test "$(jq -r .revenuecat_enabled <<< "${current_state}")" = "${{ needs.stage.outputs.revenuecat_enabled }}"
           test "$(jq -r .revenuecat_environment <<< "${current_state}")" = "${{ needs.stage.outputs.revenuecat_environment }}"
+          test "$(jq -r .cors_origins <<< "${current_state}")" = "${{ needs.stage.outputs.cors_origins }}"
 
           rollback() {
             gcloud run services update-traffic "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --to-revisions="${{ needs.stage.outputs.previous_revision }}=100" --quiet || true
@@ -221,3 +226,56 @@ jobs:
             exit 1
           fi
           gcloud run services update-traffic "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --remove-tags="${{ needs.stage.outputs.candidate_tag }}" --quiet
+
+  cleanup:
+    name: Clean abandoned candidate tag
+    if: ${{ always() && needs.stage.result == 'success' }}
+    needs: [stage, promote]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-staging
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION || 'us-west1' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Authenticate for exact candidate cleanup
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Install Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+
+      - name: Remove only the recorded abandoned tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GCP_PROJECT_ID}" = "${{ needs.stage.outputs.project_id }}"
+          test "${GCP_REGION}" = "${{ needs.stage.outputs.region }}"
+          service_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
+          cleanup_generation="$(jq -r '.metadata.generation // empty' <<< "${service_json}")"
+          action="$(./infra/gcp/scripts/classify-production-candidate-cleanup.sh \
+            "${{ needs.stage.outputs.candidate_tag }}" \
+            "${{ needs.stage.outputs.candidate_revision }}" <<< "${service_json}")"
+          if [[ "${action}" == "absent" ]]; then exit 0; fi
+          test "${action}" = "remove"
+          precleanup_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
+          test "$(jq -r '.metadata.generation // empty' <<< "${precleanup_json}")" = "${cleanup_generation}"
+          test "$(./infra/gcp/scripts/classify-production-candidate-cleanup.sh \
+            "${{ needs.stage.outputs.candidate_tag }}" \
+            "${{ needs.stage.outputs.candidate_revision }}" <<< "${precleanup_json}")" = "remove"
+          gcloud run services update-traffic "${GCP_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --remove-tags="${{ needs.stage.outputs.candidate_tag }}" \
+            --quiet
+          updated_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
+          test "$(./infra/gcp/scripts/classify-production-candidate-cleanup.sh \
+            "${{ needs.stage.outputs.candidate_tag }}" \
+            "${{ needs.stage.outputs.candidate_revision }}" <<< "${updated_json}")" = "absent"

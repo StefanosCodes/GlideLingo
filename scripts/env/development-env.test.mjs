@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -30,12 +31,12 @@ const validValues = {
     'https://vast-gator-9531.clerk.accounts.dev/.well-known/jwks.json',
   GLIDELINGO_CLERK_AUTHORIZED_PARTIES:
     '["http://localhost:8081","http://127.0.0.1:8081"]',
-  EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_fixture',
-  EXPO_PUBLIC_REVENUECAT_WEB_API_KEY: 'rcb_sb_fixture',
-  GLIDELINGO_REVENUECAT_API_KEY: 'rcb_sb_fixture',
-  GLIDELINGO_REVENUECAT_PSEUDONYM_KEY: 'pseudonym-fixture',
-  GLIDELINGO_REVENUECAT_WEBHOOK_AUTHORIZATION: 'authorization-fixture',
-  GLIDELINGO_REVENUECAT_WEBHOOK_SIGNING_SECRET: 'signing-fixture',
+  EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_fixture_long_enough',
+  EXPO_PUBLIC_REVENUECAT_WEB_API_KEY: 'rcb_sb_fixture_key',
+  GLIDELINGO_REVENUECAT_API_KEY: 'rcb_sb_fixture_key',
+  GLIDELINGO_REVENUECAT_PSEUDONYM_KEY: 'pseudonym-fixture-at-least-32-bytes',
+  GLIDELINGO_REVENUECAT_WEBHOOK_AUTHORIZATION: 'Bearer fixture authorization # = "safe"',
+  GLIDELINGO_REVENUECAT_WEBHOOK_SIGNING_SECRET: 'signing-fixture-at-least-32-bytes',
 };
 
 test('project guard accepts only the exact development project', () => {
@@ -91,9 +92,38 @@ test('managed block preserves unrelated local values and remains parseable', () 
   const parsed = parseEnv(next);
   assert.equal(parsed.OPENAI_API_KEY, 'local-only');
   assert.equal(parsed.EXPO_PUBLIC_API_BASE_URL, 'http://localhost:8123');
+  assert.equal(
+    parsed.GLIDELINGO_REVENUECAT_WEBHOOK_AUTHORIZATION,
+    'Bearer fixture authorization # = "safe"',
+  );
   assert.equal((next.match(/EXPO_PUBLIC_API_BASE_URL=/g) ?? []).length, 1);
   const replaced = replaceManagedBlock(next, renderManagedBlock({ ...validValues, GLIDELINGO_DB_PORT: '55433' }));
   assert.equal((replaced.match(/BEGIN GLIDELINGO/g) ?? []).length, 1);
+});
+
+test('dotenv rendering safely round-trips spaces, hashes, equals, quotes, and backslashes', () => {
+  const special = 'Bearer token # equals= quote=" backslash=\\';
+  const rendered = renderManagedBlock({ SPECIAL_SECRET: special });
+  assert.equal(parseEnv(rendered).SPECIAL_SECRET, special);
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'glidelingo-dotenv-runtime-'));
+  const environmentPath = path.join(directory, '.env');
+  writeFileSync(environmentPath, `${rendered}\n`, { mode: 0o600 });
+  const runtime = spawnSync(
+    process.execPath,
+    ['--env-file', environmentPath, '--eval', 'process.stdout.write(JSON.stringify(process.env.SPECIAL_SECRET))'],
+    { encoding: 'utf8' },
+  );
+  assert.equal(runtime.status, 0, runtime.stderr);
+  assert.equal(JSON.parse(runtime.stdout), special);
+  rmSync(directory, { recursive: true, force: true });
+  assert.throws(
+    () => renderManagedBlock({ SPECIAL_SECRET: 'line-one\nline-two' }),
+    /forbidden dotenv character/,
+  );
+  assert.throws(
+    () => renderManagedBlock({ SPECIAL_SECRET: "unsafe'single-quote" }),
+    /forbidden dotenv character/,
+  );
 });
 
 test('atomic writer replaces the target with mode 0600', () => {
@@ -114,6 +144,21 @@ test('validation rejects production values and accepts the local sandbox contrac
       EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_live_fixture',
       GLIDELINGO_REVENUECAT_ENVIRONMENT: 'PRODUCTION',
     }).length >= 2,
+  );
+  for (const key of [
+    'GLIDELINGO_REVENUECAT_PSEUDONYM_KEY',
+    'GLIDELINGO_REVENUECAT_WEBHOOK_AUTHORIZATION',
+    'GLIDELINGO_REVENUECAT_WEBHOOK_SIGNING_SECRET',
+  ]) {
+    assert.ok(
+      validateLocalValues({ ...validValues, [key]: 'short' }).some((error) => error.includes(key)),
+    );
+  }
+  assert.ok(
+    validateLocalValues({
+      ...validValues,
+      GLIDELINGO_REVENUECAT_WEBHOOK_AUTHORIZATION: 'valid-length\nbut-newline',
+    }).some((error) => error.includes('forbidden dotenv character')),
   );
   assert.ok(
     validateLocalValues({

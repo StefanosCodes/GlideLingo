@@ -65,14 +65,17 @@ for _ in {1..30}; do
   sleep 1
 done
 
+PGPASSFILE="${password_file}" \
+GLIDELINGO_MIGRATION_HOST=127.0.0.1 \
+GLIDELINGO_MIGRATION_PORT="${port}" \
+GLIDELINGO_MIGRATION_USER="${operator}" \
+GLIDELINGO_MIGRATION_DATABASE="${database}" \
+  ./infra/gcp/scripts/run-versioned-production-migrations.sh
+
 PGPASSFILE="${password_file}" psql -X -h 127.0.0.1 -p "${port}" -U "${operator}" -d "${database}" \
   -v ON_ERROR_STOP=1 \
   -c 'SET ROLE cloudsqlsuperuser' \
   -c 'SET search_path = public' \
-  -c "SET statement_timeout = '30s'; SET lock_timeout = '5s'" \
-  -f backend/migrations/001_lesson_tutor_guard.sql \
-  -f backend/migrations/002_revenuecat_entitlements.sql \
-  -f backend/migrations/003_revenuecat_webhook_maintenance.sql \
   -f infra/gcp/scripts/schedule-revenuecat-webhook-maintenance.sql
 
 PGPASSFILE="${password_file}" psql -X -h 127.0.0.1 -p "${port}" -U "${operator}" -d "${database}" \

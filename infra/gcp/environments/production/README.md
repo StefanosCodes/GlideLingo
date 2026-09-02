@@ -3,6 +3,7 @@
 This root owns the desktop MVP's production API, database, deployment identities, and secret
 containers. It deliberately shares no state, database, identity, or Secret Manager resource with
 `glidelingo-development`. It does not provision the lesson tutor or store provider secret bytes.
+The API explicitly allows CORS only from `https://desktop.glidelingo.com`.
 
 ## Bootstrap
 
@@ -20,10 +21,8 @@ plan before approving it. Terraform creates containers only for external credent
 out of band, then select immutable positive versions in `activation.auto.tfvars.json`.
 
 `identity.json` is the shared fail-closed identity contract for Terraform and the desktop release
-validator. Its project number intentionally starts as `null`. After project creation, copy the
-numeric `project_number` from Terraform's `production_contract` output into that file through a
-reviewed PR before any release can authenticate. Release validation must reject a null or mismatched
-number.
+validator. The pinned project number is `738451432773`. Terraform refuses an apply if the resolved
+project ID or numeric project number differs from that committed identity.
 
 Run the one-time database bootstrap only after the production instance exists:
 
@@ -33,9 +32,12 @@ GLIDELINGO_CONFIRM_PRODUCTION_MIGRATION=glidelingo-prod-50843312405 \
 ```
 
 The migration script creates a uniquely named short-lived Cloud SQL operator, starts a local
-Cloud SQL Auth Proxy, applies migrations 001–003 and the retention schedule, verifies the expected
-tables, and deletes the operator on exit. Inspect and remove the named operator manually if cleanup
-reports a warning.
+Cloud SQL Auth Proxy, and applies migrations 001–003 through a durable
+`glidelingo_schema_migration` ledger. Each migration body and its checksum record commit in the same
+transaction. An interruption therefore leaves no applied record and a rerun safely resumes; an
+already-applied checksum is a no-op and a checksum mismatch fails closed. The retention schedule is
+reconciled idempotently after schema migrations. The script verifies the expected tables and deletes
+the operator on exit. Inspect and remove the named operator manually if cleanup reports a warning.
 
 ## GitHub environments
 
@@ -50,10 +52,30 @@ GCP_DEPLOY_SERVICE_ACCOUNT
 ```
 
 Require approval on `production`. The WIF provider accepts the exact repository identity only from
-those two GitHub environments on `main`; no service-account key is stored in GitHub. The deployment
+those two GitHub environments on `main`; service-account impersonation is bound to each exact
+`google.subject`, never a repository-wide principal set, and no service-account key is stored in GitHub. The deployment
 workflow accepts an exact 40-character commit reachable from `main`, stages a zero-traffic
 candidate, proves health/auth and unchanged activation state, then pauses at `production` before
 promotion. It rolls back to the recorded revision if canonical smoke tests fail.
+
+If approval is rejected, a job is cancelled, or promotion fails, the final cleanup job inspects the
+recorded candidate tag. It removes that tag only when it still points to the exact recorded
+zero-traffic revision. An absent tag is already clean; an ambiguous tag or a tag moved to another
+revision fails closed and requires operator inspection. Re-run the workflow only after the cleanup
+job succeeds or the exact stale tag is reviewed manually.
+
+For a hard workflow cancellation where GitHub cannot start the final cleanup job, authenticate
+`gcloud` to the exact production project and run the recorded outputs explicitly:
+
+```bash
+./infra/gcp/scripts/cleanup-production-candidate.sh \
+  candidate-0123456789abcdef0123456789abcdef01234567 \
+  glidelingo-api-production-00001-abc
+```
+
+The operator script applies the same generation, zero-traffic, tag, and exact-revision checks. It
+returns successfully when the tag is absent and refuses to remove a tag that moved to a different
+revision.
 
 Create `desktop-release-signing` for protected `desktop-v*` tags with the release WIF provider and
 service-account outputs. Apple and versioned public build inputs are fetched from the production
@@ -65,7 +87,9 @@ The committed baseline is fail-closed: RevenueCat disabled, SANDBOX selected, an
 selectors null. Prelaunch sandbox and live production use physically distinct Secret Manager
 containers. A reviewed activation change must select all four API versions and both public desktop
 build versions together. Terraform rejects partial configuration and rejects a SANDBOX/production
-container mismatch.
+container mismatch. The runtime receives no RevenueCat Secret Manager accessor bindings while
+billing is disabled. Every production Secret Manager container has Terraform destruction
+protection.
 
 Do not publish sandbox builds. To go live, seed the live Stripe-backed RevenueCat values in the
 `production` containers, change the manifest to `PRODUCTION`/`production`, apply, deploy and verify

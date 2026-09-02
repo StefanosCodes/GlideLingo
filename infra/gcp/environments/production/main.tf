@@ -210,6 +210,10 @@ resource "google_secret_manager_secret" "database_url" {
     }
   }
   depends_on = [google_project_service.required]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_secret_manager_secret_version" "database_url" {
@@ -243,10 +247,14 @@ resource "google_secret_manager_secret" "revenuecat" {
     }
   }
   depends_on = [google_project_service.required]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_secret_manager_secret_iam_member" "api_revenuecat" {
-  for_each = local.selected_revenuecat_secrets
+  for_each = var.revenuecat_enabled ? local.selected_revenuecat_secrets : {}
 
   project   = var.project_id
   secret_id = google_secret_manager_secret.revenuecat["${var.revenuecat_secret_set}_${each.key}"].secret_id
@@ -272,6 +280,10 @@ resource "google_secret_manager_secret" "desktop_public_config" {
     }
   }
   depends_on = [google_project_service.required]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_secret_manager_secret" "desktop_signing" {
@@ -291,6 +303,10 @@ resource "google_secret_manager_secret" "desktop_signing" {
     }
   }
   depends_on = [google_project_service.required]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_cloud_run_v2_service" "api" {
@@ -341,6 +357,10 @@ resource "google_cloud_run_v2_service" "api" {
       env {
         name  = "GLIDELINGO_CLERK_AUTHORIZED_PARTIES"
         value = jsonencode(var.clerk_authorized_parties)
+      }
+      env {
+        name  = "GLIDELINGO_CORS_ORIGINS"
+        value = jsonencode(["https://desktop.glidelingo.com"])
       }
       env {
         name  = "GLIDELINGO_REVENUECAT_ENABLED"
@@ -498,15 +518,30 @@ resource "google_service_account" "desktop_releaser" {
 }
 
 resource "google_service_account_iam_member" "github_deploy_identity" {
+  for_each = toset([
+    "repo:${local.github_repository}:environment:production-staging",
+    "repo:${local.github_repository}:environment:production",
+  ])
+
   service_account_id = google_service_account.github_deployer.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${local.github_repository}"
+  member             = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/subject/${each.value}"
 }
 
 resource "google_service_account_iam_member" "github_release_identity" {
   service_account_id = google_service_account.desktop_releaser.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${local.github_repository}"
+  member             = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/subject/repo:${local.github_repository}:environment:desktop-release-signing"
+}
+
+check "production_identity" {
+  assert {
+    condition = (
+      local.production_identity.project_id == var.project_id &&
+      local.production_identity.project_number == tostring(data.google_project.current.number)
+    )
+    error_message = "The committed production project ID and numeric project number must match the resolved GCP project."
+  }
 }
 
 resource "google_artifact_registry_repository_iam_member" "deployer_writer" {

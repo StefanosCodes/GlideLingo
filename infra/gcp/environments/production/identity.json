@@ -1,6 +1,6 @@
 {
   "project_id": "glidelingo-prod-50843312405",
-  "project_number": null,
+  "project_number": "738451432773",
   "workload_identity_pool_id": "github-actions",
   "deploy_provider_id": "production-deploy",
   "deploy_service_account_id": "glidelingo-prod-deployer",

@@ -1,9 +1,10 @@
 ---
 interface Props {
   activePage?: 'blog';
+  primaryCtaHref?: string;
 }
 
-const { activePage } = Astro.props;
+const { activePage, primaryCtaHref } = Astro.props;
 const onHomepage = Astro.url.pathname === '/';
 ---
 
@@ -20,5 +21,6 @@ const onHomepage = Astro.url.pathname === '/';
       <a href="/blog/" aria-current={activePage === 'blog' ? 'page' : undefined}>Blog</a>
       <a href={onHomepage ? '#demo' : '/#demo'}>How it works</a>
     </nav>
+    {primaryCtaHref && <a class="button button-primary header-primary-cta" href={primaryCtaHref}>Start speaking</a>}
   </div>
 </header>

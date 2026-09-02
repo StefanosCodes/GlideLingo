@@ -27,11 +27,14 @@ const [home, notFound, blog, article, headers, robots] = await Promise.all([
   read('robots.txt'),
 ]);
 
-assert.match(home, /<title>GlideLingo — Language learning, redesigned<\/title>/);
+assert.match(home, /<title>GlideLingo \| Learn a language\. Speak with confidence\.<\/title>/);
 assert.match(home, /rel="canonical" href="https:\/\/glidelingo\.com\/"/);
 assert.match(home, /id="main-content"/);
-assert.match(home, /Learn the language\./);
-assert.match(home, /Enter the world\./);
+assert.match(home, /Learn a language\./);
+assert.match(home, /Speak with confidence\./);
+assert.match(home, /See how speaking starts\./);
+assert.match(home, /Start with Starter\. Keep speaking with Professional\./);
+assert.match(home, /Ready to speak a new language\?/);
 assert.match(home, /glidelingo-bird-black\.svg/);
 assert.match(home, /brand-name/);
 assert.match(home, /data-video-state="ready"/);
@@ -41,14 +44,23 @@ assert.match(home, /<video[^>]+controls[^>]+data-autoplay-when-visible="true"[^>
 assert.match(home, /<source[^>]+glidelingo-product-walkthrough\.webm[^>]+video\/webm/);
 assert.match(home, /<source[^>]+glidelingo-product-walkthrough\.mp4/);
 assert.match(home, /<track[^>]+kind="captions"[^>]+glidelingo-product-walkthrough\.vtt/);
-assert.match(home, />Download<svg[^>]+button-apple-icon/);
-assert.doesNotMatch(home, /Download for Mac/);
+assert.match(home, />\s*Start speaking\s*<svg[^>]+button-apple-icon/);
+assert.match(home, />See how it works<\/a>/);
+assert.match(home, /Free to start/);
+assert.match(home, /Available for macOS/);
 assert.match(home, /button-platform-icon/);
 assert.match(home, /button-apple-icon/);
 assert.match(home, /id="pricing"/);
 assert.match(home, /href="\/blog\/"/);
 assert.match(home, /\$19\.99/);
 assert.match(home, /Billed monthly\. Cancel anytime\./);
+assert.match(home, />Start free<\/a>/);
+assert.match(home, />Go Professional<\/a>/);
+assert.match(home, /For new learners/);
+assert.match(home, /Weekly learning rhythm/);
+assert.match(home, /For committed learners/);
+assert.match(home, /Everything in Starter/);
+assert.doesNotMatch(home, /Greek/);
 assert.doesNotMatch(home, /Desktop apps|Choose your desktop|Download for Windows/);
 assert.match(home, /<script[^>]+src="\/scripts\/video-player\.js"[^>]*><\/script>/i);
 assert.doesNotMatch(home, /<script(?![^>]+src=)(?:\s|>)/i);
@@ -78,6 +90,7 @@ if (active) {
 } else {
   assert.match(home, /data-download-state="unavailable"/);
   assert.doesNotMatch(home, /releases\/download/);
+  assert.match(home, /href="https:\/\/github\.com\/StefanosCodes\/GlideLingo\/releases"/);
 }
 
-console.log(`Verified ${active ? 'active' : 'disabled'} hero CTA output in ${join(root.pathname)}.`);
+console.log(`Verified ${active ? 'active' : 'fallback'} homepage CTA output in ${join(root.pathname)}.`);

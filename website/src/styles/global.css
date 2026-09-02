@@ -19,7 +19,7 @@
   --ink: var(--black);
   --ink-muted: rgb(11 16 32 / 72%);
   --ink-faint: rgb(11 16 32 / 58%);
-  --paper: var(--off-white);
+  --paper: var(--white);
   --paper-raised: var(--white);
   --paper-soft: var(--off-white);
   --line: rgb(11 16 32 / 11%);
@@ -169,6 +169,12 @@ a {
   text-underline-offset: 6px;
 }
 
+.header-primary-cta {
+  min-height: 42px;
+  margin-left: auto;
+  padding: 10px 16px;
+}
+
 .site-footer a {
   text-decoration-thickness: 1px;
   text-underline-offset: 4px;
@@ -190,6 +196,11 @@ a {
   font-weight: 600;
   line-height: 1;
   text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
 }
 
 .button-platform-icon {
@@ -210,10 +221,24 @@ a {
 .button-primary:hover {
   border-color: var(--navy);
   background: var(--navy);
+  transform: translateY(-1px);
 }
 
-.button-inactive {
-  cursor: not-allowed;
+.button-secondary {
+  border-color: var(--line-strong);
+  color: var(--ink);
+  background: rgb(255 255 255 / 78%);
+  box-shadow: var(--shadow);
+}
+
+.button-secondary:hover {
+  border-color: var(--black);
+  background: var(--white);
+  transform: translateY(-1px);
+}
+
+.button:active {
+  transform: translateY(1px);
 }
 
 .hero {
@@ -293,12 +318,11 @@ h3 {
 }
 
 .hero-lede {
-  max-width: none;
+  max-width: 880px;
   margin: 34px auto 0;
   color: var(--ink-muted);
   font-size: 20px;
   line-height: 1.5;
-  white-space: nowrap;
 }
 
 .hero-actions {
@@ -306,6 +330,17 @@ h3 {
   align-items: center;
   justify-content: center;
   margin-top: 36px;
+  gap: 12px;
+}
+
+.hero-meta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 16px 0 0;
+  gap: 8px;
+  color: var(--ink-faint);
+  font-size: 13px;
 }
 
 .product-showcase {
@@ -441,6 +476,12 @@ h3 {
   font-size: 12px;
 }
 
+.product-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 38px;
+}
+
 .pricing {
   position: relative;
   isolation: isolate;
@@ -454,8 +495,8 @@ h3 {
   inset: 24px -48px 36px;
   border-radius: 36px;
   background:
-    radial-gradient(circle at 16% 18%, rgb(184 247 230 / 28%), transparent 42%),
-    radial-gradient(circle at 84% 20%, rgb(77 124 255 / 18%), transparent 42%),
+    radial-gradient(circle at 14% 18%, rgb(218 209 255 / 24%), transparent 44%),
+    radial-gradient(circle at 86% 22%, rgb(255 226 204 / 26%), transparent 42%),
     var(--white);
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 72%);
   content: '';
@@ -476,17 +517,17 @@ h3 {
 
 .pricing-grid {
   display: grid;
-  max-width: 920px;
+  max-width: 760px;
   margin-inline: auto;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 22px;
+  gap: 20px;
 }
 
 .pricing-card {
   display: flex;
-  min-height: 430px;
+  min-height: 610px;
   flex-direction: column;
-  padding: 36px;
+  padding: 32px;
   border: 1px solid var(--line-strong);
   border-radius: 22px;
   background: rgb(255 255 255 / 82%);
@@ -510,7 +551,20 @@ h3 {
 
 .pricing-card h3 {
   font-size: 26px;
-  font-weight: 480;
+  font-weight: 430;
+}
+
+.plan-name {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.plan-name img {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  object-fit: contain;
 }
 
 .plan-price {
@@ -541,14 +595,32 @@ h3 {
   text-align: right;
 }
 
+.plan-audience {
+  margin: 32px 0 0;
+  color: var(--brand-blue);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .plan-summary {
-  margin: 38px 0 0;
+  margin: 12px 0 0;
   color: var(--ink-muted);
+}
+
+.plan-includes {
+  margin: 30px 0 0;
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .plan-features {
   display: grid;
-  margin: 30px 0 0;
+  margin: 16px 0 0;
   padding: 0;
   gap: 14px;
   list-style: none;
@@ -566,6 +638,51 @@ h3 {
   color: var(--brand-blue);
   content: '✓';
   font-weight: 700;
+}
+
+.plan-note {
+  margin: 28px 0 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-faint);
+  font-size: 13px;
+}
+
+.plan-cta {
+  width: 100%;
+  margin-top: auto;
+}
+
+.final-cta {
+  position: relative;
+  isolation: isolate;
+  padding-block: 132px 152px;
+  text-align: center;
+}
+
+.final-cta::before {
+  position: absolute;
+  z-index: -1;
+  inset: 24px -48px 36px;
+  border-radius: 36px;
+  background:
+    radial-gradient(circle at 18% 30%, rgb(77 124 255 / 16%), transparent 44%),
+    radial-gradient(circle at 82% 70%, rgb(184 247 230 / 22%), transparent 46%),
+    var(--white);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 72%);
+  content: '';
+}
+
+.final-cta-inner {
+  max-width: 760px;
+  margin-inline: auto;
+}
+
+.final-cta-inner > p {
+  max-width: 620px;
+  margin: 22px auto 34px;
+  color: var(--ink-muted);
+  font-size: 18px;
 }
 
 .site-footer {
@@ -928,6 +1045,10 @@ h3 {
     inset: 28px 0 20px;
   }
 
+  .final-cta::before {
+    inset: 28px 0 20px;
+  }
+
   .hero-copy {
     max-width: 880px;
   }
@@ -951,20 +1072,34 @@ h3 {
   }
 }
 
-@media (max-width: 860px) {
-  .hero-lede {
-    max-width: 700px;
-    white-space: normal;
-  }
-}
-
 @media (max-width: 700px) {
+  html {
+    scroll-padding-top: 132px;
+  }
+
   .shell {
     width: min(calc(100% - 32px), var(--shell));
   }
 
   .header-inner {
-    min-height: 68px;
+    min-height: 0;
+    flex-wrap: wrap;
+    padding-block: 12px;
+  }
+
+  .header-primary-cta {
+    min-height: 42px;
+  }
+
+  .site-nav {
+    position: static;
+    order: 3;
+    width: 100%;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+    justify-content: center;
+    transform: none;
   }
 
   .brand-symbol {
@@ -998,6 +1133,7 @@ h3 {
 
   .product-showcase {
     padding-block: 96px 112px;
+    scroll-margin-top: 132px;
   }
 
   .product-showcase::before {
@@ -1007,6 +1143,7 @@ h3 {
 
   .pricing {
     padding-block: 96px 112px;
+    scroll-margin-top: 132px;
   }
 
   .pricing::before {
@@ -1022,6 +1159,19 @@ h3 {
   .pricing-card {
     min-height: 0;
     padding: 30px;
+  }
+
+  .plan-cta {
+    margin-top: 30px;
+  }
+
+  .final-cta {
+    padding-block: 96px 112px;
+  }
+
+  .final-cta::before {
+    inset: 24px -12px 16px;
+    border-radius: 28px;
   }
 
   .product-frame figcaption {
@@ -1144,6 +1294,10 @@ h3 {
     align-items: stretch;
     flex-direction: column;
     padding-inline: 18px;
+  }
+
+  .hero-meta {
+    flex-wrap: wrap;
   }
 
   .product-frame {

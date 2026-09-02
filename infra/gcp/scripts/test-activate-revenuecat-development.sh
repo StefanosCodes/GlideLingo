@@ -9,7 +9,7 @@ tfvars_file="${script_dir}/../environments/development/revenuecat.auto.tfvars.js
 workflow_file="${script_dir}/../../../.github/workflows/deploy-development-api.yml"
 for workflow_assertion in \
   'expected_staged_generation="$((10#${initial_generation} + 1))"' \
-  '"${previous_revenuecat_raw}" != "true" && "${previous_revenuecat_raw}" != "false"' \
+  'resolved_revenuecat_flag="$(./infra/gcp/scripts/resolve-revenuecat-deploy-flag.sh' \
   'prepromotion_observed_generation' \
   'prepromotion_candidate_percent' \
   'prepromotion_revenuecat_raw'; do
@@ -158,8 +158,8 @@ grep -Fxq \
   'X-RevenueCat-Webhook-Signature: t=1700000000,v1=a3b3af2dc8943c2f43f7f5bef59bae7f2a4b262623ba5bc6886c2683bb645b57' \
   "${webhook_headers_fixture}"
 grep -Fxq 'Content-Type: application/json' "${webhook_headers_fixture}"
-headers_mode="$(stat -f '%Lp' "${webhook_headers_fixture}" 2>/dev/null \
-  || stat -c '%a' "${webhook_headers_fixture}")"
+headers_mode="$(stat -c '%a' "${webhook_headers_fixture}" 2>/dev/null \
+  || stat -f '%Lp' "${webhook_headers_fixture}")"
 [[ "${headers_mode}" == "600" ]]
 
 valid_v2_fixture="$(jq '

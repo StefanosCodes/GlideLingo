@@ -59,6 +59,7 @@ jobs:
           working-directory: backend
       - run: npm run setup:backend
       - run: npm run api:verify
+      - run: ./infra/gcp/scripts/test-production-settings.sh
       - run: npm run api:test:integration
       - run: npm run db:config
       - name: Build and smoke the production API container
@@ -222,7 +223,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Verify RevenueCat deploy-flag resolution
         working-directory: ${{ github.workspace }}
-        run: ./infra/gcp/scripts/test-resolve-revenuecat-deploy-flag.sh
+        run: |
+          ./infra/gcp/scripts/test-resolve-revenuecat-deploy-flag.sh
+          ./infra/gcp/scripts/test-activate-revenuecat-development.sh
+          ./infra/gcp/scripts/test-production-contract.sh
+          ./infra/gcp/scripts/test-versioned-production-migrations.sh
       - name: Install Terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
         with:
@@ -230,3 +235,12 @@ jobs:
       - run: terraform fmt -check
       - run: terraform init -backend=false -lockfile=readonly
       - run: terraform validate
+      - name: Format production Terraform
+        working-directory: infra/gcp/environments/production
+        run: terraform fmt -check
+      - name: Initialize production Terraform without remote state
+        working-directory: infra/gcp/environments/production
+        run: terraform init -backend=false -lockfile=readonly
+      - name: Validate production Terraform
+        working-directory: infra/gcp/environments/production
+        run: terraform validate

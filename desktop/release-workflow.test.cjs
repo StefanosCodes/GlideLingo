@@ -67,6 +67,55 @@ test('GitHub draft lookup follows release-list pagination after a tag miss', asy
   ]);
 });
 
+test('GitHub draft adapter marks sandbox builds as internal prereleases only', async () => {
+  const commands = [];
+  const responses = [];
+  const api = (args) => {
+    responses.push(args);
+    return {
+      status: 0,
+      stdout: JSON.stringify({ id: 7, tag_name: releaseTag, draft: true, assets: [] }),
+      stderr: '',
+    };
+  };
+  const adapter = createGitHubAdapter(
+    'StefanosCodes/GlideLingo',
+    api,
+    (args) => commands.push(args),
+  );
+
+  await adapter.createDraft({
+    billingMode: 'sandbox',
+    commitSha,
+    releaseTag,
+  });
+  assert.ok(commands[0].includes('--prerelease'));
+  assert.ok(commands[0].includes('INTERNAL SANDBOX BUILD. Do not publish or link from the public website.'));
+
+  commands.length = 0;
+  await adapter.createDraft({
+    billingMode: 'production',
+    commitSha,
+    releaseTag,
+  });
+  assert.ok(commands[0].includes('--generate-notes'));
+  assert.ok(!commands[0].includes('--prerelease'));
+
+  await adapter.updateDraft(7, {
+    billingMode: 'sandbox',
+    releaseTag,
+  });
+  assert.ok(responses.at(-1).includes('prerelease=true'));
+  assert.ok(responses.at(-1).some((argument) => argument.startsWith('body=')));
+
+  await adapter.updateDraft(7, {
+    billingMode: 'production',
+    releaseTag,
+  });
+  assert.ok(responses.at(-1).includes('prerelease=false'));
+  assert.ok(!responses.at(-1).some((argument) => argument.startsWith('body=')));
+});
+
 function gitAdapter({ onMain = true, taggedCommit = commitSha } = {}) {
   return {
     resolveCommit(reference) {
@@ -245,13 +294,14 @@ test('partial and rerun drafts converge by replacing every existing asset', asyn
         id: 10,
         tag_name: releaseTag,
         draft: true,
+        prerelease: true,
         assets: localAssets.map(remoteAsset),
       };
     },
   };
 
   await convergeDraftRelease(
-    { commitSha, releaseTag, version: '1.0.0' },
+    { billingMode: 'sandbox', commitSha, releaseTag, version: '1.0.0' },
     localAssets,
     github,
   );
@@ -266,7 +316,7 @@ test('partial and rerun drafts converge by replacing every existing asset', asyn
 
   calls.length = 0;
   await convergeDraftRelease(
-    { commitSha, releaseTag, version: '1.0.0' },
+    { billingMode: 'sandbox', commitSha, releaseTag, version: '1.0.0' },
     localAssets,
     github,
   );
@@ -288,7 +338,15 @@ test('draft convergence refuses published releases and invalid remote asset sets
   };
   await assert.rejects(
     convergeDraftRelease(
-      { commitSha, releaseTag, version: '1.0.0' },
+      { billingMode: 'preview', commitSha, releaseTag, version: '1.0.0' },
+      localAssets,
+      {},
+    ),
+    /BILLING_MODE/,
+  );
+  await assert.rejects(
+    convergeDraftRelease(
+      { billingMode: 'production', commitSha, releaseTag, version: '1.0.0' },
       localAssets,
       { async getRelease() { return published; } },
     ),
@@ -304,6 +362,7 @@ test('draft convergence refuses published releases and invalid remote asset sets
         id: 2,
         tag_name: releaseTag,
         draft: true,
+        prerelease: true,
         assets: [remoteAsset(localAssets[0], 1)],
       };
     },
@@ -315,15 +374,43 @@ test('draft convergence refuses published releases and invalid remote asset sets
   };
   await assert.rejects(
     convergeDraftRelease(
-      { commitSha, releaseTag, version: '1.0.0' },
+      { billingMode: 'sandbox', commitSha, releaseTag, version: '1.0.0' },
       localAssets,
       github,
     ),
     /must be exactly/,
   );
+
+  reads = 0;
+  await assert.rejects(
+    convergeDraftRelease(
+      { billingMode: 'sandbox', commitSha, releaseTag, version: '1.0.0' },
+      localAssets,
+      {
+        async getRelease() {
+          reads += 1;
+          return reads === 1
+            ? null
+            : {
+                id: 3,
+                tag_name: releaseTag,
+                draft: true,
+                prerelease: false,
+                assets: localAssets.map(remoteAsset),
+              };
+        },
+        async createDraft() {
+          return { id: 3, tag_name: releaseTag, draft: true, assets: [] };
+        },
+        async deleteAsset() {},
+        async uploadAssets() {},
+      },
+    ),
+    /sandbox draft prerelease flag/,
+  );
 });
 
-test('workflow keeps all Apple credentials out of preflight validation', () => {
+test('workflow uses protected WIF configuration and only pinned GCP secret versions', () => {
   const workflow = fs.readFileSync(
     path.resolve(__dirname, '../.github/workflows/desktop-release.yml'),
     'utf8',
@@ -332,13 +419,34 @@ test('workflow keeps all Apple credentials out of preflight validation', () => {
   assert.doesNotMatch(validationJob, /secrets\./);
   assert.match(workflow, /needs: validate/);
   assert.match(workflow, /environment: desktop-release-signing/);
-  assert.match(workflow, /EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: \$\{\{ vars\.GLIDELINGO_CLERK_PUBLISHABLE_KEY \}\}/);
-  assert.match(workflow, /EXPO_PUBLIC_REVENUECAT_WEB_API_KEY: \$\{\{ vars\.GLIDELINGO_REVENUECAT_WEB_API_KEY \}\}/);
+  assert.match(workflow, /id-token: write/);
+  assert.match(
+    workflow,
+    /google-github-actions\/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093/,
+  );
+  assert.match(
+    workflow,
+    /google-github-actions\/get-secretmanager-secrets@bc9c54b29fdffb8a47776820a7d26e77b379d262/,
+  );
+  assert.match(workflow, /workload_identity_provider: \$\{\{ vars\.GLIDELINGO_GCP_WORKLOAD_IDENTITY_PROVIDER \}\}/);
+  assert.match(workflow, /service_account: \$\{\{ vars\.GLIDELINGO_GCP_DESKTOP_RELEASE_SERVICE_ACCOUNT \}\}/);
+  assert.match(workflow, /EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: \$\{\{ steps\.release_secrets\.outputs\.clerk_publishable_key \}\}/);
+  assert.match(workflow, /EXPO_PUBLIC_REVENUECAT_WEB_API_KEY: \$\{\{ steps\.release_secrets\.outputs\.revenuecat_web_api_key \}\}/);
+  assert.match(workflow, /GLIDELINGO_BILLING_MODE: \$\{\{ vars\.GLIDELINGO_BILLING_MODE \}\}/);
   assert.match(workflow, /GLIDELINGO_CLERK_ORIGIN: \$\{\{ vars\.GLIDELINGO_PRODUCTION_CLERK_ORIGIN \}\}/);
+  assert.match(workflow, /macos_certificate_base64:\$\{\{ vars\.GLIDELINGO_MACOS_CERTIFICATE_SECRET_VERSION \}\}/);
+  assert.match(workflow, /revenuecat_web_api_key:\$\{\{ vars\.GLIDELINGO_REVENUECAT_WEB_API_KEY_SECRET_VERSION \}\}/);
+  assert.doesNotMatch(workflow, /\$\{\{ secrets\./);
+  assert.doesNotMatch(workflow, /credentials_json:/);
+  assert.doesNotMatch(workflow, /versions\/latest/);
   assert.match(workflow, /release\/latest-mac\.yml/);
   assert.match(workflow, /release\/GlideLingo-\$\{\{ needs\.validate\.outputs\.version \}\}-universal\.zip\.blockmap/);
   assert.match(workflow, /release\/GlideLingo-\$\{\{ needs\.validate\.outputs\.version \}\}-universal\.dmg\.blockmap/);
   assert.doesNotMatch(workflow, /gh release create[\s\S]*--latest/);
+  assert.doesNotMatch(workflow, /PUBLIC_MAC_DOWNLOAD_STATE/);
+
+  const gitignore = fs.readFileSync(path.resolve(__dirname, '../.gitignore'), 'utf8');
+  assert.match(gitignore, /^gha-creds-\*\.json$/m);
 });
 
 test('builder pins the public GitHub update provider', () => {

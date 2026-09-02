@@ -46,8 +46,8 @@ requires both a development bundle and the explicit `EXPO_PUBLIC_ENABLE_MOCK_BIL
 platform key fails closed and exposes no mock package or Pro state. Never expose a RevenueCat secret API key through
 `EXPO_PUBLIC_*`.
 
-The signed desktop workflow receives `GLIDELINGO_REVENUECAT_WEB_API_KEY` in its protected GitHub environment and exports
-it to the renderer as `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY`. For local Stripe-sandbox work, put the matching Billing Web
+The signed desktop workflow fetches an exact, mode-scoped RevenueCat Web key version from GCP Secret Manager after its
+protected GitHub environment approval and exports it to the renderer as `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY`. For local Stripe-sandbox work, put the matching Billing Web
 public SDK key in the ignored root `.env`. Never expose Stripe credentials, project-wide RevenueCat secret keys, or
 webhook credentials through an `EXPO_PUBLIC_` variable.
 
@@ -64,7 +64,7 @@ webhook credentials through an `EXPO_PUBLIC_` variable.
 5. Enable and brand the RevenueCat Billing customer portal. Confirm an active web subscription returns a secure
    `managementURL`; see [Customer Portal](https://www.revenuecat.com/docs/web/web-billing/customer-portal).
 6. Copy that configuration's Web **public SDK key** (currently expected to start with `rcb_...`) into
-   `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY` locally and `GLIDELINGO_REVENUECAT_WEB_API_KEY` in the protected desktop release
+   `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY` locally and a pinned `GLIDELINGO_REVENUECAT_WEB_API_KEY_SECRET_VERSION` selector in the protected desktop release
    environment. Configure the server's `GLIDELINGO_REVENUECAT_API_KEY` with the exact same key so checkout and entitlement
    reconciliation address the same RevenueCat Billing configuration. Restart Metro after local env changes.
 7. Sign in through Clerk, open `/subscription`, and verify the exact stable Clerk `userId` appears as the RevenueCat App

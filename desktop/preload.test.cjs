@@ -4,49 +4,50 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function loadPreload(invoke) {
-  let exposed;
+function loadPreload() {
   const source = fs.readFileSync(path.join(__dirname, 'preload.cjs'), 'utf8');
-  vm.runInNewContext(source, {
-    Object,
+  const calls = [];
+  const context = {
     require: (moduleName) => {
       assert.equal(moduleName, 'electron');
       return {
         contextBridge: {
-          exposeInMainWorld: (name, value) => {
-            exposed = { name, value };
-          },
+          exposeInMainWorld: (name, bridge) => calls.push({ name, bridge }),
         },
-        ipcRenderer: { invoke },
+        ipcRenderer: {
+          invoke: (...args) => args,
+        },
       };
     },
-  });
-  return exposed;
+  };
+  vm.runInNewContext(source, context);
+  return calls;
 }
 
-test('preload exposes one frozen, narrow OAuth bridge', async () => {
-  const calls = [];
-  const exposed = loadPreload(async (...args) => {
-    calls.push(args);
-    return { callbackUrl: 'glidelingo://app/sso-callback?rotating_token_nonce=nonce' };
-  });
+test('preload exposes Clerk token and OAuth IPC channels in Electron sandbox', async () => {
+  const calls = loadPreload();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].name, '__clerk_internal_electron');
 
-  assert.equal(exposed.name, 'glideLingoDesktopAuth');
-  assert.deepEqual(Object.keys(exposed.value), ['open']);
-  assert.equal(Object.isFrozen(exposed.value), true);
-  const result = await exposed.value.open('https://accounts.google.com/o/oauth2/v2/auth');
-  assert.equal(
-    result.callbackUrl,
-    'glidelingo://app/sso-callback?rotating_token_nonce=nonce',
-  );
-  assert.deepEqual(calls, [[
-    'glidelingo:oauth:open',
-    'https://accounts.google.com/o/oauth2/v2/auth',
-  ]]);
-});
-
-test('preload rejects malformed request and response payloads', async () => {
-  const invalidResponse = loadPreload(async () => ({ callbackUrl: 42 }));
-  await assert.rejects(invalidResponse.value.open('https://accounts.google.com'), /callback was invalid/);
-  await assert.rejects(invalidResponse.value.open(42), /URL was invalid/);
+  const { tokenCache, oauthTransport } = calls[0].bridge;
+  assert.deepEqual(await tokenCache.getToken('__clerk_client_jwt'), [
+    'clerk:token-cache:get',
+    '__clerk_client_jwt',
+  ]);
+  assert.deepEqual(await tokenCache.saveToken('__clerk_client_jwt', 'token'), [
+    'clerk:token-cache:save',
+    '__clerk_client_jwt',
+    'token',
+  ]);
+  assert.deepEqual(await tokenCache.clearToken('__clerk_client_jwt'), [
+    'clerk:token-cache:clear',
+    '__clerk_client_jwt',
+  ]);
+  assert.deepEqual(await oauthTransport.getRedirectUrl(), [
+    'clerk:oauth-transport:get-redirect-url',
+  ]);
+  assert.deepEqual(await oauthTransport.open('https://clerk.example.test'), [
+    'clerk:oauth-transport:open',
+    'https://clerk.example.test',
+  ]);
 });

@@ -1,4 +1,3 @@
-import { useClerk, useUser } from '@clerk/expo';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -7,6 +6,7 @@ import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useClerk, useUser } from '@/providers/clerk-runtime';
 
 import { authErrorMessage } from './auth-error-message';
 import { accountIdentity } from './auth-profile';

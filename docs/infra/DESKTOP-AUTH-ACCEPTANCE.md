@@ -33,8 +33,8 @@ npm run desktop:export
 Expected evidence:
 
 - the sign-in copy contract names Google, Apple, and email, and does not advertise phone;
-- callback parsing still accepts only `glidelingo://app/sign-in` and `glidelingo://app/sso-callback` with bounded
-  parameters;
+- Clerk's official Electron bridge is wired across main and renderer; the sandboxed preload exposes the exact IPC
+  shape that bridge expects and the flow uses the exact `glidelingo://app/` callback;
 - packaged navigation remains on the virtual local origin `https://desktop.glidelingo.com`, while unrelated HTTPS
   traffic is forwarded to Chromium's built-in network handler;
 - development auth child navigation accepts only the exact Clerk instance, Google, Apple, and exact renderer origin;
@@ -59,10 +59,9 @@ Expected evidence:
 
 3. Confirm the signed-out screen says **Continue with Google, Apple, or email** and Clerk renders the enabled
    choices.
-4. Open each configured provider once. Confirm the OAuth popup remains inside the Electron auth child while it is on
-   Clerk, Google, or Apple. Confirm an unrelated HTTPS link opens in the system browser instead of navigating the auth
-   child.
-5. Close an OAuth popup before completing it. Confirm the sign-in screen remains usable and a new attempt can start.
+4. Open each configured provider once. Confirm Electron opens the system browser, the provider returns through
+   `glidelingo://app/`, and the same Electron window completes the flow.
+5. Cancel a system-browser OAuth attempt. Confirm the sign-in screen remains usable and a new attempt can start.
 6. Navigate the renderer to `http://localhost:8081/sso-callback?error=access_denied`. Confirm it shows **Sign in was
    cancelled**, the account remains unchanged, and **Return to sign in** returns to a usable sign-in screen.
 7. Navigate the renderer to `http://localhost:8081/sso-callback?error=server_error`. Confirm the callback handler fails
@@ -71,8 +70,8 @@ Expected evidence:
    - readiness reports the API and database state;
    - **Authenticated session verified** appears;
    - the screen shows request metadata but no token and no raw Clerk user ID.
-9. Sign out, sign in as a different test user, and repeat the diagnostics proof. Confirm browser learning state is not
-   silently shared between the two identities.
+9. Sign out, sign back in as the same test user, then sign out and sign in as a different test user. Repeat diagnostics
+   after each transition and confirm learning state is not silently shared between identities.
 
 Live development evidence to record:
 
@@ -101,11 +100,10 @@ Then use the DMG produced under `release/`:
 
 1. Copy the DMG to a clean secondary Mac, open it, drag **GlideLingo** to `/Applications`, and launch it from Finder.
 2. With GlideLingo already running, start Google sign-in. Confirm the system browser opens, authentication completes,
-   and macOS routes the `glidelingo://app/...` callback into that same running app. Repeat with Apple. This is the warm
+   and macOS routes the `glidelingo://app/` callback into that same running app. Repeat with Apple. This is the warm
    callback test.
-3. Fully quit GlideLingo. Start a new provider flow, arrange for its callback while the app is closed, and confirm macOS
-   launches `/Applications/GlideLingo.app` and completes the sign-in. Repeat for Google and Apple. This is the cold
-   callback test.
+3. Do not claim support for quitting GlideLingo while the external OAuth flow is still pending. Clerk Electron resolves
+   the provider callback against an in-memory pending OAuth flow in the already running app.
 4. Cancel a provider flow and confirm the installed app returns to an actionable sign-in state without authenticating or
    becoming stuck on the callback screen.
 5. Complete email-code sign-in in the installed app. Phone SMS remains deferred to mobile.
@@ -118,9 +116,7 @@ Live packaged evidence to record:
 
 - [ ] Signed/notarized DMG installed on a clean Mac and passed Gatekeeper.
 - [ ] Google warm callback passed.
-- [ ] Google cold callback passed.
 - [ ] Apple warm callback passed.
-- [ ] Apple cold callback passed.
 - [ ] Provider cancellation recovery passed.
 - [ ] Email verification-code sign-in passed.
 - [ ] First-name completion, session persistence, sign-out, account isolation, and diagnostics proof passed.

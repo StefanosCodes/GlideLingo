@@ -4,6 +4,7 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "dependencies": {
+    "@clerk/electron": "0.0.36",
     "@clerk/expo": "4.6.1",
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo/ui": "~57.0.15",

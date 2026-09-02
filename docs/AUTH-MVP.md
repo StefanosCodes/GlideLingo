@@ -54,9 +54,10 @@ to import or reject it; importing moves the legacy data into that Clerk user's s
 4. Replace Clerk's shared web Apple credentials with production OAuth credentials.
 5. Configure SMS countries and Clerk phone-auth pricing only when the separate mobile release adds phone authentication.
 6. Inject production keys through EAS environments. Keep the Clerk secret key and RevenueCat secret API keys server-only.
-7. In Clerk's production Native application, allowlist both exact desktop redirect URLs:
-   `glidelingo://app/sign-in` and `glidelingo://app/sso-callback`. Do not allowlist a wildcard host,
-   alternate authority, port, userinfo, or arbitrary custom-protocol path.
+7. In each Clerk Native application environment used by Electron, allowlist the official SDK callback
+   `glidelingo://app/`. Keep `glidelingo://app/sign-in` and `glidelingo://app/sso-callback` while older
+   distributed builds still need them. Do not allowlist a wildcard host, alternate authority, port,
+   userinfo, or arbitrary custom-protocol path.
 
 ## Packaged Electron contract
 
@@ -67,16 +68,20 @@ to import or reject it; importing moves the legacy data into that Clerk user's s
   use the reviewed defaults in `desktop/runtime.cjs`; `desktop:release` validates the production origins, embeds them in
   Electron package metadata, and exports the web bundle with the matching public client configuration. Wildcard Clerk
   instance trust is intentionally rejected.
-- Packaged OAuth uses redirect mode and opens provider navigation in the system browser. The installer registers the
-  `glidelingo` protocol. The main process enforces one app instance and accepts callbacks only at
-  `glidelingo://app/sign-in` or `glidelingo://app/sso-callback`, with bounded parameter names/counts/values.
-- Before publishing a signed artifact, install it, start an OAuth flow, confirm the system browser returns to the already
-  running app (warm callback), then repeat with the app initially closed (cold callback). These signed-installed warm and
-  cold OAuth callback smokes remain activation gates; unit tests prove parsing and routing policy but cannot prove
-  operating-system registration or Clerk Native application allowlisting.
-- Development Electron popup windows may navigate only among the exact configured Clerk origin, Google, Apple, and the
-  exact loopback renderer origin that opened the flow. The same policy is installed on every auth child window and its
-  nested window attempts; unrelated HTTPS destinations leave Electron and open in the system browser.
+- Electron uses Clerk's official `@clerk/electron` main and React bridge. A sandbox-compatible preload exposes the
+  official Clerk IPC shape without importing npm modules inside Electron's sandboxed preload runtime. Clerk persists the
+  client token through macOS Keychain-backed encryption, marks API requests as native, and opens OAuth in the system
+  browser. The installer registers the `glidelingo` protocol; the SDK callback is exactly `glidelingo://app/`. The
+  older `/sign-in` and `/sso-callback` routes remain narrowly validated only for compatibility with already distributed
+  builds.
+- Before publishing a signed artifact, install it, start an OAuth flow, and confirm the system browser returns to the
+  already running app (warm callback). This signed-installed OAuth smoke remains an activation gate; unit tests prove
+  parser and routing policy but cannot prove operating-system registration or Clerk Native application allowlisting.
+  Quitting the app while an OAuth attempt is in progress discards Clerk Electron's in-memory pending OAuth flow, so
+  cold callback completion is not an MVP guarantee.
+- Development Electron uses the same official native bridge and system-browser OAuth lifecycle as the packaged app;
+  only the Clerk instance, API endpoint, billing sandbox, and renderer origin differ. Ordinary browser development
+  continues to use Clerk's web popup flow.
 - The internal diagnostics screen calls `GET /v1/auth/session` with the normal API client, compares FastAPI's verified
   subject to Clerk's current `userId`, and displays only match state, HTTP status, and request ID. It never renders the
   session token or either raw user ID.

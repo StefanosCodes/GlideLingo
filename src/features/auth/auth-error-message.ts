@@ -1,4 +1,4 @@
-import { isClerkAPIResponseError } from '@clerk/expo';
+import { isClerkAPIResponseError } from '@/providers/clerk-errors';
 
 export function authErrorMessage(error: unknown, fallback: string) {
   if (isClerkAPIResponseError(error)) {

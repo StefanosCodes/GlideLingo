@@ -6,6 +6,27 @@ This roadmap turns the architecture into small working slices. It is directional
 
 Each slice must preserve a working application and include its own verification.
 
+[`PRODUCT.md`](../../PRODUCT.md) is the canonical V1 product contract. This roadmap sequences
+infrastructure work and must not redefine product behavior.
+
+## Current `main` snapshot
+
+Audited at `786a1141410e01c3b2e6484d455fe4d340039820`:
+
+- the Expo/Electron client, one authored Greek learning path, local evidence/rhythm state, and
+  pre-generated Google lesson audio exist;
+- the public FastAPI service has health/readiness, verified Clerk session authentication, `/v1`
+  routes, and an authenticated lesson-tutor gateway;
+- the IAM-private lesson-tutor service and its operator-run guard migration exist but remain dormant
+  behind disabled flags;
+- server-owned RevenueCat authorization exists but remains disabled until its documented migration,
+  secret-version, webhook, and sandbox acceptance gates pass;
+- PostgreSQL and development/release infrastructure foundations exist;
+- general server-persisted learner progress, complete authored V1 curriculum, background workers,
+  live OpenAI Realtime voice, and LiveAvatar presentation do not exist.
+
+Status labels below describe this snapshot, not the age or merge state of an earlier PR.
+
 ## Slice 0: Architecture reference
 
 Outcome:
@@ -25,6 +46,9 @@ Excluded:
 - Deployment credentials or pipelines.
 
 ## Slice 1: Golden Greek learning mission
+
+Status: partially implemented; one bounded Greek path and local evidence behavior exist, while the
+complete authored V1 course does not.
 
 Outcome:
 
@@ -79,6 +103,9 @@ This slice proves infrastructure wiring, not learner persistence.
 
 ## Slice 3: Persistent authenticated learner
 
+Status: partially implemented; Clerk sessions are verified server-side, but durable learner sessions,
+attempt persistence, and cross-client resume are not.
+
 Outcome:
 
 - One learner can sign in, start a lesson, submit an attempt, close the application, and resume on another client.
@@ -120,6 +147,9 @@ Acceptance:
 
 ## Slice 5: Mastery and review
 
+Status: partially implemented in deterministic local evidence/review policy; server-owned durable
+state and cross-client read models are not.
+
 Outcome:
 
 - Learning evidence updates deterministic skill state and schedules useful review.
@@ -137,25 +167,39 @@ Acceptance:
 - Review ordering is deterministic and bounded.
 - Progress does not rely on client-computed durable totals.
 
-## Slice 6: Speaking pipeline
+## Slice 6: OpenAI Realtime conversation
 
 Outcome:
 
-- A learner can submit a controlled Greek speaking attempt and receive honest, recoverable feedback.
+- A learner can complete one course-connected Greek conversation through the direct OpenAI Realtime
+  voice-only path on supported mobile and desktop clients. The learner may select LiveAvatar Show
+  tutor presentation without changing the conversation or learning contract.
 
 Work:
 
-- Evaluate Greek STT/TTS using native-speaker test material.
-- Add direct media upload and private object storage.
-- Introduce durable jobs and a worker.
-- Define retries, timeouts, concurrency, cancellation, and terminal recovery.
-- Separate recognition confidence from pronunciation claims.
+- Freeze one server-resolved `VoiceSessionSpec` for voice-only and Show tutor.
+- Model session lifecycle separately from turn state, presentation state, and normalized events.
+- Add authenticated admission, end, and recap endpoints under the existing `/v1`
+  convention.
+- Implement and verify direct OpenAI Realtime voice-only before optional avatar integration.
+- Add captions, interruption, reconnect, idempotent finalization, usage limits, cleanup, and cost
+  attribution.
+- Add LiveAvatar only as the user-selectable Show tutor adapter with clean voice-only fallback.
+- Evaluate communicative meaning separately from pronunciation; add media storage or workers only
+  when a validated acoustic assessment actually requires durable asynchronous work.
+- Keep OpenAI and LiveAvatar unable to own or mutate curriculum, scoring, XP, evidence, entitlement,
+  or unlock state.
 
 Acceptance:
 
-- Provider failure produces a recoverable state.
-- Duplicate job delivery cannot duplicate terminal effects.
-- Feedback claims only capabilities validated for Greek.
+- Direct voice-only completes the authored scenario on physical iPhone, Android, and Electron.
+- Show tutor on/off uses the same `VoiceSessionSpec` and produces the same authoritative outcomes.
+- Avatar unavailability or failure never ends otherwise healthy voice.
+- Reconnect, cancellation, provider replay, and finalization do not duplicate turns, evidence, XP, or
+  usage accounting.
+- Every provider resource stops on completion, cancellation, timeout, disconnect expiry, or error.
+- Feedback claims only capabilities validated for Greek, and no transcript is presented as a
+  pronunciation score.
 
 ## Slice 7: Offline current unit
 
@@ -177,6 +221,9 @@ Acceptance:
 - Unsupported online-only activities explain their requirement clearly.
 
 ## Slice 8: Monetization and release readiness
+
+Status: partially implemented; desktop release, Clerk, and server-owned RevenueCat foundations exist,
+but RevenueCat remains disabled and the full product release/enablement gates have not passed.
 
 Outcome:
 
@@ -202,6 +249,8 @@ Acceptance:
 
 - Do not build the entire database schema before the golden mission establishes real data needs.
 - Do not add workers before a durable long-running operation exists.
+- Do not start optional avatar integration before the direct OpenAI Realtime voice-only acceptance
+  path and shared `VoiceSessionSpec` are proven.
 - Do not implement offline sync before the online idempotency contract works.
 - Do not integrate billing before the learning loop is validated.
 - Do not extract microservices while one transaction protects core learning invariants.

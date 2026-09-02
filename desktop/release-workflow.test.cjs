@@ -120,13 +120,17 @@ test('GitHub draft adapter marks sandbox builds as internal prereleases only', a
 
   await adapter.updateDraft(7, {
     billingMode: 'sandbox',
+    commitSha,
     releaseTag,
   });
   assert.ok(responses.at(-1).includes('prerelease=true'));
+  assert.ok(responses.at(-1).includes(`tag_name=${releaseTag}`));
+  assert.ok(responses.at(-1).includes(`target_commitish=${commitSha}`));
   assert.ok(responses.at(-1).some((argument) => argument.startsWith('body=')));
 
   await adapter.updateDraft(7, {
     billingMode: 'production',
+    commitSha,
     releaseTag,
   });
   assert.ok(responses.at(-1).includes('prerelease=false'));
@@ -388,6 +392,7 @@ test('partial and rerun drafts converge by replacing every existing asset', asyn
   const calls = [];
   let release = sandboxDraft({
     id: 10,
+    tag_name: 'untagged-deadbeef',
     assets: [
       { id: 1, name: localAssets[0].name },
       { id: 2, name: localAssets[0].name },
@@ -403,6 +408,7 @@ test('partial and rerun drafts converge by replacing every existing asset', asyn
     },
     async updateDraft(id) {
       calls.push(['update', id]);
+      release = { ...release, tag_name: releaseTag };
     },
     async getReleaseById() {
       return release;
@@ -444,6 +450,32 @@ test('partial and rerun drafts converge by replacing every existing asset', asyn
     github,
   );
   assert.equal(calls.filter(([action]) => action === 'delete').length, 6);
+});
+
+test('untagged drafts must normalize to the protected tag before asset mutation', async () => {
+  const localAssets = expectedReleaseAssetNames('1.0.0').map((name, index) => ({
+    name,
+    path: `/tmp/${name}`,
+    size: index + 1,
+    sha256: `${index}`.repeat(64),
+  }));
+  const discovered = sandboxDraft({ tag_name: 'untagged-deadbeef' });
+  let updates = 0;
+  let assetMutations = 0;
+
+  await assert.rejects(
+    convergeDraftRelease(sandboxSelection(), localAssets, {
+      async getRelease() { return discovered; },
+      async updateDraft() { updates += 1; },
+      async getReleaseById() { return discovered; },
+      async deleteAsset() { assetMutations += 1; },
+      async uploadAssets() { assetMutations += 1; },
+    }),
+    /exact unpublished draft identity/,
+  );
+
+  assert.equal(updates, 1);
+  assert.equal(assetMutations, 0);
 });
 
 test('draft convergence refuses published releases and invalid remote asset sets', async () => {
@@ -521,6 +553,7 @@ test('draft convergence refuses published releases and invalid remote asset sets
     async createDraft() {
       return sandboxDraft({ id: 2 });
     },
+    async updateDraft() {},
     async deleteAsset() {},
     async uploadAssets() {},
   };
@@ -551,6 +584,7 @@ test('draft convergence refuses published releases and invalid remote asset sets
         async createDraft() {
           return sandboxDraft({ id: 3 });
         },
+        async updateDraft() {},
         async deleteAsset() {},
         async uploadAssets() {},
       },

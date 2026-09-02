@@ -275,10 +275,10 @@ function releaseTitle(selection) {
     : `GlideLingo ${selection.releaseTag}`;
 }
 
-function assertDraftIdentity(release, selection) {
+function assertDraftIdentity(release, selection, allowUntagged = false) {
   const tagMatches =
     release?.tag_name === selection.releaseTag ||
-    /^untagged-[0-9a-f]+$/i.test(release?.tag_name || '');
+    (allowUntagged && /^untagged-[0-9a-f]+$/i.test(release?.tag_name || ''));
   if (
     !release ||
     !Number.isSafeInteger(release.id) ||
@@ -329,7 +329,7 @@ function findDraftBySelectionPages(pages, selection) {
     .flat()
     .filter((release) => {
       try {
-        assertDraftIdentity(release, selection);
+        assertDraftIdentity(release, selection, true);
         return true;
       } catch {
         return false;
@@ -351,15 +351,14 @@ async function convergeDraftRelease(selection, localAssets, github) {
 
   if (!release) {
     release = await github.createDraft(selection);
-  } else {
-    assertDraftIdentity(release, selection);
-    await github.updateDraft(release.id, selection);
-    release = await github.getReleaseById(release.id);
   }
 
   if (!release) {
     throw new Error(`Draft release ${selection.releaseTag} could not be created.`);
   }
+  assertDraftIdentity(release, selection, true);
+  await github.updateDraft(release.id, selection);
+  release = await github.getReleaseById(release.id);
   assertDraftIdentity(release, selection);
 
   for (const asset of release.assets || []) {
@@ -445,9 +444,11 @@ function createGitHubAdapter(
         'PATCH',
         `repos/${repository}/releases/${releaseId}`,
         '-f',
-        selection.billingMode === 'sandbox'
-          ? `name=GlideLingo ${selection.releaseTag} (internal sandbox)`
-          : `name=GlideLingo ${selection.releaseTag}`,
+        `tag_name=${selection.releaseTag}`,
+        '-f',
+        `target_commitish=${selection.commitSha}`,
+        '-f',
+        `name=${releaseTitle(selection)}`,
         '-F',
         'draft=true',
         '-F',

@@ -141,6 +141,8 @@ jobs:
           GLIDELINGO_DESKTOP_RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
         run: npm run desktop:release
       - name: Verify signature, notarization, and architecture
+        env:
+          GLIDELINGO_RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
           codesign --verify --deep --strict --verbose=2 release/mac-universal/GlideLingo.app
           spctl --assess --type execute --verbose=4 release/mac-universal/GlideLingo.app
@@ -150,7 +152,7 @@ jobs:
           grep -qw arm64 <<< "$ARCHITECTURES"
           EXTRACTED_ZIP_APP="${RUNNER_TEMP}/glidelingo-updater-zip"
           mkdir -p "$EXTRACTED_ZIP_APP"
-          ditto -x -k "release/GlideLingo-${{ needs.validate.outputs.version }}-universal.zip" "$EXTRACTED_ZIP_APP"
+          ditto -x -k "release/GlideLingo-${GLIDELINGO_RELEASE_VERSION}-universal.zip" "$EXTRACTED_ZIP_APP"
           codesign --verify --deep --strict --verbose=2 "$EXTRACTED_ZIP_APP/GlideLingo.app"
           spctl --assess --type execute --verbose=4 "$EXTRACTED_ZIP_APP/GlideLingo.app"
           xcrun stapler validate "$EXTRACTED_ZIP_APP/GlideLingo.app"

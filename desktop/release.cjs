@@ -6,6 +6,7 @@ const { resolveBillingMode } = require('./release-secrets.cjs');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const DESKTOP_TAG_PREFIX = 'desktop-v';
+const DESKTOP_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 function resolveProductionApiOrigin(value) {
   if (!value || value !== value.trim()) {
@@ -122,6 +123,9 @@ function validateNotarizationCredentials(environment) {
 }
 
 function validateReleaseTag(tag, desktopVersion = version) {
+  if (!DESKTOP_VERSION_PATTERN.test(desktopVersion || '')) {
+    throw new Error('Desktop package version must be a strict numeric SemVer release.');
+  }
   if (!tag) {
     return;
   }

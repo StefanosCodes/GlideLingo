@@ -144,10 +144,11 @@ choosing **Later** at each prompt to prove no unattended install occurs. This si
 `1.0.1` exercise cannot be replaced by an unsigned local package test.
 
 The authentication integration preserves the corrected desktop origin and OAuth contract:
-FastAPI CORS allows `glidelingo://app`, packaged Electron uses the system browser for OAuth, and
+FastAPI CORS allows the exact virtual renderer origin `https://desktop.glidelingo.com`, packaged
+Electron serves signed local files at that origin and uses the system browser for OAuth, and
 the callback handler accepts only the exact application authority and bounded callback routes.
 The release command embeds only validated, exact API and Clerk origins in Electron package
-metadata; the default development origins remain exact as well. The public Clerk key must belong
+metadata; the packaged defaults point to those same production services. The public Clerk key must belong
 to the configured Clerk origin, and mock billing is rejected by release validation.
 
 ## Credential rotation and failure behavior

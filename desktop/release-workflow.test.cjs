@@ -7,7 +7,10 @@ const test = require('node:test');
 
 const {
   convergeDraftRelease,
+  createGitHubAdapter,
   expectedReleaseAssetNames,
+  findReleaseByTag,
+  findReleaseByTagPages,
   inspectLocalAssets,
   resolveReleaseSelection,
   writeChecksums,
@@ -16,6 +19,53 @@ const {
 const commitSha = 'a'.repeat(40);
 const mainSha = 'b'.repeat(40);
 const releaseTag = 'desktop-v1.0.0';
+
+test('draft releases can be recovered from the release list when the tag endpoint omits them', () => {
+  const draft = { id: 42, draft: true, tag_name: releaseTag };
+
+  assert.equal(findReleaseByTag([{ tag_name: 'desktop-v0.9.0' }, draft], releaseTag), draft);
+  assert.equal(findReleaseByTag([], releaseTag), null);
+  assert.throws(() => findReleaseByTag({}, releaseTag), /must be an array/);
+});
+
+test('draft recovery searches every paginated release-list response', () => {
+  const firstPage = Array.from({ length: 100 }, (_, index) => ({
+    id: index + 1,
+    tag_name: `desktop-v0.${index}.0`,
+  }));
+  const draft = { id: 101, draft: true, tag_name: releaseTag };
+
+  assert.equal(findReleaseByTagPages([firstPage, [draft]], releaseTag), draft);
+  assert.equal(findReleaseByTagPages([firstPage, []], releaseTag), null);
+  assert.throws(
+    () => findReleaseByTagPages([firstPage, {}], releaseTag),
+    /array of pages/,
+  );
+});
+
+test('GitHub draft lookup follows release-list pagination after a tag miss', async () => {
+  const draft = { id: 101, draft: true, tag_name: releaseTag, assets: [] };
+  const firstPage = Array.from({ length: 100 }, (_, index) => ({
+    id: index + 1,
+    draft: false,
+    tag_name: `desktop-v0.${index}.0`,
+  }));
+  const calls = [];
+  const github = createGitHubAdapter('StefanosCodes/GlideLingo', (args, options) => {
+    calls.push({ args, options });
+    if (calls.length === 1) {
+      return { status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' };
+    }
+    return { status: 0, stdout: JSON.stringify([firstPage, [draft]]), stderr: '' };
+  });
+
+  assert.deepEqual(await github.getRelease(releaseTag), draft);
+  assert.deepEqual(calls[1].args, [
+    '--paginate',
+    '--slurp',
+    'repos/StefanosCodes/GlideLingo/releases?per_page=100',
+  ]);
+});
 
 function gitAdapter({ onMain = true, taggedCommit = commitSha } = {}) {
   return {

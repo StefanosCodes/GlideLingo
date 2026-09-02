@@ -32,6 +32,8 @@ Expected evidence:
 - the sign-in copy contract names Google, Apple, email, and phone;
 - callback parsing still accepts only `glidelingo://app/sign-in` and `glidelingo://app/sso-callback` with bounded
   parameters;
+- packaged navigation remains on the virtual local origin `https://desktop.glidelingo.com`, while unrelated HTTPS
+  traffic is forwarded to Chromium's built-in network handler;
 - development auth child navigation accepts only the exact Clerk instance, Google, Apple, and exact renderer origin;
 - Electron continues to use `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`;
 - the typed `/v1/auth/session` client proves both identity match and mismatch behavior without returning a token;

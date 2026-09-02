@@ -5,17 +5,19 @@ const { pathToFileURL } = require('node:url');
 const { app, BrowserWindow, dialog, net, protocol, session, shell } = require('electron');
 
 const {
-  APP_HOST,
   APP_SCHEME,
+  DEVELOPMENT_CLERK_ORIGIN,
+  PACKAGED_RENDERER_ORIGIN,
   PRODUCTION_API_ORIGIN,
   PRODUCTION_CLERK_ORIGIN,
   buildContentSecurityPolicy,
   findAuthCallbackUrl,
   isAllowedAuthWindowUrl,
   isAllowedNavigation,
-  isExactAppUrl,
+  isExactPackagedRendererUrl,
   isSafeExternalUrl,
   installAuthPopupNavigationSecurity,
+  mapAuthCallbackToRendererUrl,
   parseAuthCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
@@ -26,7 +28,7 @@ const { startMacUpdater } = require('./updater.cjs');
 const { glidelingoApiOrigin, glidelingoClerkOrigin } = require('./package.json');
 
 const DEVELOPMENT_URL = validateDevelopmentUrl(process.env.ELECTRON_RENDERER_URL);
-const PRODUCTION_URL = `${APP_SCHEME}://${APP_HOST}/`;
+const PRODUCTION_URL = `${PACKAGED_RENDERER_ORIGIN}/`;
 const RENDERER_URL = DEVELOPMENT_URL ?? PRODUCTION_URL;
 const PACKAGED_API_ORIGIN = validateProductionApiOrigin(
   glidelingoApiOrigin ?? PRODUCTION_API_ORIGIN,
@@ -34,6 +36,9 @@ const PACKAGED_API_ORIGIN = validateProductionApiOrigin(
 const PACKAGED_CLERK_ORIGIN = validateProductionClerkOrigin(
   glidelingoClerkOrigin ?? PRODUCTION_CLERK_ORIGIN,
 );
+const AUTH_CLERK_ORIGIN = DEVELOPMENT_URL
+  ? DEVELOPMENT_CLERK_ORIGIN
+  : PACKAGED_CLERK_ORIGIN;
 const CONTENT_SECURITY_POLICY = buildContentSecurityPolicy({
   apiOrigin: PACKAGED_API_ORIGIN,
   clerkOrigin: PACKAGED_CLERK_ORIGIN,
@@ -67,7 +72,11 @@ async function registerProductionProtocol() {
     : path.join(app.getAppPath(), '..', 'dist');
   const notFoundPage = path.join(distDirectory, '+not-found.html');
 
-  await protocol.handle(APP_SCHEME, async (request) => {
+  await protocol.handle('https', async (request) => {
+    if (!isExactPackagedRendererUrl(request.url)) {
+      return net.fetch(request, { bypassCustomProtocolHandlers: true });
+    }
+
     const requestedFile = resolveRendererPath(distDirectory, request.url);
 
     if (!requestedFile) {
@@ -99,7 +108,7 @@ function installSessionSecurity() {
 
   if (!DEVELOPMENT_URL) {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-      if (!isExactAppUrl(details.url)) {
+      if (!isExactPackagedRendererUrl(details.url)) {
         callback({ responseHeaders: details.responseHeaders });
         return;
       }
@@ -121,11 +130,12 @@ function openExternalUrl(targetUrl) {
 }
 
 function handleAuthCallback(targetUrl) {
-  const callbackUrl = parseAuthCallbackUrl(targetUrl);
-  if (!callbackUrl) return false;
+  const acceptedCallbackUrl = parseAuthCallbackUrl(targetUrl);
+  const callbackUrl = mapAuthCallbackToRendererUrl(targetUrl);
+  if (!acceptedCallbackUrl || !callbackUrl) return false;
 
   if (!mainWindow || mainWindow.isDestroyed()) {
-    pendingAuthCallbackUrl = callbackUrl;
+    pendingAuthCallbackUrl = acceptedCallbackUrl;
     return true;
   }
 
@@ -152,12 +162,12 @@ function authPopupWindowOptions(parent) {
 function installAuthPopupSecurity(authWindow, parent) {
   installAuthPopupNavigationSecurity(authWindow.webContents, {
     rendererUrl: RENDERER_URL,
-    clerkOrigin: PACKAGED_CLERK_ORIGIN,
+    clerkOrigin: AUTH_CLERK_ORIGIN,
     openExternalUrl,
   });
 
   authWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (!isAllowedAuthWindowUrl(url, PACKAGED_CLERK_ORIGIN)) {
+    if (!isAllowedAuthWindowUrl(url, AUTH_CLERK_ORIGIN)) {
       openExternalUrl(url);
       return { action: 'deny' };
     }
@@ -197,7 +207,7 @@ function createWindow() {
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (isAllowedAuthWindowUrl(url, PACKAGED_CLERK_ORIGIN)) {
+    if (isAllowedAuthWindowUrl(url, AUTH_CLERK_ORIGIN)) {
       if (!DEVELOPMENT_URL) {
         openExternalUrl(url);
         return { action: 'deny' };
@@ -217,6 +227,12 @@ function createWindow() {
   });
 
   window.webContents.on('will-navigate', (event, url) => {
+    if (parseAuthCallbackUrl(url)) {
+      event.preventDefault();
+      handleAuthCallback(url);
+      return;
+    }
+
     if (isAllowedNavigation(url, RENDERER_URL)) {
       return;
     }
@@ -232,8 +248,15 @@ function createWindow() {
           const rendered = await window.webContents.executeJavaScript(`({
             authenticated: Boolean(document.querySelector('[data-testid="start-lesson"]')),
             completingProfile: Boolean(document.querySelector('[data-testid="first-name-completion"]')),
+            origin: window.location.origin,
             signedOut: Boolean(document.querySelector('[data-testid="auth-sign-in"]')),
           })`);
+
+          if (!DEVELOPMENT_URL && rendered.origin !== PACKAGED_RENDERER_ORIGIN) {
+            console.error(`[desktop-smoke] unexpected renderer origin: ${rendered.origin}`);
+            app.exit(1);
+            return;
+          }
 
           if (!rendered.authenticated && !rendered.completingProfile && !rendered.signedOut) {
             console.error('[desktop-smoke] renderer loaded without a valid signed-in or signed-out screen');

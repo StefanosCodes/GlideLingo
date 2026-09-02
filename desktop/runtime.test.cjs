@@ -3,16 +3,19 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  DEVELOPMENT_CLERK_ORIGIN,
   PRODUCTION_API_ORIGIN,
   PRODUCTION_CLERK_ORIGIN,
+  PACKAGED_RENDERER_ORIGIN,
   buildContentSecurityPolicy,
   findAuthCallbackUrl,
   isAllowedAuthPopupNavigation,
   isAllowedAuthWindowUrl,
   isAllowedNavigation,
-  isExactAppUrl,
+  isExactPackagedRendererUrl,
   isSafeExternalUrl,
   installAuthPopupNavigationSecurity,
+  mapAuthCallbackToRendererUrl,
   parseAuthCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
@@ -21,7 +24,7 @@ const {
 } = require('./runtime.cjs');
 
 test('authentication popups are restricted to Clerk, Google, and Apple HTTPS origins', () => {
-  assert.equal(isAllowedAuthWindowUrl('https://vast-gator-9531.clerk.accounts.dev/v1/oauth_callback'), true);
+  assert.equal(isAllowedAuthWindowUrl('https://clerk.glidelingo.com/v1/oauth_callback'), true);
   assert.equal(isAllowedAuthWindowUrl('https://accounts.google.com/o/oauth2/v2/auth'), true);
   assert.equal(isAllowedAuthWindowUrl('https://appleid.apple.com/auth/authorize'), true);
   assert.equal(isAllowedAuthWindowUrl('https://clerk.accounts.dev.attacker.example/'), false);
@@ -35,33 +38,62 @@ test('development auth popup navigation stays on reviewed OAuth or renderer orig
 
   assert.equal(
     isAllowedAuthPopupNavigation(
-      'https://vast-gator-9531.clerk.accounts.dev/v1/oauth_callback',
+      `${DEVELOPMENT_CLERK_ORIGIN}/v1/oauth_callback`,
       rendererUrl,
+      DEVELOPMENT_CLERK_ORIGIN,
     ),
     true,
   );
   assert.equal(
-    isAllowedAuthPopupNavigation('https://accounts.google.com/o/oauth2/v2/auth', rendererUrl),
+    isAllowedAuthPopupNavigation(
+      'https://accounts.google.com/o/oauth2/v2/auth',
+      rendererUrl,
+      DEVELOPMENT_CLERK_ORIGIN,
+    ),
     true,
   );
   assert.equal(
-    isAllowedAuthPopupNavigation('https://appleid.apple.com/auth/authorize', rendererUrl),
+    isAllowedAuthPopupNavigation(
+      'https://appleid.apple.com/auth/authorize',
+      rendererUrl,
+      DEVELOPMENT_CLERK_ORIGIN,
+    ),
     true,
   );
   assert.equal(
-    isAllowedAuthPopupNavigation('http://127.0.0.1:8081/sso-callback?state=opaque', rendererUrl),
+    isAllowedAuthPopupNavigation(
+      'http://127.0.0.1:8081/sso-callback?state=opaque',
+      rendererUrl,
+      DEVELOPMENT_CLERK_ORIGIN,
+    ),
     true,
   );
   assert.equal(
-    isAllowedAuthPopupNavigation('http://localhost:8081/sso-callback', rendererUrl),
+    isAllowedAuthPopupNavigation(
+      'http://localhost:8081/sso-callback',
+      rendererUrl,
+      DEVELOPMENT_CLERK_ORIGIN,
+    ),
     false,
   );
   assert.equal(
-    isAllowedAuthPopupNavigation('https://example.com/oauth', rendererUrl),
+    isAllowedAuthPopupNavigation(
+      'https://example.com/oauth',
+      rendererUrl,
+      DEVELOPMENT_CLERK_ORIGIN,
+    ),
     false,
   );
   assert.equal(
-    isAllowedAuthPopupNavigation('javascript:alert(1)', rendererUrl),
+    isAllowedAuthPopupNavigation('javascript:alert(1)', rendererUrl, DEVELOPMENT_CLERK_ORIGIN),
+    false,
+  );
+  assert.equal(
+    isAllowedAuthPopupNavigation(
+      'https://clerk.glidelingo.com/v1/oauth_callback',
+      rendererUrl,
+      DEVELOPMENT_CLERK_ORIGIN,
+    ),
     false,
   );
 });
@@ -139,11 +171,28 @@ test('OS authentication callbacks require the exact app origin, route, and bound
   assert.equal(parseAuthCallbackUrl(`glidelingo://app/sign-in?state=${'x'.repeat(3000)}`), null);
 });
 
-test('packaged renderer URLs require the exact custom-protocol authority', () => {
-  assert.equal(isExactAppUrl('glidelingo://app/sign-in'), true);
-  assert.equal(isExactAppUrl('glidelingo://app:123/sign-in'), false);
-  assert.equal(isExactAppUrl('glidelingo://user:pass@app/sign-in'), false);
-  assert.equal(isExactAppUrl('glidelingo://other/sign-in'), false);
+test('accepted OS callbacks translate to the exact packaged HTTPS renderer', () => {
+  assert.equal(
+    mapAuthCallbackToRendererUrl(
+      'glidelingo://app/sso-callback?__clerk_status=verified&state=opaque',
+    ),
+    `${PACKAGED_RENDERER_ORIGIN}/sso-callback?__clerk_status=verified&state=opaque`,
+  );
+  assert.equal(mapAuthCallbackToRendererUrl('glidelingo://other/sso-callback?state=opaque'), null);
+  assert.equal(
+    mapAuthCallbackToRendererUrl(
+      'glidelingo://app/sso-callback?state=opaque',
+      'https://desktop.glidelingo.com.attacker.example',
+    ),
+    null,
+  );
+});
+
+test('packaged renderer URLs require the exact virtual HTTPS origin', () => {
+  assert.equal(isExactPackagedRendererUrl(`${PACKAGED_RENDERER_ORIGIN}/sign-in`), true);
+  assert.equal(isExactPackagedRendererUrl('https://desktop.glidelingo.com:444/sign-in'), false);
+  assert.equal(isExactPackagedRendererUrl('https://user:pass@desktop.glidelingo.com/sign-in'), false);
+  assert.equal(isExactPackagedRendererUrl('https://desktop.glidelingo.com.attacker.example/sign-in'), false);
 });
 
 test('development renderer URL is restricted to the local Expo server', () => {
@@ -154,46 +203,46 @@ test('development renderer URL is restricted to the local Expo server', () => {
   assert.throws(() => validateDevelopmentUrl('http://localhost:8081/unexpected'));
 });
 
-test('custom protocol maps routes and assets inside the exported web directory', () => {
+test('virtual HTTPS renderer maps routes and assets inside the exported web directory', () => {
   const root = path.resolve('/tmp/glidelingo-dist');
 
-  assert.equal(resolveRendererPath(root, 'glidelingo://app/'), path.join(root, 'index.html'));
+  assert.equal(resolveRendererPath(root, `${PACKAGED_RENDERER_ORIGIN}/`), path.join(root, 'index.html'));
   assert.equal(
-    resolveRendererPath(root, 'glidelingo://app/explore'),
+    resolveRendererPath(root, `${PACKAGED_RENDERER_ORIGIN}/explore`),
     path.join(root, 'explore.html'),
   );
   assert.equal(
-    resolveRendererPath(root, 'glidelingo://app/_expo/static/app.js'),
+    resolveRendererPath(root, `${PACKAGED_RENDERER_ORIGIN}/_expo/static/app.js`),
     path.join(root, '_expo/static/app.js'),
   );
 });
 
-test('custom protocol rejects other hosts and traversal attempts', () => {
+test('virtual HTTPS renderer rejects other hosts and traversal attempts', () => {
   const root = path.resolve('/tmp/glidelingo-dist');
 
-  assert.equal(resolveRendererPath(root, 'glidelingo://other/index.html'), null);
-  assert.equal(resolveRendererPath(root, 'glidelingo://app:123/index.html'), null);
-  assert.equal(resolveRendererPath(root, 'glidelingo://user:pass@app/index.html'), null);
-  assert.equal(resolveRendererPath(root, 'https://app/index.html'), null);
-  assert.equal(resolveRendererPath(root, 'glidelingo://app/%2e%2e/secret.txt'), null);
-  assert.equal(resolveRendererPath(root, 'glidelingo://app/%E0%A4%A'), null);
+  assert.equal(resolveRendererPath(root, 'https://other.glidelingo.com/index.html'), null);
+  assert.equal(resolveRendererPath(root, 'https://desktop.glidelingo.com:444/index.html'), null);
+  assert.equal(resolveRendererPath(root, 'https://user:pass@desktop.glidelingo.com/index.html'), null);
+  assert.equal(resolveRendererPath(root, 'glidelingo://app/index.html'), null);
+  assert.equal(resolveRendererPath(root, `${PACKAGED_RENDERER_ORIGIN}/%2e%2e/secret.txt`), null);
+  assert.equal(resolveRendererPath(root, `${PACKAGED_RENDERER_ORIGIN}/%E0%A4%A`), null);
 });
 
 test('navigation stays in the renderer and only HTTPS links may open externally', () => {
   assert.equal(
-    isAllowedNavigation('glidelingo://app/explore', 'glidelingo://app/'),
+    isAllowedNavigation(`${PACKAGED_RENDERER_ORIGIN}/explore`, `${PACKAGED_RENDERER_ORIGIN}/`),
     true,
   );
   assert.equal(
-    isAllowedNavigation('glidelingo://other/explore', 'glidelingo://app/'),
+    isAllowedNavigation('https://other.glidelingo.com/explore', `${PACKAGED_RENDERER_ORIGIN}/`),
     false,
   );
   assert.equal(
-    isAllowedNavigation('glidelingo://app:123/explore', 'glidelingo://app/'),
+    isAllowedNavigation('https://desktop.glidelingo.com:444/explore', `${PACKAGED_RENDERER_ORIGIN}/`),
     false,
   );
   assert.equal(
-    isAllowedNavigation('glidelingo://user:pass@app/explore', 'glidelingo://app/'),
+    isAllowedNavigation('https://user:pass@desktop.glidelingo.com/explore', `${PACKAGED_RENDERER_ORIGIN}/`),
     false,
   );
   assert.equal(
@@ -246,14 +295,14 @@ test('packaged Clerk access is restricted to one exact HTTPS origin', () => {
 
 test('packaged CSP permits only the configured API and Clerk origins', () => {
   const policy = buildContentSecurityPolicy({
-    apiOrigin: 'https://api.glidelingo.com',
-    clerkOrigin: 'https://clerk.glidelingo.com',
+    apiOrigin: 'https://api.release.glidelingo.com',
+    clerkOrigin: 'https://clerk.release.glidelingo.com',
   });
   const connectDirective = policy
     .split('; ')
     .find((directive) => directive.startsWith('connect-src'));
-  assert.match(connectDirective, /https:\/\/api\.glidelingo\.com/);
-  assert.match(connectDirective, /https:\/\/clerk\.glidelingo\.com/);
+  assert.match(connectDirective, /https:\/\/api\.release\.glidelingo\.com/);
+  assert.match(connectDirective, /https:\/\/clerk\.release\.glidelingo\.com/);
   assert.doesNotMatch(policy, new RegExp(PRODUCTION_API_ORIGIN.replaceAll('.', '\\.')));
   assert.doesNotMatch(policy, new RegExp(PRODUCTION_CLERK_ORIGIN.replaceAll('.', '\\.')));
   assert.equal(

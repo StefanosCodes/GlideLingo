@@ -268,6 +268,29 @@ function assertRemoteDraft(release, localAssets, releaseTag) {
   }
 }
 
+function findReleaseByTag(releases, tag) {
+  if (!Array.isArray(releases)) {
+    throw new Error('GitHub releases response must be an array.');
+  }
+
+  return releases.find((release) => release?.tag_name === tag) ?? null;
+}
+
+function findReleaseByTagPages(pages, tag) {
+  if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) {
+    throw new Error('GitHub paginated releases response must be an array of pages.');
+  }
+
+  for (const page of pages) {
+    const release = findReleaseByTag(page, tag);
+    if (release) {
+      return release;
+    }
+  }
+
+  return null;
+}
+
 async function convergeDraftRelease(selection, localAssets, github) {
   let release = await github.getRelease(selection.releaseTag);
 
@@ -295,9 +318,10 @@ async function convergeDraftRelease(selection, localAssets, github) {
   return converged;
 }
 
-function createGitHubAdapter(repository) {
-  const api = (args, options) => run('gh', ['api', ...args], options);
-
+function createGitHubAdapter(
+  repository,
+  api = (args, options) => run('gh', ['api', ...args], options),
+) {
   return {
     async getRelease(tag) {
       const endpoint = `repos/${repository}/releases/tags/${encodeURIComponent(tag)}`;
@@ -305,7 +329,12 @@ function createGitHubAdapter(repository) {
       if (result.status !== 0) {
         const detail = `${result.stdout}\n${result.stderr}`;
         if (/HTTP 404|release not found|Not Found/i.test(detail)) {
-          return null;
+          const listed = api([
+            '--paginate',
+            '--slurp',
+            `repos/${repository}/releases?per_page=100`,
+          ]);
+          return findReleaseByTagPages(JSON.parse(listed.stdout), tag);
         }
         throw new Error(`Unable to inspect draft release ${tag}: ${detail.trim()}`);
       }
@@ -419,7 +448,10 @@ if (require.main === module) {
 module.exports = {
   assertRemoteDraft,
   convergeDraftRelease,
+  createGitHubAdapter,
   expectedReleaseAssetNames,
+  findReleaseByTag,
+  findReleaseByTagPages,
   inspectLocalAssets,
   resolveReleaseSelection,
   writeChecksums,

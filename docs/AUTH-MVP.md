@@ -28,8 +28,13 @@ both files. Never expose a Clerk secret key through an `EXPO_PUBLIC_*` variable.
 EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=
 GLIDELINGO_CLERK_ISSUER=https://your-instance.clerk.accounts.dev
 GLIDELINGO_CLERK_JWKS_URL=https://your-instance.clerk.accounts.dev/.well-known/jwks.json
-GLIDELINGO_CLERK_AUTHORIZED_PARTIES=["http://localhost:8081","http://127.0.0.1:8081","glidelingo://app"]
+GLIDELINGO_CLERK_AUTHORIZED_PARTIES=["http://localhost:8081","http://127.0.0.1:8081"]
 ```
+
+Local Electron uses the development Clerk instance and a loopback FastAPI server. Production Clerk and API values are
+injected only by the protected desktop release workflow; they do not belong in the local `.env`. Google and Apple OAuth
+return through Clerk's public development frontend, so local authentication does not require a tunnel. A tunnel such as
+ngrok is required only when an external service such as RevenueCat must deliver a webhook to local FastAPI.
 
 The app automatically attaches Clerk's current signed session token to API requests. FastAPI verifies its RS256 signature,
 issuer, expiry, and subject against Clerk's JWKS. When a token includes Clerk's `azp` claim, FastAPI accepts it only when
@@ -56,6 +61,9 @@ to import or reject it; importing moves the legacy data into that Clerk user's s
 
 ## Packaged Electron contract
 
+- Signed builds serve packaged renderer files through Electron's exact virtual origin
+  `https://desktop.glidelingo.com`. The origin has no DNS record or remote renderer deployment; all other HTTPS
+  requests use Chromium's normal network handler. API CORS and Clerk authorized parties use this exact origin.
 - The packaged renderer permits only the exact configured Clerk frontend and API origins. Ordinary development packages
   use the reviewed defaults in `desktop/runtime.cjs`; `desktop:release` validates the production origins, embeds them in
   Electron package metadata, and exports the web bundle with the matching public client configuration. Wildcard Clerk

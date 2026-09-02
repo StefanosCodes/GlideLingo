@@ -2,9 +2,11 @@ const path = require('node:path');
 
 const APP_SCHEME = 'glidelingo';
 const APP_HOST = 'app';
+const PACKAGED_RENDERER_ORIGIN = 'https://desktop.glidelingo.com';
 const DEVELOPMENT_PORT = '8081';
-const PRODUCTION_API_ORIGIN = 'https://glidelingo-api-50843312405.us-west1.run.app';
-const PRODUCTION_CLERK_ORIGIN = 'https://vast-gator-9531.clerk.accounts.dev';
+const DEVELOPMENT_CLERK_ORIGIN = 'https://vast-gator-9531.clerk.accounts.dev';
+const PRODUCTION_API_ORIGIN = 'https://glidelingo-api-production-50843312405.us-west1.run.app';
+const PRODUCTION_CLERK_ORIGIN = 'https://clerk.glidelingo.com';
 const REVENUECAT_WEB_SDK_ORIGIN = 'https://sdk.revenuecat-static.com';
 const REVENUECAT_BRANDING_ORIGIN = 'https://da08ctfrofx1b.cloudfront.net';
 const AUTH_CALLBACK_PATHS = new Set(['/sign-in', '/sso-callback']);
@@ -25,6 +27,23 @@ function isExactAppUrl(value) {
   return (
     url.protocol === `${APP_SCHEME}:` &&
     url.hostname === APP_HOST &&
+    !url.port &&
+    !url.username &&
+    !url.password
+  );
+}
+
+function isExactPackagedRendererUrl(value) {
+  let url;
+
+  try {
+    url = value instanceof URL ? value : new URL(value);
+  } catch {
+    return false;
+  }
+
+  return (
+    url.origin === PACKAGED_RENDERER_ORIGIN &&
     !url.port &&
     !url.username &&
     !url.password
@@ -159,7 +178,7 @@ function resolveRendererPath(distDirectory, requestUrl) {
     return null;
   }
 
-  if (!isExactAppUrl(url)) {
+  if (!isExactPackagedRendererUrl(url)) {
     return null;
   }
 
@@ -202,10 +221,36 @@ function isAllowedNavigation(targetUrl, rendererUrl) {
       return isExactAppUrl(renderer) && isExactAppUrl(target);
     }
 
-    return target.origin === renderer.origin;
+    return (
+      target.origin === renderer.origin &&
+      !target.username &&
+      !target.password
+    );
   } catch {
     return false;
   }
+}
+
+function mapAuthCallbackToRendererUrl(
+  targetUrl,
+  rendererOrigin = PACKAGED_RENDERER_ORIGIN,
+) {
+  const callbackUrl = parseAuthCallbackUrl(targetUrl);
+  if (!callbackUrl) return null;
+
+  let renderer;
+  try {
+    renderer = new URL(rendererOrigin);
+  } catch {
+    return null;
+  }
+  if (!isExactPackagedRendererUrl(renderer)) return null;
+
+  const callback = new URL(callbackUrl);
+  const translated = new URL(callback.pathname, renderer);
+  translated.search = callback.search;
+  translated.hash = callback.hash;
+  return translated.toString();
 }
 
 function isSafeExternalUrl(targetUrl) {
@@ -310,6 +355,8 @@ function findAuthCallbackUrl(argv) {
 module.exports = {
   APP_HOST,
   APP_SCHEME,
+  DEVELOPMENT_CLERK_ORIGIN,
+  PACKAGED_RENDERER_ORIGIN,
   PRODUCTION_API_ORIGIN,
   PRODUCTION_CLERK_ORIGIN,
   REVENUECAT_BRANDING_ORIGIN,
@@ -320,8 +367,10 @@ module.exports = {
   isAllowedAuthWindowUrl,
   isAllowedNavigation,
   isExactAppUrl,
+  isExactPackagedRendererUrl,
   isSafeExternalUrl,
   installAuthPopupNavigationSecurity,
+  mapAuthCallbackToRendererUrl,
   parseAuthCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,

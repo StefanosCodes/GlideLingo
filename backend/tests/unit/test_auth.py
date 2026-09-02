@@ -313,14 +313,14 @@ def test_packaged_desktop_preflight_allows_its_exact_origin(client: TestClient) 
     response = client.options(
         "/v1/auth/session",
         headers={
-            "Origin": "glidelingo://app",
+            "Origin": "https://desktop.glidelingo.com",
             "Access-Control-Request-Method": "GET",
             "Access-Control-Request-Headers": "authorization",
         },
     )
 
     assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == "glidelingo://app"
+    assert response.headers["access-control-allow-origin"] == "https://desktop.glidelingo.com"
 
 
 def authenticated_get(client: TestClient, token: str) -> Response:

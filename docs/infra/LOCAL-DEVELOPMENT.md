@@ -80,6 +80,20 @@ Environment rules:
 - Use explicit development, test, staging, and production profiles.
 - Never silently use development credentials in production.
 
+The default local desktop lane is deliberately isolated from production:
+
+| Concern | Local desktop | Signed production desktop |
+| --- | --- | --- |
+| Renderer | `http://localhost:8081` | Virtual `https://desktop.glidelingo.com` |
+| API | `http://localhost:8123` | Protected release API origin |
+| Identity | Clerk development instance | Clerk production instance |
+| Billing | RevenueCat/Stripe sandbox | Release-configured billing environment |
+| External webhook delivery | ngrok (only when exercising local webhooks) | Public API endpoint |
+
+Google and Apple OAuth do not require ngrok locally: their provider callback is Clerk's public development frontend,
+and Clerk completes the session back in the local renderer. RevenueCat webhooks originate on RevenueCat's servers, so
+they need a public ngrok URL when FastAPI is running only on the developer machine.
+
 ## Health and readiness
 
 The API distinguishes:

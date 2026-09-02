@@ -143,14 +143,18 @@ def test_clerk_configuration_loads_from_expected_environment_names(
     monkeypatch.setenv("GLIDELINGO_CLERK_AUDIENCE", "glidelingo-api")
     monkeypatch.setenv(
         "GLIDELINGO_CLERK_AUTHORIZED_PARTIES",
-        '["https://app.glidelingo.test","http://localhost:8081","glidelingo://app"]',
+        '["https://app.glidelingo.test","http://localhost:8081","https://desktop.glidelingo.com"]',
     )
 
     assert Settings(_env_file=None).clerk_configuration == (
         "https://clerk.glidelingo.test",
         "https://clerk.glidelingo.test/.well-known/jwks.json",
         "glidelingo-api",
-        ("https://app.glidelingo.test", "http://localhost:8081", "glidelingo://app"),
+        (
+            "https://app.glidelingo.test",
+            "http://localhost:8081",
+            "https://desktop.glidelingo.com",
+        ),
     )
 
 

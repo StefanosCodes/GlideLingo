@@ -28,7 +28,7 @@ env:
   IMAGE_NAME: glidelingo-api
   CLERK_ISSUER: https://vast-gator-9531.clerk.accounts.dev
   CLERK_JWKS_URL: https://vast-gator-9531.clerk.accounts.dev/.well-known/jwks.json
-  CLERK_AUTHORIZED_PARTIES: '["http://localhost:8081","http://127.0.0.1:8081","glidelingo://app"]'
+  CLERK_AUTHORIZED_PARTIES: '["http://localhost:8081","http://127.0.0.1:8081","https://desktop.glidelingo.com"]'
 
 jobs:
   deploy:

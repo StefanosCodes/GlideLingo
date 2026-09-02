@@ -81,17 +81,15 @@ variable "clerk_authorized_parties" {
   default = [
     "http://localhost:8081",
     "http://127.0.0.1:8081",
-    "glidelingo://app",
+    "https://desktop.glidelingo.com",
   ]
 
   validation {
     condition = length(var.clerk_authorized_parties) > 0 && alltrue([
       for party in var.clerk_authorized_parties :
-      party == "glidelingo://app" || (
-        can(regex("^https?://[^/?#]+$", party)) && !strcontains(party, "@")
-      )
+      can(regex("^https?://[^/?#]+$", party)) && !strcontains(party, "@")
     ])
-    error_message = "Clerk authorized parties must contain credential-free exact HTTP(S) origins or glidelingo://app."
+    error_message = "Clerk authorized parties must contain credential-free exact HTTP(S) origins."
   }
 }
 

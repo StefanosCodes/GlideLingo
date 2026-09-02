@@ -69,6 +69,46 @@ def test_revenuecat_server_authorization_is_disabled_by_default() -> None:
     assert settings.revenuecat_entitlement_freshness_seconds == 900
 
 
+def test_affiliate_foundation_is_fully_disabled_by_default() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.affiliates_enabled is False
+    assert settings.affiliate_referral_resolution_enabled is False
+    assert settings.affiliate_attribution_binding_enabled is False
+    assert settings.affiliate_membership_admin_enabled is False
+    assert settings.affiliate_principal_pseudonym_key is None
+
+
+def test_affiliate_route_flags_require_the_master_flag() -> None:
+    with pytest.raises(ValidationError, match="master affiliate flag"):
+        Settings(_env_file=None, affiliate_referral_resolution_enabled=True)
+
+
+def test_authenticated_affiliate_routes_require_key_and_clerk() -> None:
+    with pytest.raises(ValidationError, match="pseudonym key"):
+        Settings(_env_file=None, affiliates_enabled=True)
+
+    with pytest.raises(ValidationError, match="Clerk authentication"):
+        Settings(
+            _env_file=None,
+            affiliates_enabled=True,
+            affiliate_attribution_binding_enabled=True,
+            affiliate_principal_pseudonym_key="p" * 32,
+        )
+
+    settings = Settings(
+        _env_file=None,
+        affiliates_enabled=True,
+        affiliate_referral_resolution_enabled=True,
+        affiliate_attribution_binding_enabled=True,
+        affiliate_membership_admin_enabled=True,
+        affiliate_principal_pseudonym_key="p" * 32,
+        clerk_issuer="https://clerk.glidelingo.test",
+        clerk_jwks_url="https://clerk.glidelingo.test/.well-known/jwks.json",
+    )
+    assert settings.affiliates_enabled is True
+
+
 def test_enabled_revenuecat_requires_all_server_only_secrets() -> None:
     with pytest.raises(ValidationError, match="RevenueCat API key"):
         Settings(_env_file=None, revenuecat_enabled=True)

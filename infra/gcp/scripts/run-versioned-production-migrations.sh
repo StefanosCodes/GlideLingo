@@ -54,7 +54,7 @@ for index in "${!migration_files[@]}"; do
     --set="migration_version=${version}" \
     --set="migration_name=${name}" \
     --set="migration_checksum=${checksum}" \
-    --command="
+    --file=- <<'SQL'
 SET ROLE cloudsqlsuperuser;
 SELECT CASE
   WHEN NOT EXISTS (
@@ -67,7 +67,9 @@ SELECT CASE
   ) THEN 'applied'
   ELSE 'mismatch'
 END;
-" | tr -d '[:space:]')"
+SQL
+  )"
+  state="$(tr -d '[:space:]' <<< "${state}")"
 
   case "${state}" in
     applied)

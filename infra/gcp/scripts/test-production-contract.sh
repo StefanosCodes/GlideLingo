@@ -96,6 +96,17 @@ if grep -REn --include='*.tf' --include='*.json' 'glidelingo-prod-50843312405-1|
   echo "Production identity must not permit a fallback or wildcard project." >&2
   exit 1
 fi
+migration_script="${root}/infra/gcp/scripts/migrate-production-database.sh"
+grep -Fq 'data = @${user_request_file}' "${migration_script}"
+grep -Fq 'chmod 600 "${user_request_file}" "${curl_config_file}"' "${migration_script}"
+create_cleanup_line="$(grep -n -m1 '^operator_created=true$' "${migration_script}" | cut -d: -f1)"
+create_request_line="$(grep -n -m1 '^curl --config ' "${migration_script}" | cut -d: -f1)"
+test "${create_cleanup_line}" -lt "${create_request_line}"
+if grep -Fq -- '--password="${operator_password}"' "${migration_script}" \
+  || grep -Fq 'sql users set-password' "${migration_script}"; then
+  echo "Production migration must keep temporary database credentials out of process arguments." >&2
+  exit 1
+fi
 for secret_id in \
   glidelingo-desktop-macos-certificate-base64 \
   glidelingo-desktop-macos-certificate-password \

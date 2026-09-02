@@ -16,7 +16,7 @@ if [[ "$(gcloud config get-value project 2>/dev/null)" != "${project_id}" ]]; th
   echo "Active gcloud project must be exactly ${project_id}." >&2
   exit 1
 fi
-for command in gcloud cloud-sql-proxy psql openssl; do
+for command in gcloud cloud-sql-proxy psql openssl curl python3; do
   command -v "${command}" >/dev/null 2>&1 || { echo "${command} is required." >&2; exit 1; }
 done
 if [[ "${GLIDELINGO_CONFIRM_PRODUCTION_MIGRATION:-}" != "${project_id}" ]]; then
@@ -26,6 +26,9 @@ fi
 
 temporary_dir="$(mktemp -d "${TMPDIR:-/tmp}/glidelingo-production-migration.XXXXXX")"
 password_file="${temporary_dir}/pgpass"
+user_request_file="${temporary_dir}/create-user.json"
+user_response_file="${temporary_dir}/create-user-response.json"
+curl_config_file="${temporary_dir}/create-user.curl"
 operator_password="$(openssl rand -base64 36 | tr -d '\n')"
 proxy_pid=""
 operator_created=false
@@ -37,22 +40,31 @@ cleanup() {
       echo "WARNING: delete temporary operator ${operator} manually." >&2
   fi
   unset operator_password
-  rm -f -- "${password_file}"
+  rm -f -- "${password_file}" "${user_request_file}" "${user_response_file}" "${curl_config_file}"
   rmdir -- "${temporary_dir}" >/dev/null 2>&1 || true
   exit "${exit_status}"
 }
 trap cleanup EXIT INT TERM
 
-gcloud sql users create "${operator}" \
-  --project="${project_id}" \
-  --instance="${instance}" \
-  --type=BUILT_IN \
-  --database-roles=cloudsqlsuperuser
+access_token="$(gcloud auth print-access-token)"
+printf '{"name":"%s","password":"%s","type":"BUILT_IN","databaseRoles":["cloudsqlsuperuser"]}\n' \
+  "${operator}" "${operator_password}" > "${user_request_file}"
+printf '%s\n' \
+  'silent' \
+  'show-error' \
+  'fail-with-body' \
+  'request = "POST"' \
+  "header = \"Authorization: Bearer ${access_token}\"" \
+  'header = "Content-Type: application/json"' \
+  "data = @${user_request_file}" \
+  "url = \"https://sqladmin.googleapis.com/sql/v1beta4/projects/${project_id}/instances/${instance}/users\"" \
+  "output = \"${user_response_file}\"" > "${curl_config_file}"
+unset access_token
+chmod 600 "${user_request_file}" "${curl_config_file}"
 operator_created=true
-printf '%s\n' "${operator_password}" | gcloud sql users set-password "${operator}" \
-  --project="${project_id}" \
-  --instance="${instance}" \
-  --prompt-for-password
+curl --config "${curl_config_file}"
+operation_name="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["name"])' "${user_response_file}")"
+gcloud sql operations wait "${operation_name}" --project="${project_id}" --timeout=300
 printf '127.0.0.1:%s:%s:%s:%s\n' "${port}" "${database}" "${operator}" "${operator_password}" > "${password_file}"
 chmod 600 "${password_file}"
 unset operator_password

@@ -26,6 +26,10 @@ for argument in "$@"; do
     --command=*) command_sql="${argument#*=}" ;;
   esac
 done
+if [[ "${migration_file}" == "-" ]]; then
+  command_sql="$(cat)"
+  migration_file=""
+fi
 if [[ "${command_sql}" == *"CREATE TABLE IF NOT EXISTS public.glidelingo_schema_migration"* ]]; then
   exit 0
 fi

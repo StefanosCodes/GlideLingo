@@ -1,8 +1,6 @@
 import '@/providers/install-local-storage';
 
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-google-fonts/inter';
-import { ClerkProvider, useAuth } from '@clerk/expo';
-import { tokenCache } from '@clerk/expo/token-cache';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider as NavigationThemeProvider } from 'expo-router';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
@@ -14,14 +12,11 @@ import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { FirstNameCompletionGate } from '@/features/auth/first-name-completion-gate';
-import { getDesktopOAuthTransport } from '@/features/auth/desktop-oauth-transport';
-import {
-  ALLOWED_AUTH_REDIRECT_PROTOCOLS,
-  CLERK_ALLOWED_OPAQUE_REDIRECT_ORIGINS,
-} from '@/features/auth/oauth-flow';
 import { useTheme, useThemeController } from '@/hooks/use-theme';
 import { AppThemeProvider } from '@/providers/app-theme-provider';
 import { BillingProvider } from '@/providers/billing-provider';
+import { GlideLingoClerkProvider } from '@/providers/clerk-provider';
+import { useAuth } from '@/providers/clerk-runtime';
 import { LearningProvider } from '@/providers/learning-provider';
 
 SplashScreen.preventAutoHideAsync();
@@ -35,19 +30,12 @@ export default function RootLayout() {
   if (!fontsLoaded && !fontError) return null;
 
   const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim();
-  const desktopOAuthTransport = getDesktopOAuthTransport();
-
   return (
     <AppThemeProvider>
       {publishableKey ? (
-        <ClerkProvider
-          __internal_oauthTransport={desktopOAuthTransport}
-          allowedRedirectOrigins={CLERK_ALLOWED_OPAQUE_REDIRECT_ORIGINS}
-          allowedRedirectProtocols={ALLOWED_AUTH_REDIRECT_PROTOCOLS}
-          publishableKey={publishableKey}
-          tokenCache={tokenCache}>
+        <GlideLingoClerkProvider publishableKey={publishableKey}>
           <ClerkApp />
-        </ClerkProvider>
+        </GlideLingoClerkProvider>
       ) : (
         <MissingClerkConfiguration />
       )}

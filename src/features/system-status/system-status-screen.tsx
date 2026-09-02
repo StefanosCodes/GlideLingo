@@ -1,4 +1,3 @@
-import { useAuth } from '@clerk/expo';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -16,6 +15,7 @@ import {
   SystemStatusError,
 } from '@/features/system-status/api';
 import { useTheme } from '@/hooks/use-theme';
+import { useAuth } from '@/providers/clerk-runtime';
 
 type ViewState =
   | { kind: 'checking' }

@@ -1,4 +1,3 @@
-import { useAuth, useClerk } from '@clerk/expo';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
@@ -11,6 +10,7 @@ import {
   wasSsoCallbackCancelled,
 } from '@/features/auth/sso-callback-recovery';
 import { useTheme } from '@/hooks/use-theme';
+import { useAuth, useClerk } from '@/providers/clerk-runtime';
 
 type CallbackState = 'completing' | 'cancelled' | 'failed';
 

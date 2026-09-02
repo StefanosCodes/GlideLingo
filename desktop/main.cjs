@@ -2,7 +2,9 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
-const { app, BrowserWindow, dialog, ipcMain, net, protocol, session, shell } = require('electron');
+const { createClerkBridge } = require('@clerk/electron');
+const { storage: createClerkStorage } = require('@clerk/electron/storage');
+const { app, BrowserWindow, dialog, net, protocol, session, shell } = require('electron');
 
 const {
   APP_SCHEME,
@@ -19,13 +21,11 @@ const {
   installAuthPopupNavigationSecurity,
   mapAuthCallbackToRendererUrl,
   parseAuthCallbackUrl,
-  parseOAuthTransportCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
   validateProductionApiOrigin,
   validateProductionClerkOrigin,
 } = require('./runtime.cjs');
-const { createOAuthTransportCoordinator } = require('./oauth-transport.cjs');
 const { startMacUpdater } = require('./updater.cjs');
 const { glidelingoApiOrigin, glidelingoClerkOrigin } = require('./package.json');
 
@@ -47,26 +47,20 @@ const CONTENT_SECURITY_POLICY = buildContentSecurityPolicy({
 });
 let mainWindow = null;
 let pendingAuthCallbackUrl = findAuthCallbackUrl(process.argv);
-const oauthTransport = createOAuthTransportCoordinator();
-const OAUTH_OPEN_CHANNEL = 'glidelingo:oauth:open';
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 }
 
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: APP_SCHEME,
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-      stream: true,
-    },
-  },
-]);
+const clerkBridge = hasSingleInstanceLock
+  ? createClerkBridge({
+      manageSingleInstanceLock: false,
+      renderer: { scheme: APP_SCHEME, host: 'app' },
+      storage: createClerkStorage({ name: 'clerk-tokens' }),
+      userAgent: `GlideLingo/${app.getVersion()}`,
+    })
+  : null;
 
 app.enableSandbox();
 
@@ -138,18 +132,6 @@ function handleAuthCallback(targetUrl) {
   const callbackUrl = mapAuthCallbackToRendererUrl(targetUrl, RENDERER_URL);
   if (!acceptedCallbackUrl || !callbackUrl) return false;
 
-  if (
-    parseOAuthTransportCallbackUrl(acceptedCallbackUrl) &&
-    oauthTransport.complete(acceptedCallbackUrl)
-  ) {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-    }
-    return true;
-  }
-
   if (!mainWindow || mainWindow.isDestroyed()) {
     pendingAuthCallbackUrl = acceptedCallbackUrl;
     return true;
@@ -211,7 +193,7 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      ...(!DEVELOPMENT_URL && { preload: path.join(__dirname, 'preload.cjs') }),
+      preload: path.join(__dirname, 'preload.cjs'),
       sandbox: true,
       webSecurity: true,
     },
@@ -219,9 +201,7 @@ function createWindow() {
 
   window.once('ready-to-show', () => window.show());
   mainWindow = window;
-  const windowWebContentsId = window.webContents.id;
   window.once('closed', () => {
-    oauthTransport.cancelForSender(windowWebContentsId);
     if (mainWindow === window) mainWindow = null;
   });
 
@@ -267,9 +247,16 @@ function createWindow() {
           const rendered = await window.webContents.executeJavaScript(`({
             authenticated: Boolean(document.querySelector('[data-testid="start-lesson"]')),
             completingProfile: Boolean(document.querySelector('[data-testid="first-name-completion"]')),
+            electronBridge: Boolean(window.__clerk_internal_electron),
             origin: window.location.origin,
             signedOut: Boolean(document.querySelector('[data-testid="auth-sign-in"]')),
           })`);
+
+          if (!rendered.electronBridge) {
+            console.error('[desktop-smoke] Clerk Electron preload bridge was not exposed');
+            app.exit(1);
+            return;
+          }
 
           if (!DEVELOPMENT_URL && rendered.origin !== PACKAGED_RENDERER_ORIGIN) {
             console.error(`[desktop-smoke] unexpected renderer origin: ${rendered.origin}`);
@@ -311,33 +298,6 @@ function createWindow() {
 
   return window;
 }
-
-ipcMain.handle(OAUTH_OPEN_CHANNEL, async (event, targetUrl) => {
-  if (
-    !mainWindow ||
-    mainWindow.isDestroyed() ||
-    event.sender.id !== mainWindow.webContents.id
-  ) {
-    throw new Error('Desktop OAuth is only available from the main GlideLingo window.');
-  }
-  if (!isAllowedAuthWindowUrl(targetUrl, AUTH_CLERK_ORIGIN)) {
-    throw new Error('Desktop OAuth refused an untrusted browser URL.');
-  }
-
-  const senderId = event.sender.id;
-  const onSenderDestroyed = () => oauthTransport.cancelForSender(senderId);
-  event.sender.once('destroyed', onSenderDestroyed);
-
-  try {
-    return await oauthTransport.open({
-      senderId,
-      targetUrl,
-      openExternalUrl: (url) => shell.openExternal(url),
-    });
-  } finally {
-    event.sender.removeListener('destroyed', onSenderDestroyed);
-  }
-});
 
 app.on('open-url', (event, url) => {
   event.preventDefault();
@@ -394,5 +354,5 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  oauthTransport.cancel();
+  clerkBridge?.cleanup();
 });

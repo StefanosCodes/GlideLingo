@@ -88,9 +88,10 @@ confidential, but storing their pinned build inputs in GCP gives the signed pack
 configuration source.
 
 The Clerk publishable key must begin with `pk_live_`; the release command rejects development
-`pk_test_` keys. In Clerk's production Native application, allowlist exactly
-`glidelingo://app/sign-in` and `glidelingo://app/sso-callback`. Do not use wildcard custom-protocol
-redirects or alternate authorities.
+`pk_test_` keys. In Clerk's production Native application, allowlist the official Electron SDK callback
+`glidelingo://app/`. Keep the legacy `glidelingo://app/sign-in` and
+`glidelingo://app/sso-callback` entries until older installed builds are no longer supported. Do not use
+wildcard custom-protocol redirects or alternate authorities.
 
 On macOS, `base64 < file | pbcopy` copies a file's encoded value without writing another secret file. Keep the originals in an approved secure location until credential rotation, then remove unsecured copies.
 
@@ -160,7 +161,7 @@ The automated workflow proves:
 - DMG and ZIP checksums are generated before upload.
 - updater metadata and both blockmaps are present before the draft can converge.
 
-Before linking a release from the public landing page, download the DMG onto a second clean Mac, drag GlideLingo to Applications, launch it normally, and exercise the critical lesson, audio, persistence, and production API flows. With the installed signed app, prove the system-browser OAuth callback both while GlideLingo is already running (warm callback) and while it is fully closed (cold callback). These installed OAuth smokes remain activation gates even after unit and packaging checks pass.
+Before linking a release from the public landing page, download the DMG onto a second clean Mac, drag GlideLingo to Applications, launch it normally, and exercise the critical lesson, audio, persistence, and production API flows. With the installed signed app, prove the system-browser OAuth callback while GlideLingo is already running, then quit and relaunch to prove the stored Clerk session restores cleanly. This installed OAuth smoke remains an activation gate even after unit and packaging checks pass.
 
 The clean-Mac smoke test is currently external, so the workflow intentionally leaves every
 release in draft state and contains no publish step. A sandbox build must remain a draft even when

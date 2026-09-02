@@ -1,4 +1,3 @@
-import { useClerk, useUser } from '@clerk/expo';
 import { type PropsWithChildren, useState } from 'react';
 import {
   ActivityIndicator,
@@ -15,6 +14,7 @@ import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useClerk, useUser } from '@/providers/clerk-runtime';
 
 import { authErrorMessage } from './auth-error-message';
 import { hasFirstName, normalizedFirstName } from './auth-profile';

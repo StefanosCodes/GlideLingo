@@ -94,6 +94,7 @@ grep -Eq '^  workflow_dispatch:' "${migration_workflow}"
 grep -Fq 'environment: desktop-release-signing' "${migration_workflow}"
 grep -Fq 'test "${GITHUB_REF}" = "${EXPECTED_REF}"' "${migration_workflow}"
 grep -Fq -- '--data-file=-' "${migration_workflow}"
+grep -Fq -- '-legacy' "${migration_workflow}"
 grep -Fq 'set +x' "${migration_workflow}"
 expected_legacy_secrets="$(
   printf '%s\n' \

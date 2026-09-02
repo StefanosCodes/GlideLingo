@@ -605,6 +605,17 @@ resource "google_secret_manager_secret_iam_member" "releaser_signing" {
   member    = "serviceAccount:${google_service_account.desktop_releaser.email}"
 }
 
+# ONE-TIME MIGRATION: remove this binding and the matching GitHub workflow after
+# a GCP-sourced signed and notarized desktop draft succeeds.
+resource "google_secret_manager_secret_iam_member" "releaser_signing_migration" {
+  for_each = google_secret_manager_secret.desktop_signing
+
+  project   = var.project_id
+  secret_id = each.value.secret_id
+  role      = "roles/secretmanager.secretVersionAdder"
+  member    = "serviceAccount:${google_service_account.desktop_releaser.email}"
+}
+
 resource "google_billing_budget" "production" {
   billing_account = var.billing_account_id
   display_name    = "GlideLingo production monthly budget"

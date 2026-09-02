@@ -9,6 +9,8 @@ const { resolveBillingMode } = require('./release-secrets.cjs');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const FULL_COMMIT_PATTERN = /^[0-9a-f]{40}$/i;
+const DRAFT_LOOKUP_ATTEMPTS = 10;
+const DRAFT_LOOKUP_DELAY_MS = 2_000;
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -315,6 +317,9 @@ async function convergeDraftRelease(selection, localAssets, github) {
   if (!release) {
     throw new Error(`Draft release ${selection.releaseTag} could not be created.`);
   }
+  if (release.tag_name !== selection.releaseTag || release.draft !== true) {
+    throw new Error(`Release ${selection.releaseTag} must remain an unpublished draft.`);
+  }
 
   for (const asset of release.assets || []) {
     await github.deleteAsset(asset.id);
@@ -330,6 +335,7 @@ function createGitHubAdapter(
   repository,
   api = (args, options) => run('gh', ['api', ...args], options),
   execute = (args) => run('gh', args),
+  wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
 ) {
   return {
     async getRelease(tag) {
@@ -375,7 +381,16 @@ function createGitHubAdapter(
         args.push('--generate-notes');
       }
       execute(args);
-      return this.getRelease(selection.releaseTag);
+      for (let attempt = 1; attempt <= DRAFT_LOOKUP_ATTEMPTS; attempt += 1) {
+        const release = await this.getRelease(selection.releaseTag);
+        if (release) {
+          return release;
+        }
+        if (attempt < DRAFT_LOOKUP_ATTEMPTS) {
+          await wait(DRAFT_LOOKUP_DELAY_MS);
+        }
+      }
+      return null;
     },
     async updateDraft(releaseId, selection) {
       const args = [

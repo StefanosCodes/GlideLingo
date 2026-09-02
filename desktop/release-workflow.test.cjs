@@ -116,6 +116,72 @@ test('GitHub draft adapter marks sandbox builds as internal prereleases only', a
   assert.ok(!responses.at(-1).some((argument) => argument.startsWith('body=')));
 });
 
+test('GitHub draft creation tolerates bounded release API read-after-create lag', async () => {
+  const draft = { id: 7, tag_name: releaseTag, draft: true, assets: [] };
+  const waits = [];
+  let listReads = 0;
+  let creates = 0;
+  const api = (args) => {
+    if (args[0] === `repos/StefanosCodes/GlideLingo/releases/tags/${releaseTag}`) {
+      return { status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' };
+    }
+    listReads += 1;
+    return {
+      status: 0,
+      stdout: JSON.stringify(listReads < 3 ? [[]] : [[draft]]),
+      stderr: '',
+    };
+  };
+  const adapter = createGitHubAdapter(
+    'StefanosCodes/GlideLingo',
+    api,
+    () => {
+      creates += 1;
+    },
+    async (milliseconds) => {
+      waits.push(milliseconds);
+    },
+  );
+
+  assert.deepEqual(
+    await adapter.createDraft({ billingMode: 'sandbox', commitSha, releaseTag }),
+    draft,
+  );
+  assert.equal(creates, 1);
+  assert.equal(listReads, 3);
+  assert.deepEqual(waits, [2_000, 2_000]);
+});
+
+test('GitHub draft creation exhausts bounded lookup retries without recreating', async () => {
+  let listReads = 0;
+  let creates = 0;
+  let waits = 0;
+  const adapter = createGitHubAdapter(
+    'StefanosCodes/GlideLingo',
+    (args) => {
+      if (args[0] === `repos/StefanosCodes/GlideLingo/releases/tags/${releaseTag}`) {
+        return { status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' };
+      }
+      listReads += 1;
+      return { status: 0, stdout: '[[]]', stderr: '' };
+    },
+    () => {
+      creates += 1;
+    },
+    async () => {
+      waits += 1;
+    },
+  );
+
+  assert.equal(
+    await adapter.createDraft({ billingMode: 'sandbox', commitSha, releaseTag }),
+    null,
+  );
+  assert.equal(creates, 1);
+  assert.equal(listReads, 10);
+  assert.equal(waits, 9);
+});
+
 function gitAdapter({ onMain = true, taggedCommit = commitSha } = {}) {
   return {
     resolveCommit(reference) {
@@ -352,6 +418,22 @@ test('draft convergence refuses published releases and invalid remote asset sets
     ),
     /already published/,
   );
+
+  let postCreateMutations = 0;
+  await assert.rejects(
+    convergeDraftRelease(
+      { billingMode: 'production', commitSha, releaseTag, version: '1.0.0' },
+      localAssets,
+      {
+        async getRelease() { return null; },
+        async createDraft() { return published; },
+        async deleteAsset() { postCreateMutations += 1; },
+        async uploadAssets() { postCreateMutations += 1; },
+      },
+    ),
+    /remain an unpublished draft/,
+  );
+  assert.equal(postCreateMutations, 0);
 
   let reads = 0;
   const github = {

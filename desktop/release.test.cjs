@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  buildDesktopRelease,
   resolveProductionApiOrigin,
   resolveProductionClerkOrigin,
   validateNotarizationCredentials,
@@ -17,6 +18,7 @@ const apiKeyEnvironment = {
   EXPO_PUBLIC_API_BASE_URL: 'https://api.glidelingo.com/v1',
   EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_live_publicclientkey',
   EXPO_PUBLIC_REVENUECAT_WEB_API_KEY: 'rcb_publicwebkey',
+  GLIDELINGO_BILLING_MODE: 'sandbox',
   GLIDELINGO_CLERK_ORIGIN: 'https://clerk.glidelingo.com',
 };
 
@@ -42,9 +44,14 @@ test('release Clerk configuration returns one exact HTTPS origin', () => {
 
 test('release validation requires public Clerk and RevenueCat web keys and rejects mock billing', () => {
   assert.deepEqual(validatePublicBuildConfiguration(apiKeyEnvironment), {
+    billingMode: 'sandbox',
     clerkPublishableKey: 'pk_live_publicclientkey',
     revenueCatWebApiKey: 'rcb_publicwebkey',
   });
+  assert.throws(
+    () => validatePublicBuildConfiguration({ ...apiKeyEnvironment, GLIDELINGO_BILLING_MODE: '' }),
+    /BILLING_MODE/,
+  );
   assert.throws(
     () => validatePublicBuildConfiguration({ ...apiKeyEnvironment, EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: '' }),
     /CLERK_PUBLISHABLE_KEY/,
@@ -88,6 +95,7 @@ test('release tag must match the packaged desktop version', () => {
 test('release environment accepts macOS and rejects unsigned or non-macOS builds', () => {
   assert.deepEqual(validateReleaseEnvironment(apiKeyEnvironment, 'darwin'), {
     apiOrigin: 'https://api.glidelingo.com',
+    billingMode: 'sandbox',
     clerkOrigin: 'https://clerk.glidelingo.com',
   });
   assert.throws(() => validateReleaseEnvironment(apiKeyEnvironment, 'linux'), /built on macOS/);
@@ -98,5 +106,28 @@ test('release environment accepts macOS and rejects unsigned or non-macOS builds
         'darwin',
       ),
     /must be set/,
+  );
+});
+
+test('release packaging embeds the validated billing mode and exact origins', () => {
+  const calls = [];
+  buildDesktopRelease(
+    apiKeyEnvironment,
+    (command, args, environment) => {
+      calls.push({ command, args, environment });
+    },
+    'darwin',
+  );
+
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].args, ['run', 'desktop:export']);
+  assert.ok(
+    calls[1].args.includes('--config.extraMetadata.glidelingoBillingMode=sandbox'),
+  );
+  assert.ok(
+    calls[1].args.includes('--config.extraMetadata.glidelingoApiOrigin=https://api.glidelingo.com'),
+  );
+  assert.ok(
+    calls[1].args.includes('--config.extraMetadata.glidelingoClerkOrigin=https://clerk.glidelingo.com'),
   );
 });

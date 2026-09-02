@@ -24,7 +24,7 @@ The `Start speaking` and plan CTAs use the validated macOS download URL when a r
 
 ## Blog
 
-The blog is a static Astro content collection. Add a Markdown file to `src/data/blog` with these frontmatter fields: `title`, `description`, `publishedAt`, `category`, `readMinutes`, `heroImage`, `heroAlt`, and `draft`. Categories are intentionally limited to `Learning`, `Product`, and `Company`; update the schema in `src/content.config.mjs` when the editorial taxonomy genuinely expands.
+The blog is a static Astro content collection. Add a Markdown file to `src/data/blog` with these frontmatter fields: `title`, `description`, `publishedAt`, `category`, `readMinutes`, `heroImage`, `heroAlt`, and `draft`. Categories are intentionally limited to `Learning`, `Speaking`, `Product`, and `Company`; update the schema in `src/content.config.mjs` when the editorial taxonomy genuinely expands.
 
 Published entries automatically appear newest-first on `/blog/` and receive a static route at `/blog/<filename>/`. Set `draft: true` to keep an entry out of both the index and generated routes. Store editorial images under `public/images/blog` so production pages remain first-party and independent of a remote image service.
 

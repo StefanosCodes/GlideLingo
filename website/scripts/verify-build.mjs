@@ -11,8 +11,20 @@ await Promise.all([
   access(new URL('index.html', root)),
   access(new URL('404.html', root)),
   access(new URL('blog/index.html', root)),
+  access(new URL('blog/from-first-phrase-to-real-conversation/index.html', root)),
+  access(new URL('blog/how-to-practice-speaking-alone/index.html', root)),
+  access(new URL('blog/review-that-makes-language-available/index.html', root)),
+  access(new URL('blog/build-a-language-week-you-can-repeat/index.html', root)),
+  access(new URL('blog/designing-for-calm-momentum/index.html', root)),
+  access(new URL('blog/what-speaking-with-confidence-means/index.html', root)),
   access(new URL('blog/why-learning-words-isnt-enough/index.html', root)),
-  access(new URL('images/blog/from-words-to-conversation.webp', root)),
+  access(new URL('images/blog/conversation-gradient.jpg', root)),
+  access(new URL('images/blog/language-in-use-gradient.jpg', root)),
+  access(new URL('images/blog/speaking-alone-gradient.jpg', root)),
+  access(new URL('images/blog/useful-review-gradient.jpg', root)),
+  access(new URL('images/blog/weekly-rhythm-gradient.jpg', root)),
+  access(new URL('images/blog/calm-momentum-gradient.jpg', root)),
+  access(new URL('images/blog/speaking-confidence-gradient.jpg', root)),
   access(new URL('_headers', root)),
   access(new URL('robots.txt', root)),
   access(new URL('sitemap-index.xml', root)),
@@ -67,10 +79,20 @@ assert.doesNotMatch(home, /<script(?![^>]+src=)(?:\s|>)/i);
 assert.doesNotMatch(home, /<form(?:\s|>)/i);
 assert.doesNotMatch(home, /document\.cookie|localStorage|sessionStorage/i);
 assert.match(notFound, /This page flew off course/);
-assert.match(blog, /<title>Blog — GlideLingo<\/title>/);
+assert.match(blog, /<title>Blog \| GlideLingo<\/title>/);
 assert.match(blog, /rel="canonical" href="https:\/\/glidelingo\.com\/blog\/"/);
+assert.match(blog, /<h1 id="recent-heading">Recent<\/h1>/);
+assert.match(blog, /<h2 id="more-stories-heading">All stories<\/h2>/);
 assert.match(blog, /Why learning words isn’t the same as learning a language/);
-assert.match(blog, /images\/blog\/from-words-to-conversation\.webp/);
+assert.match(blog, /From first phrase to real conversation/);
+assert.match(blog, /How to practice speaking when no one else is around/);
+assert.match(blog, /Review should make language available/);
+assert.match(blog, /Build a language-learning week you can repeat/);
+assert.match(blog, /Designing GlideLingo for calm momentum/);
+assert.match(blog, /What speaking with confidence actually means/);
+assert.match(blog, /data-blog-filter="speaking"/);
+assert.match(blog, /src="\/scripts\/blog-filter\.js"/);
+assert.match(blog, /images\/blog\/language-in-use-gradient\.jpg/);
 assert.match(article, /property="og:type" content="article"/);
 assert.match(article, /rel="canonical" href="https:\/\/glidelingo\.com\/blog\/why-learning-words-isnt-enough\/"/);
 assert.match(article, /Knowing is not yet using/);

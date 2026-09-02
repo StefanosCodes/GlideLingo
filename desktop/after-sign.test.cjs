@@ -34,7 +34,7 @@ test('final signing preserves Electron metadata and may target the CI keychain',
     '/tmp/release.keychain',
   );
 
-  assert.ok(args.includes('--deep'));
+  assert.ok(!args.includes('--deep'));
   assert.ok(args.includes('--timestamp'));
   assert.ok(args.includes('--preserve-metadata=identifier,requirements,flags,entitlements'));
   assert.deepEqual(args.slice(-3), [

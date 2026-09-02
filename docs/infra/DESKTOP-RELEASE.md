@@ -147,6 +147,9 @@ new published version on their next launch.
 
 The automated workflow proves:
 
+- the exact updater ZIP extracts to a valid Developer ID-signed, notarized universal app (not
+  merely that the pre-archive build directory was valid);
+
 - repository tests pass;
 - Expo's web renderer exports successfully;
 - electron-builder finds a Developer ID Application identity;

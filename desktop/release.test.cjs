@@ -90,6 +90,14 @@ test('release tag must match the packaged desktop version', () => {
   assert.doesNotThrow(() => validateReleaseTag(undefined, '1.2.3'));
   assert.doesNotThrow(() => validateReleaseTag('desktop-v1.2.3', '1.2.3'));
   assert.throws(() => validateReleaseTag('desktop-v1.2.4', '1.2.3'), /must match/);
+  assert.throws(
+    () => validateReleaseTag('desktop-v1.2.3-beta.1', '1.2.3-beta.1'),
+    /strict numeric SemVer/,
+  );
+  assert.throws(
+    () => validateReleaseTag('desktop-v1.2.3;echo-pwned', '1.2.3;echo-pwned'),
+    /strict numeric SemVer/,
+  );
 });
 
 test('release environment accepts macOS and rejects unsigned or non-macOS builds', () => {

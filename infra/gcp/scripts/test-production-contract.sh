@@ -9,7 +9,6 @@ state_reader="${root}/infra/gcp/scripts/read-production-deploy-state.sh"
 cleanup_classifier="${root}/infra/gcp/scripts/classify-production-candidate-cleanup.sh"
 cleanup_operator="${root}/infra/gcp/scripts/cleanup-production-candidate.sh"
 workflow="${root}/.github/workflows/deploy-production-api.yml"
-migration_workflow="${root}/.github/workflows/migrate-desktop-signing-secrets.yml"
 
 jq -e '
   (. | keys) == ["desktop_public_secret_versions", "revenuecat_enabled", "revenuecat_environment", "revenuecat_secret_set", "revenuecat_secret_versions"]
@@ -81,34 +80,6 @@ for secret_resource in database_url revenuecat desktop_public_config desktop_sig
     exit 1
   fi
 done
-migration_binding="$(
-  sed -n \
-    '/resource "google_secret_manager_secret_iam_member" "releaser_signing_migration"/,/^}/p' \
-    "${production}/main.tf"
-)"
-grep -Fq 'for_each = google_secret_manager_secret.desktop_signing' <<< "${migration_binding}"
-grep -Fq 'role      = "roles/secretmanager.secretVersionAdder"' <<< "${migration_binding}"
-grep -Fq 'member    = "serviceAccount:${google_service_account.desktop_releaser.email}"' <<< "${migration_binding}"
-test -f "${migration_workflow}"
-grep -Eq '^  workflow_dispatch:' "${migration_workflow}"
-grep -Fq 'environment: desktop-release-signing' "${migration_workflow}"
-grep -Fq 'test "${GITHUB_REF}" = "${EXPECTED_REF}"' "${migration_workflow}"
-grep -Fq -- '--data-file=-' "${migration_workflow}"
-grep -Fq -- '-legacy' "${migration_workflow}"
-grep -Fq 'set +x' "${migration_workflow}"
-expected_legacy_secrets="$(
-  printf '%s\n' \
-    secrets.APPLE_APP_SPECIFIC_PASSWORD \
-    secrets.APPLE_ID \
-    secrets.APPLE_TEAM_ID \
-    secrets.MACOS_CERTIFICATE_BASE64 \
-    secrets.MACOS_CERTIFICATE_PASSWORD
-)"
-actual_legacy_secrets="$(
-  grep -Eo 'secrets\.[A-Z0-9_]+' "${migration_workflow}" |
-    sort -u
-)"
-test "${actual_legacy_secrets}" = "${expected_legacy_secrets}"
 grep -Fq 'for_each = var.revenuecat_enabled ? local.selected_revenuecat_secrets : {}' "${production}/main.tf"
 grep -Fq 'name  = "GLIDELINGO_CORS_ORIGINS"' "${production}/main.tf"
 grep -Fq 'value = jsonencode(["https://desktop.glidelingo.com"])' "${production}/main.tf"

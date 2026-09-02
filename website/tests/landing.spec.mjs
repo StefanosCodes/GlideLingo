@@ -164,3 +164,46 @@ test('renders a branded, non-indexed 404 page', async ({ page }) => {
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex');
   await expect(page.getByRole('link', { name: 'Return home' })).toHaveAttribute('href', '/');
 });
+
+test('publishes accessible privacy and terms pages linked from the homepage', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', '/privacy/');
+  await expect(page.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', '/terms/');
+
+  await page.getByRole('link', { name: 'Privacy' }).click();
+  await expect(page).toHaveURL(/\/privacy\/$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Privacy Policy' })).toBeVisible();
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+    'href',
+    'https://glidelingo.com/privacy/',
+  );
+  await expect(page.getByRole('heading', { name: 'Google sign-in data' })).toBeVisible();
+  await expect(page.getByText('GlideLingo does not sell personal information.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'stefanoscodes26@gmail.com' }).first()).toHaveAttribute(
+    'href',
+    'mailto:stefanoscodes26@gmail.com',
+  );
+  await expect(page.getByText(/scheduled for deletion after 30 days/)).toBeVisible();
+
+  await page.getByRole('link', { name: 'Terms' }).click();
+  await expect(page).toHaveURL(/\/terms\/$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Terms of Service' })).toBeVisible();
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+    'href',
+    'https://glidelingo.com/terms/',
+  );
+  await expect(page.getByRole('heading', { name: 'Subscriptions and billing' })).toBeVisible();
+});
+
+test('keeps legal pages accessible, cookie-free, and within the viewport', async ({ page }) => {
+  for (const route of ['/privacy/', '/terms/']) {
+    await page.goto(route);
+    const sizes = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(sizes.scrollWidth).toBeLessThanOrEqual(sizes.clientWidth);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    expect(await page.context().cookies()).toEqual([]);
+  }
+});

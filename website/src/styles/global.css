@@ -595,8 +595,79 @@ h3 {
   margin: 0;
 }
 
-.footer-inner > a:last-child {
+.footer-nav {
+  display: flex;
   justify-self: end;
+  gap: 18px;
+}
+
+.footer-nav a {
+  white-space: nowrap;
+}
+
+.legal-page {
+  padding-block: 104px 128px;
+}
+
+.legal-header,
+.legal-copy {
+  max-width: 760px;
+  margin-inline: auto;
+}
+
+.legal-header {
+  padding-bottom: 48px;
+  border-bottom: 1px solid var(--line);
+}
+
+.legal-header h1 {
+  max-width: none;
+  margin: 0;
+  font-size: clamp(46px, 6vw, 72px);
+  text-align: left;
+}
+
+.legal-header > p:last-child {
+  margin: 20px 0 0;
+  color: var(--ink-faint);
+  font-size: 14px;
+}
+
+.legal-copy {
+  padding-top: 48px;
+}
+
+.legal-copy h2 {
+  margin-top: 48px;
+  font-size: 28px;
+}
+
+.legal-copy p,
+.legal-copy li {
+  color: var(--ink-muted);
+  font-size: 17px;
+  line-height: 1.75;
+}
+
+.legal-copy p {
+  margin: 18px 0 0;
+}
+
+.legal-copy ul {
+  display: grid;
+  margin: 20px 0 0;
+  padding-left: 24px;
+  gap: 12px;
+}
+
+.legal-copy a {
+  color: var(--navy);
+  font-weight: 600;
+  text-underline-offset: 3px;
+}
+
+.legal-copy a:hover {
+  color: var(--brand-blue);
 }
 
 .not-found {
@@ -1033,8 +1104,24 @@ h3 {
     gap: 16px;
   }
 
-  .footer-inner > a:last-child {
+  .footer-nav {
     justify-self: start;
+  }
+
+  .legal-page {
+    padding-block: 72px 96px;
+  }
+
+  .legal-header {
+    padding-bottom: 36px;
+  }
+
+  .legal-copy {
+    padding-top: 36px;
+  }
+
+  .legal-copy h2 {
+    margin-top: 40px;
   }
 
   .blog-masthead {

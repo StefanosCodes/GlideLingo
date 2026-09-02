@@ -20,6 +20,10 @@ const productVideoReady =
   existsSync(resolve('public/videos/glidelingo-product-walkthrough.vtt'));
 const releaseFallbackUrl = 'https://github.com/StefanosCodes/GlideLingo/releases';
 const startHref = download.available ? download.downloadUrl : releaseFallbackUrl;
+const primaryDownloadLabel = download.available ? 'Download for macOS' : 'View releases';
+const platformAvailability = download.available
+  ? 'Universal for Apple silicon and Intel Macs'
+  : 'Available for macOS';
 const description =
   'GlideLingo helps you learn a language, speak with confidence, and keep progressing toward mastery.';
 ---
@@ -29,7 +33,19 @@ const description =
   description={description}
   socialImageAlt="The GlideLingo language-learning app home screen"
 >
-  <SiteHeader primaryCtaHref={startHref} />
+  {
+    download.available && (
+      <aside class="launch-banner" aria-label="Product announcement">
+        <div class="shell launch-banner-inner">
+          <span>GlideLingo for macOS is now available. <span aria-hidden="true">🎉</span></span>
+          <a href={download.downloadUrl}>
+            Download for macOS <span aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </aside>
+    )
+  }
+  <SiteHeader primaryCtaHref={startHref} primaryCtaIcon="apple" primaryCtaLabel={primaryDownloadLabel} />
 
   <main id="main-content">
     <section class="hero shell" aria-labelledby="hero-heading">
@@ -41,14 +57,14 @@ const description =
         </p>
         <div class="hero-actions" data-download-state={download.available ? 'available' : 'unavailable'}>
           <a class="button button-primary" href={startHref}>
-            Start speaking
+            {primaryDownloadLabel}
             <svg class="button-platform-icon button-apple-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.79 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.09ZM12.03 7.25C11.88 5.02 13.69 3.18 15.77 3c.29 2.58-2.34 4.5-3.74 4.25Z"></path>
             </svg>
           </a>
           <a class="button button-secondary" href="#demo">See how it works</a>
         </div>
-        <p class="hero-meta">Free to start <span aria-hidden="true">·</span> Available for macOS</p>
+        <p class="hero-meta">Free to start <span aria-hidden="true">·</span> {platformAvailability}</p>
       </div>
     </section>
 

@@ -96,6 +96,32 @@ a {
   margin-inline: auto;
 }
 
+.launch-banner {
+  color: var(--white);
+  background: var(--black);
+}
+
+.launch-banner-inner {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  padding-block: 10px;
+  font-size: 15px;
+  gap: 14px;
+  text-align: center;
+}
+
+.launch-banner-inner a {
+  font-weight: 650;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+.launch-banner-inner a:hover {
+  color: var(--aqua);
+}
+
 .site-header {
   position: sticky;
   z-index: 20;
@@ -1156,6 +1182,15 @@ h3 {
 
   .shell {
     width: min(calc(100% - 32px), var(--shell));
+  }
+
+  .launch-banner-inner {
+    min-height: 54px;
+    align-items: center;
+    flex-direction: column;
+    padding-block: 9px;
+    font-size: 14px;
+    gap: 1px;
   }
 
   .header-inner {

@@ -56,10 +56,8 @@ assert.match(home, /<video[^>]+controls[^>]+data-autoplay-when-visible="true"[^>
 assert.match(home, /<source[^>]+glidelingo-product-walkthrough\.webm[^>]+video\/webm/);
 assert.match(home, /<source[^>]+glidelingo-product-walkthrough\.mp4/);
 assert.match(home, /<track[^>]+kind="captions"[^>]+glidelingo-product-walkthrough\.vtt/);
-assert.match(home, />\s*Start speaking\s*<svg[^>]+button-apple-icon/);
 assert.match(home, />See how it works<\/a>/);
 assert.match(home, /Free to start/);
-assert.match(home, /Available for macOS/);
 assert.match(home, /button-platform-icon/);
 assert.match(home, /button-apple-icon/);
 assert.match(home, /id="pricing"/);
@@ -108,9 +106,16 @@ if (active) {
 
   assert.ok(downloadUrl, 'Active output verification requires PUBLIC_MAC_DOWNLOAD_URL.');
   assert.match(home, /data-download-state="available"/);
+  assert.match(home, />\s*Download for macOS\s*<svg[^>]+button-apple-icon/);
+  assert.match(home, /Universal for Apple silicon and Intel Macs/);
+  assert.match(home, /GlideLingo for macOS is now available\. <span aria-hidden="true">🎉<\/span>/);
+  assert.match(home, /aria-label="Product announcement"/);
   assert.ok(home.includes(downloadUrl), 'Active output must contain the configured DMG URL.');
 } else {
   assert.match(home, /data-download-state="unavailable"/);
+  assert.match(home, />\s*View releases\s*<svg[^>]+button-apple-icon/);
+  assert.match(home, /Available for macOS/);
+  assert.doesNotMatch(home, /aria-label="Product announcement"/);
   assert.doesNotMatch(home, /releases\/download/);
   assert.match(home, /href="https:\/\/github\.com\/StefanosCodes\/GlideLingo\/releases"/);
 }

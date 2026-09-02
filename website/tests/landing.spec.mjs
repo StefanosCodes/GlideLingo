@@ -41,12 +41,19 @@ test('renders the complete landing page without third-party requests or horizont
   );
   await expect(page.locator('.site-header .brand-symbol')).toHaveAttribute('src', '/brand/glidelingo-bird-black.svg');
   await expect(page.locator('.site-header .brand-name')).toHaveText('GlideLingo');
-  await expect(page.getByRole('link', { name: 'Pricing' })).toHaveAttribute('href', '#pricing');
-  await expect(page.getByRole('link', { name: 'How it works', exact: true })).toHaveAttribute('href', '#demo');
-  await expect(page.locator('.site-header').getByRole('link', { name: 'Start speaking' })).toHaveAttribute(
+  const launchBanner = page.getByLabel('Product announcement');
+  await expect(launchBanner).toContainText('GlideLingo for macOS is now available. 🎉');
+  await expect(launchBanner.getByRole('link', { name: 'Download for macOS' })).toHaveAttribute(
     'href',
     downloadUrl,
   );
+  await expect(page.getByRole('link', { name: 'Pricing' })).toHaveAttribute('href', '#pricing');
+  await expect(page.getByRole('link', { name: 'How it works', exact: true })).toHaveAttribute('href', '#demo');
+  await expect(page.locator('.site-header').getByRole('link', { name: 'Download for macOS' })).toHaveAttribute(
+    'href',
+    downloadUrl,
+  );
+  await expect(page.locator('.site-header .button-apple-icon')).toHaveCount(1);
   const headerAlignment = await page.evaluate(() => {
     const header = document.querySelector('.header-inner');
     const navigation = document.querySelector('.site-nav');
@@ -99,7 +106,7 @@ test('renders the complete landing page without third-party requests or horizont
   await expect(page.locator('.hero-actions .button-platform-icon')).toHaveCount(1);
   await expect(page.locator('.hero-actions .button-apple-icon')).toHaveCount(1);
   await expect(page.locator('.hero-actions[data-download-state="available"]')).toBeVisible();
-  const heroPrimary = page.locator('.hero-actions').getByRole('link', { name: 'Start speaking' });
+  const heroPrimary = page.locator('.hero-actions').getByRole('link', { name: 'Download for macOS' });
   await expect(heroPrimary).toHaveAttribute(
     'href',
     downloadUrl,
@@ -108,7 +115,7 @@ test('renders the complete landing page without third-party requests or horizont
     'href',
     '#demo',
   );
-  await expect(page.locator('.hero-meta')).toHaveText('Free to start · Available for macOS');
+  await expect(page.locator('.hero-meta')).toHaveText('Free to start · Universal for Apple silicon and Intel Macs');
   await expect(page.locator('.product-actions').getByRole('link', { name: 'Start speaking' })).toHaveAttribute(
     'href',
     downloadUrl,

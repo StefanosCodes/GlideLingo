@@ -91,6 +91,18 @@ def test_reconciliation_rejects_entitlement_without_environment_source() -> None
     asyncio.run(provider.close())
 
 
+def test_reconciliation_rejects_sandbox_access_in_production() -> None:
+    provider = client_for(response_payload(expires_at=NOW + timedelta(days=1), is_sandbox=True))
+
+    snapshot = asyncio.run(
+        provider.fetch_pro_entitlement(app_user_id="user_123", environment="PRODUCTION")
+    )
+
+    assert snapshot.is_active is False
+    assert snapshot.environment == "PRODUCTION"
+    asyncio.run(provider.close())
+
+
 def test_reconciliation_bounds_untrusted_provider_response() -> None:
     provider = RevenueCatHttpClient(
         api_key="server-secret",

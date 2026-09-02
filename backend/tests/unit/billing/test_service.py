@@ -176,6 +176,24 @@ def test_stale_provider_snapshot_remains_fail_closed() -> None:
     assert status.is_pro is False
 
 
+def test_provider_snapshot_from_other_environment_remains_fail_closed() -> None:
+    repository = FakeRepository()
+    provider = FakeProvider(
+        RevenueCatSnapshot(
+            is_active=True,
+            environment="PRODUCTION",
+            expires_at=NOW + timedelta(days=30),
+            observed_at=NOW,
+        )
+    )
+
+    status = asyncio.run(service(repository, provider).status(principal=PRINCIPAL))
+
+    assert status.state == "unavailable"
+    assert status.is_pro is False
+    assert repository.store_calls == 0
+
+
 @pytest.mark.parametrize(
     ("stored", "expected_state"),
     [
@@ -385,6 +403,24 @@ def test_webhook_from_other_environment_is_ignored() -> None:
 
     assert response.status == "ignored"
     assert provider.calls == []
+
+
+def test_webhook_provider_snapshot_from_other_environment_is_retried() -> None:
+    repository = FakeRepository()
+    provider = FakeProvider(
+        RevenueCatSnapshot(
+            is_active=True,
+            environment="PRODUCTION",
+            expires_at=NOW + timedelta(days=30),
+            observed_at=NOW,
+        )
+    )
+
+    with pytest.raises(DependencyUnavailableError):
+        asyncio.run(service(repository, provider).process_webhook(webhook_payload()))
+
+    assert repository.events == set()
+    assert repository.webhook_snapshot is None
 
 
 def test_webhook_with_future_provider_timestamp_cannot_poison_ordering() -> None:

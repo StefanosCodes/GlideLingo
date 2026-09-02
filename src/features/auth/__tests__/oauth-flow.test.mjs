@@ -37,7 +37,8 @@ test('Clerk allows only the desktop custom callback protocol and opaque origin',
 });
 
 test('desktop sign-in copy names every configured MVP method', () => {
-  for (const method of ['Google', 'Apple', 'email', 'phone']) {
+  for (const method of ['Google', 'Apple', 'email']) {
     assert.match(SIGN_IN_METHODS_COPY, new RegExp(`\\b${method}\\b`));
   }
+  assert.doesNotMatch(SIGN_IN_METHODS_COPY, /\\bphone\\b/i);
 });

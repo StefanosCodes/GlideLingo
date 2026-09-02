@@ -119,6 +119,8 @@ class BillingService:
                 app_user_id=principal.user_id,
                 environment=self._environment,
             )
+            if snapshot.environment != self._environment:
+                return self._stale_or_unavailable(stored)
             stored = await asyncio.to_thread(
                 self._repository.store_reconciliation,
                 actor_ref=actor_ref,
@@ -196,6 +198,8 @@ class BillingService:
             )
         except RevenueCatUnavailableError as error:
             raise DependencyUnavailableError from error
+        if snapshot.environment != self._environment:
+            raise DependencyUnavailableError
         actor_ref = derive_billing_actor_ref(
             key=self._pseudonym_key,
             app_user_id=event.app_user_id,

@@ -142,6 +142,25 @@ def test_status_reconciles_only_the_verified_clerk_subject() -> None:
     assert "user_route_123" not in str(response.json())
 
 
+def test_client_cannot_override_the_verified_clerk_subject() -> None:
+    client, repository, provider = make_client()
+    with client:
+        response = client.get(
+            "/v1/billing/entitlements/pro?app_user_id=user_attacker",
+            headers={"Authorization": "Bearer valid-test-token"},
+        )
+
+    assert response.status_code == 200
+    assert provider.users == ["user_route_123"]
+    assert repository.stored is not None
+    assert repository.stored.actor_ref == derive_billing_actor_ref(
+        key=KEY, app_user_id="user_route_123"
+    )
+    assert repository.stored.actor_ref != derive_billing_actor_ref(
+        key=KEY, app_user_id="user_attacker"
+    )
+
+
 def test_reconcile_forces_provider_fetch_over_fresh_inactive_state() -> None:
     client, repository, provider = make_client()
     repository.stored = StoredProEntitlement(
@@ -202,6 +221,44 @@ def test_webhook_rejects_invalid_signature_before_payload_processing() -> None:
         response = client.post("/v1/billing/revenuecat/webhook", content=raw, headers=headers)
 
     assert response.status_code == 401
+    assert provider.users == []
+
+
+def test_webhook_rejects_missing_authorization_or_signature() -> None:
+    client, _repository, provider = make_client()
+    raw = json.dumps(
+        {
+            "api_version": "1.0",
+            "event": {
+                "id": "evt_unsigned",
+                "type": "TEST",
+                "event_timestamp_ms": 0,
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+    valid_headers = signed_webhook_headers(raw)
+
+    with client:
+        missing_authorization = client.post(
+            "/v1/billing/revenuecat/webhook",
+            content=raw,
+            headers={
+                "X-RevenueCat-Webhook-Signature": valid_headers["X-RevenueCat-Webhook-Signature"],
+                "Content-Type": "application/json",
+            },
+        )
+        missing_signature = client.post(
+            "/v1/billing/revenuecat/webhook",
+            content=raw,
+            headers={
+                "Authorization": AUTHORIZATION,
+                "Content-Type": "application/json",
+            },
+        )
+
+    assert missing_authorization.status_code == 401
+    assert missing_signature.status_code == 401
     assert provider.users == []
 
 

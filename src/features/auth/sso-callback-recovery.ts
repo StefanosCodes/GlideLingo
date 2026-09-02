@@ -28,3 +28,16 @@ export function wasSsoCallbackCancelled(callbackUrl: string): boolean {
   const description = parameters.get('error_description')?.trim().toLowerCase();
   return description?.includes('cancel') ?? false;
 }
+
+export function rotatingTokenNonceFromSsoCallback(callbackUrl: string): string | null {
+  let url: URL;
+
+  try {
+    url = new URL(callbackUrl);
+  } catch {
+    return null;
+  }
+
+  const nonce = url.searchParams.get('rotating_token_nonce');
+  return nonce && nonce.length <= 2048 ? nonce : null;
+}

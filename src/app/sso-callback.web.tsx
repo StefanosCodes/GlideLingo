@@ -1,4 +1,4 @@
-import { useClerk } from '@clerk/expo';
+import { useAuth, useClerk } from '@clerk/expo';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
@@ -6,12 +6,16 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { Spacing } from '@/constants/theme';
-import { wasSsoCallbackCancelled } from '@/features/auth/sso-callback-recovery';
+import {
+  rotatingTokenNonceFromSsoCallback,
+  wasSsoCallbackCancelled,
+} from '@/features/auth/sso-callback-recovery';
 import { useTheme } from '@/hooks/use-theme';
 
 type CallbackState = 'completing' | 'cancelled' | 'failed';
 
 export default function SsoCallbackRoute() {
+  const { isLoaded } = useAuth();
   const clerk = useClerk();
   const router = useRouter();
   const theme = useTheme();
@@ -22,21 +26,32 @@ export default function SsoCallbackRoute() {
   );
 
   useEffect(() => {
-    if (callbackState !== 'completing') return;
+    if (!isLoaded || callbackState !== 'completing') return;
 
     let active = true;
-    void clerk
-      .handleRedirectCallback({
+    const completeCallback = async () => {
+      const callbackUrl = window.location.href;
+      const rotatingTokenNonce = rotatingTokenNonceFromSsoCallback(callbackUrl);
+      if (rotatingTokenNonce) {
+        const signIn = clerk.client?.signIn;
+        if (!signIn) {
+          throw new Error('Clerk was not ready to complete the desktop sign-in callback.');
+        }
+        await signIn.reload({ rotatingTokenNonce });
+      }
+      await clerk.handleRedirectCallback({
         signInFallbackRedirectUrl: '/',
         signUpFallbackRedirectUrl: '/',
-      })
-      .catch(() => {
-        if (active) setCallbackState('failed');
       });
+    };
+
+    void completeCallback().catch(() => {
+      if (active) setCallbackState('failed');
+    });
     return () => {
       active = false;
     };
-  }, [callbackState, clerk]);
+  }, [callbackState, clerk, isLoaded]);
 
   const returnToSignIn = () => router.replace('/sign-in');
 

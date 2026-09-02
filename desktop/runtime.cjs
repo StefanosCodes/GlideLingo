@@ -250,7 +250,14 @@ function mapAuthCallbackToRendererUrl(
   } catch {
     return null;
   }
-  if (!isExactPackagedRendererUrl(renderer)) return null;
+  const isPackagedRenderer = isExactPackagedRendererUrl(renderer);
+  let isDevelopmentRenderer = false;
+  try {
+    isDevelopmentRenderer = Boolean(validateDevelopmentUrl(rendererOrigin));
+  } catch {
+    isDevelopmentRenderer = false;
+  }
+  if (!isPackagedRenderer && !isDevelopmentRenderer) return null;
 
   const callback = new URL(callbackUrl);
   const translated = new URL(callback.pathname, renderer);
@@ -354,6 +361,12 @@ function parseAuthCallbackUrl(targetUrl) {
   return url.toString();
 }
 
+function parseOAuthTransportCallbackUrl(targetUrl) {
+  const callbackUrl = parseAuthCallbackUrl(targetUrl);
+  if (!callbackUrl) return null;
+  return new URL(callbackUrl).pathname === '/sso-callback' ? callbackUrl : null;
+}
+
 function authCallbackParameters(url) {
   const parameters = [...url.searchParams.entries()];
   const hash = url.hash.slice(1);
@@ -430,6 +443,7 @@ module.exports = {
   installAuthPopupNavigationSecurity,
   mapAuthCallbackToRendererUrl,
   parseAuthCallbackUrl,
+  parseOAuthTransportCallbackUrl,
   resolveRendererPath,
   validateDevelopmentUrl,
   validateProductionApiOrigin,

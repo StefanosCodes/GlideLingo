@@ -14,6 +14,7 @@ import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { FirstNameCompletionGate } from '@/features/auth/first-name-completion-gate';
+import { getDesktopOAuthTransport } from '@/features/auth/desktop-oauth-transport';
 import {
   ALLOWED_AUTH_REDIRECT_PROTOCOLS,
   CLERK_ALLOWED_OPAQUE_REDIRECT_ORIGINS,
@@ -34,11 +35,13 @@ export default function RootLayout() {
   if (!fontsLoaded && !fontError) return null;
 
   const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim();
+  const desktopOAuthTransport = getDesktopOAuthTransport();
 
   return (
     <AppThemeProvider>
       {publishableKey ? (
         <ClerkProvider
+          __internal_oauthTransport={desktopOAuthTransport}
           allowedRedirectOrigins={CLERK_ALLOWED_OPAQUE_REDIRECT_ORIGINS}
           allowedRedirectProtocols={ALLOWED_AUTH_REDIRECT_PROTOCOLS}
           publishableKey={publishableKey}

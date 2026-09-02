@@ -10,6 +10,8 @@ directories:
 
 files:
   - main.cjs
+  - oauth-transport.cjs
+  - preload.cjs
   - runtime.cjs
   - updater.cjs
   - package.json

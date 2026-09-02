@@ -7,6 +7,10 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  DEVELOPMENT_CLERK_ISSUER,
+  DEVELOPMENT_DATABASE_PASSWORD,
+  DEVELOPMENT_DATABASE_PORT,
+  DEVELOPMENT_DATABASE_URL,
   DEVELOPMENT_PROJECT,
   accessSecret,
   assertDevelopmentProject,
@@ -20,18 +24,24 @@ import {
 } from './development-env.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const clerkPublishableKeyFor = (frontend) =>
+  `pk_test_${Buffer.from(`${frontend}$`, 'utf8').toString('base64url')}`;
 
 const validValues = {
   EXPO_PUBLIC_API_BASE_URL: 'http://localhost:8123',
   EXPO_PUBLIC_ENABLE_MOCK_BILLING: 'false',
   GLIDELINGO_REVENUECAT_ENABLED: 'true',
   GLIDELINGO_REVENUECAT_ENVIRONMENT: 'SANDBOX',
-  GLIDELINGO_CLERK_ISSUER: 'https://vast-gator-9531.clerk.accounts.dev',
-  GLIDELINGO_CLERK_JWKS_URL:
-    'https://vast-gator-9531.clerk.accounts.dev/.well-known/jwks.json',
+  GLIDELINGO_CLERK_ISSUER: DEVELOPMENT_CLERK_ISSUER,
+  GLIDELINGO_CLERK_JWKS_URL: `${DEVELOPMENT_CLERK_ISSUER}/.well-known/jwks.json`,
   GLIDELINGO_CLERK_AUTHORIZED_PARTIES:
     '["http://localhost:8081","http://127.0.0.1:8081"]',
-  EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_fixture_long_enough',
+  EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: clerkPublishableKeyFor(
+    'vast-gator-9531.clerk.accounts.dev',
+  ),
+  GLIDELINGO_DATABASE_URL: DEVELOPMENT_DATABASE_URL,
+  GLIDELINGO_DB_PORT: DEVELOPMENT_DATABASE_PORT,
+  GLIDELINGO_DB_PASSWORD: DEVELOPMENT_DATABASE_PASSWORD,
   EXPO_PUBLIC_REVENUECAT_WEB_API_KEY: 'rcb_sb_fixture_key',
   GLIDELINGO_REVENUECAT_API_KEY: 'rcb_sb_fixture_key',
   GLIDELINGO_REVENUECAT_PSEUDONYM_KEY: 'pseudonym-fixture-at-least-32-bytes',
@@ -166,6 +176,30 @@ test('validation rejects production values and accepts the local sandbox contrac
       GLIDELINGO_CLERK_AUTHORIZED_PARTIES:
         '["http://localhost:8081","glidelingo://app"]',
     }).some((error) => error.includes('only local development origins')),
+  );
+});
+
+test('validation rejects remote databases and other Clerk development instances', () => {
+  const errors = validateLocalValues({
+    ...validValues,
+    EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: clerkPublishableKeyFor(
+      'other-instance.clerk.accounts.dev',
+    ),
+    GLIDELINGO_DATABASE_URL:
+      'postgresql+psycopg://glidelingo:production-password@production-db.example:5432/glidelingo',
+    GLIDELINGO_DB_PORT: '5432',
+    GLIDELINGO_DB_PASSWORD: 'production-password',
+  });
+
+  assert.ok(errors.some((error) => error.includes('pinned development frontend')));
+  assert.ok(errors.some((error) => error.includes('GLIDELINGO_DATABASE_URL')));
+  assert.ok(errors.some((error) => error.includes('GLIDELINGO_DB_PORT')));
+  assert.ok(errors.some((error) => error.includes('GLIDELINGO_DB_PASSWORD')));
+  assert.ok(
+    validateLocalValues({
+      ...validValues,
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_not-valid-base64***',
+    }).some((error) => error.includes('pinned development frontend')),
   );
 });
 

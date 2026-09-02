@@ -12,6 +12,10 @@ import path from 'node:path';
 
 export const DEVELOPMENT_PROJECT = 'glidelingo-development';
 export const DEVELOPMENT_CLERK_ISSUER = 'https://vast-gator-9531.clerk.accounts.dev';
+export const DEVELOPMENT_DATABASE_URL =
+  'postgresql+psycopg://glidelingo:glidelingo_dev_only@localhost:55433/glidelingo';
+export const DEVELOPMENT_DATABASE_PORT = '55433';
+export const DEVELOPMENT_DATABASE_PASSWORD = 'glidelingo_dev_only';
 export const MANAGED_START = '# BEGIN GLIDELINGO MANAGED DEVELOPMENT ENV';
 export const MANAGED_END = '# END GLIDELINGO MANAGED DEVELOPMENT ENV';
 
@@ -144,14 +148,13 @@ export function buildManagedValues(secretValues) {
     EXPO_PUBLIC_ENABLE_MOCK_BILLING: 'false',
     GLIDELINGO_REVENUECAT_ENABLED: 'true',
     GLIDELINGO_REVENUECAT_ENVIRONMENT: 'SANDBOX',
-    GLIDELINGO_DATABASE_URL:
-      'postgresql+psycopg://glidelingo:glidelingo_dev_only@localhost:55433/glidelingo',
+    GLIDELINGO_DATABASE_URL: DEVELOPMENT_DATABASE_URL,
     GLIDELINGO_CLERK_ISSUER: DEVELOPMENT_CLERK_ISSUER,
     GLIDELINGO_CLERK_JWKS_URL: `${DEVELOPMENT_CLERK_ISSUER}/.well-known/jwks.json`,
     GLIDELINGO_CLERK_AUTHORIZED_PARTIES:
       '["http://localhost:8081","http://127.0.0.1:8081"]',
-    GLIDELINGO_DB_PORT: '55433',
-    GLIDELINGO_DB_PASSWORD: 'glidelingo_dev_only',
+    GLIDELINGO_DB_PORT: DEVELOPMENT_DATABASE_PORT,
+    GLIDELINGO_DB_PASSWORD: DEVELOPMENT_DATABASE_PASSWORD,
     ...secretValues,
   };
 }
@@ -203,11 +206,29 @@ export function validateLocalValues(values) {
   if (values.EXPO_PUBLIC_API_BASE_URL !== 'http://localhost:8123') {
     errors.push('EXPO_PUBLIC_API_BASE_URL must be http://localhost:8123.');
   }
-  if (
-    !values.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.startsWith('pk_test_') ||
-    Buffer.byteLength(values.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '') < 16
-  ) {
-    errors.push('The Clerk publishable key must be a development pk_test_ key of at least 16 bytes.');
+  const clerkPublishableKey = values.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '';
+  const encodedClerkFrontend = clerkPublishableKey.startsWith('pk_test_')
+    ? clerkPublishableKey.slice('pk_test_'.length)
+    : '';
+  let decodedClerkFrontend = '';
+  if (/^[A-Za-z0-9_-]+={0,2}$/.test(encodedClerkFrontend)) {
+    try {
+      decodedClerkFrontend = Buffer.from(encodedClerkFrontend, 'base64url').toString('utf8');
+    } catch {
+      // The pinned-frontend comparison below reports the invalid public key safely.
+    }
+  }
+  if (decodedClerkFrontend !== `${new URL(DEVELOPMENT_CLERK_ISSUER).hostname}$`) {
+    errors.push('The Clerk publishable key must encode the pinned development frontend.');
+  }
+  if (values.GLIDELINGO_DATABASE_URL !== DEVELOPMENT_DATABASE_URL) {
+    errors.push('GLIDELINGO_DATABASE_URL must target the managed local development database.');
+  }
+  if (values.GLIDELINGO_DB_PORT !== DEVELOPMENT_DATABASE_PORT) {
+    errors.push(`GLIDELINGO_DB_PORT must be ${DEVELOPMENT_DATABASE_PORT}.`);
+  }
+  if (values.GLIDELINGO_DB_PASSWORD !== DEVELOPMENT_DATABASE_PASSWORD) {
+    errors.push('GLIDELINGO_DB_PASSWORD must match the managed local development database.');
   }
   if (values.GLIDELINGO_CLERK_ISSUER !== DEVELOPMENT_CLERK_ISSUER) {
     errors.push('The Clerk issuer must be the pinned development instance.');

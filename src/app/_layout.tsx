@@ -132,6 +132,7 @@ function AppNavigation({ signedIn }: { signedIn: boolean }) {
           <Stack.Screen name="subscription" />
         </Stack.Protected>
         <Stack.Screen name="sso-callback" />
+        <Stack.Screen name="referral" />
       </Stack>
     </NavigationThemeProvider>
   );

@@ -1,0 +1,101 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import SiteFooter from '../components/SiteFooter.astro';
+import SiteHeader from '../components/SiteHeader.astro';
+import { resolveReferralPageConfig } from '../lib/referral-config.mjs';
+
+const referral = resolveReferralPageConfig();
+---
+
+<BaseLayout
+  title="Continue to GlideLingo"
+  description="Continue securely to GlideLingo and verify referral eligibility."
+  canonicalPath="/referral/"
+  noindex
+>
+  <SiteHeader />
+  <main id="main-content" class="referral-main">
+    <section
+      class="referral-card"
+      data-referral-app-url={referral.appUrl}
+      data-referral-current-state={referral.enabled ? 'loading' : 'disabled'}
+      data-referral-enabled={String(referral.enabled)}
+      data-referral-offer
+    >
+      <p class="eyebrow">REFERRAL HANDOFF</p>
+      <div data-referral-state="loading" hidden={!referral.enabled} role="status" aria-live="polite">
+        <h1>Preparing your secure handoff…</h1>
+        <p>GlideLingo is checking the referral link on this device.</p>
+      </div>
+      <div data-referral-state="ready" hidden role="status" aria-live="polite">
+        <h1>Your referral is ready.</h1>
+        <p>Sign in to let GlideLingo verify eligibility. This page does not promise or calculate a discount.</p>
+        <div class="referral-actions">
+          <a class="button button-primary" data-referral-browser href="/">Continue in browser</a>
+          <a class="button button-secondary" data-referral-desktop href="/">Continue in GlideLingo</a>
+        </div>
+        <p class="referral-fallback">If the app does not open, continue in the browser instead.</p>
+      </div>
+      <div data-referral-state="expired" hidden role="alert">
+        <h1>This referral link has expired.</h1>
+        <p>You can continue normally without referral attribution or return to the creator’s link.</p>
+        <a class="button button-primary" href="https://app.glidelingo.com/sign-in">Continue to sign in</a>
+      </div>
+      <div data-referral-state="invalid" hidden role="alert">
+        <h1>This referral link is not valid.</h1>
+        <p>No account or purchase was changed. You can still continue to GlideLingo normally.</p>
+        <a class="button button-primary" href="https://app.glidelingo.com/sign-in">Continue to sign in</a>
+      </div>
+      <div data-referral-state="missing" hidden role="alert">
+        <h1>No referral is waiting.</h1>
+        <p>You can still sign in, learn, and subscribe through the ordinary GlideLingo flow.</p>
+        <a class="button button-primary" href="https://app.glidelingo.com/sign-in">Continue to sign in</a>
+      </div>
+      <div data-referral-state="unavailable" hidden role="alert">
+        <h1>The referral could not be checked.</h1>
+        <p>Try the creator’s link again later, or continue normally without referral attribution.</p>
+        <a class="button button-primary" href="https://app.glidelingo.com/sign-in">Continue to sign in</a>
+      </div>
+      <div data-referral-state="disabled" hidden={referral.enabled} role="status">
+        <h1>Referral access is not available yet.</h1>
+        <p>GlideLingo remains available through the ordinary learning and subscription experience.</p>
+        <a class="button button-primary" href="/">Return home</a>
+      </div>
+      <p class="referral-fallback">
+        <a href="https://app.glidelingo.com/sign-in">Continue without referral</a>
+      </p>
+    </section>
+  </main>
+  <SiteFooter />
+  <script is:inline type="module" src="/scripts/referral-offer.js"></script>
+</BaseLayout>
+
+<style>
+  .referral-main { display: grid; min-height: 68vh; place-items: center; padding: 72px 20px; }
+  .referral-card {
+    width: min(100%, 720px);
+    padding: clamp(32px, 6vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 24px;
+    background: var(--paper-raised);
+    box-shadow: var(--shadow);
+    text-align: center;
+  }
+  .referral-card h1 { font-size: clamp(36px, 6vw, 58px); line-height: 1.03; }
+  .referral-card p:not(.eyebrow) {
+    max-width: 580px;
+    margin: 24px auto 0;
+    color: var(--ink-muted);
+    font-size: 18px;
+  }
+  .referral-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: center;
+    margin-top: 32px;
+  }
+  .button-secondary { border-color: var(--line-strong); background: var(--paper-raised); }
+  .referral-card > div > .button { margin-top: 32px; }
+  .referral-fallback { font-size: 14px !important; }
+</style>

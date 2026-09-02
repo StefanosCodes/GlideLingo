@@ -17,6 +17,7 @@ import {
   CredentialAuthScreen,
   credentialAuthStyles,
 } from '@/features/auth/credential-auth-ui.web';
+import { referralAuthReturnPath } from '@/features/affiliates/referral-session';
 import { useTheme } from '@/hooks/use-theme';
 import { useSignIn } from '@/providers/clerk-runtime';
 
@@ -59,7 +60,7 @@ export default function SignInRoute() {
         return;
       }
       setPassword('');
-      router.replace('/');
+      router.replace(referralAuthReturnPath());
     } catch (error) {
       setErrorMessage(safeAuthErrorMessage(error, 'We could not sign you in. Please try again.'));
     } finally {

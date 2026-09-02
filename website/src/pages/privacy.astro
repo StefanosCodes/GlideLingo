@@ -1,0 +1,120 @@
+---
+import SiteFooter from '../components/SiteFooter.astro';
+import SiteHeader from '../components/SiteHeader.astro';
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const description =
+  'How GlideLingo collects, uses, stores, and shares account, learning, billing, and Google sign-in data.';
+---
+
+<BaseLayout title="Privacy Policy — GlideLingo" description={description} canonicalPath="/privacy/">
+  <SiteHeader />
+
+  <main id="main-content" class="legal-page shell">
+    <header class="legal-header">
+      <p class="eyebrow">Legal</p>
+      <h1>Privacy Policy</h1>
+      <p>Effective September 2, 2026</p>
+    </header>
+
+    <article class="legal-copy">
+      <p>
+        This policy explains how GlideLingo (“we,” “us,” or “our”) handles information when you use
+        the GlideLingo website and applications. GlideLingo does not sell personal information.
+      </p>
+
+      <h2>Information we collect</h2>
+      <ul>
+        <li>
+          <strong>Account information:</strong> your account identifier, first name, email address,
+          profile image, and sign-in provider details supplied through Clerk or the provider you choose.
+        </li>
+        <li>
+          <strong>Learning information:</strong> language choices, preferences, lesson activity,
+          progress, answers, saved learning items, and content you submit to learning features.
+        </li>
+        <li>
+          <strong>Speaking and tutor information:</strong> audio, transcripts, prompts, and limited
+          learning context when you choose to use speaking or AI-assisted features.
+        </li>
+        <li>
+          <strong>Subscription information:</strong> plan, purchase status, entitlement, renewal,
+          and provider transaction identifiers. GlideLingo does not receive or store your full card number.
+        </li>
+        <li>
+          <strong>Technical information:</strong> app version, device and operating-system details,
+          request identifiers, diagnostic events, IP address, and security logs needed to operate and protect the service.
+        </li>
+      </ul>
+
+      <h2>Google sign-in data</h2>
+      <p>
+        If you choose Google sign-in, GlideLingo receives the basic profile information you approve:
+        your Google account identifier, name, email address, and profile image. We use it only to
+        authenticate you, create and secure your GlideLingo account, and display your account profile.
+        GlideLingo does not request access to your Google Drive, Calendar, contacts, or Gmail, and does
+        not use Google user data for advertising.
+      </p>
+
+      <h2>How we use information</h2>
+      <p>We use information to:</p>
+      <ul>
+        <li>provide sign-in, lessons, learning progress, practice, and account features;</li>
+        <li>personalize learning to your selected language, level, and activity;</li>
+        <li>process subscriptions and enforce access to paid features;</li>
+        <li>operate, troubleshoot, secure, and improve GlideLingo; and</li>
+        <li>comply with legal obligations and prevent fraud or misuse.</li>
+      </ul>
+
+      <h2>Service providers</h2>
+      <p>
+        We share only the information needed for providers to perform services for GlideLingo. Current
+        providers may include Clerk for authentication, Google or Apple for sign-in, Google Cloud for
+        hosting and storage, RevenueCat and Stripe for subscriptions and payment processing, Cloudflare
+        for website delivery, and OpenAI for AI-assisted learning features. Those providers process data
+        under their own terms and privacy commitments. We may also disclose information when required by
+        law, to protect users or the service, or as part of a business transfer with appropriate safeguards.
+      </p>
+
+      <h2>Storage and retention</h2>
+      <p>
+        Some learning information is stored locally on your device, and account-scoped information may
+        be stored in our hosted systems. We keep personal information only as long as needed to provide
+        the service, maintain security and billing records, resolve disputes, or meet legal requirements.
+        Short-lived billing-event identifiers are scheduled for deletion after 30 days to prevent
+        duplicate processing, but cleanup and backup cycles may cause them to remain longer.
+      </p>
+
+      <h2>Your choices</h2>
+      <p>
+        You can stop Google access from your Google Account and manage an active subscription through the
+        billing-management link in GlideLingo. To request access, correction, or deletion of account data,
+        including help clearing locally stored learning data, email
+        <a href="mailto:stefanoscodes26@gmail.com">stefanoscodes26@gmail.com</a>. We may need to verify your
+        identity before acting on a request, and some records may be retained where legally required.
+      </p>
+
+      <h2>Security</h2>
+      <p>
+        We use technical and organizational safeguards designed to protect information. No method of
+        storage or transmission is completely secure, so we cannot guarantee absolute security.
+      </p>
+
+      <h2>Children</h2>
+      <p>
+        GlideLingo is not directed to children under 13. If local law requires a higher age to consent to
+        data processing, a parent or guardian must provide any required permission. Contact us if you
+        believe a child provided personal information without appropriate permission.
+      </p>
+
+      <h2>Changes to this policy</h2>
+      <p>
+        We may update this policy as GlideLingo changes. We will update the effective date and provide
+        additional notice when required. Questions can be sent to
+        <a href="mailto:stefanoscodes26@gmail.com">stefanoscodes26@gmail.com</a>.
+      </p>
+    </article>
+  </main>
+
+  <SiteFooter />
+</BaseLayout>

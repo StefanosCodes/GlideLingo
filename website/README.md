@@ -56,6 +56,13 @@ curl --silent --show-error --dump-header - --output /dev/null 'https://www.glide
 
 The response must be `301` with `Location: https://glidelingo.com/redirect-check?source=cloudflare`. The committed `_headers` file applies the site security policy.
 
+The referral handoff foundation is present but disabled. The Pages Function accepts `/r/<slug>` only when
+`AFFILIATE_REFERRAL_ENABLED=true` and `GLIDELINGO_API_BASE_URL` is an exact HTTPS origin. The static referral page
+accepts handoffs only when `PUBLIC_AFFILIATE_REFERRALS_ENABLED=true` and
+`PUBLIC_REFERRAL_APP_URL=https://app.glidelingo.com/referral`. Do not set either flag until the backend parent,
+authenticated app origin, Cloudflare route, Clerk/CORS/CSP configuration, and referral acceptance gates are approved.
+The handoff is carried only in URL fragments and origin-scoped session storage; no shared cookie is assumed.
+
 ## Verification
 
 ```sh

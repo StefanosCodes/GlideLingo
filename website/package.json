@@ -12,10 +12,11 @@
     "test": "vitest run",
     "build": "cross-env ASTRO_TELEMETRY_DISABLED=1 astro build && node scripts/verify-build.mjs",
     "build:fixture:active": "cross-env PUBLIC_MAC_DOWNLOAD_STATE=active PUBLIC_MAC_DOWNLOAD_URL=https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/GlideLingo-0.1.0-universal.dmg PUBLIC_MAC_CHECKSUM_URL=https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/SHA256SUMS.txt PUBLIC_MAC_VERSION=0.1.0 PUBLIC_MAC_RELEASE_DATE=2026-08-31 npm run build",
+    "build:fixture:e2e": "cross-env PUBLIC_MAC_DOWNLOAD_STATE=active PUBLIC_MAC_DOWNLOAD_URL=https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/GlideLingo-0.1.0-universal.dmg PUBLIC_MAC_CHECKSUM_URL=https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/SHA256SUMS.txt PUBLIC_MAC_VERSION=0.1.0 PUBLIC_MAC_RELEASE_DATE=2026-08-31 PUBLIC_AFFILIATE_REFERRALS_ENABLED=true PUBLIC_REFERRAL_APP_URL=https://app.glidelingo.com/referral npm run build",
     "build:fixture:disabled": "cross-env CF_PAGES_BRANCH=main PUBLIC_MAC_DOWNLOAD_STATE=disabled npm run build",
     "build:fixture:rollback": "cross-env CF_PAGES_BRANCH=main PUBLIC_MAC_DOWNLOAD_STATE=disabled PUBLIC_MAC_DOWNLOAD_URL=https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/GlideLingo-0.1.0-universal.dmg PUBLIC_MAC_CHECKSUM_URL=https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/SHA256SUMS.txt PUBLIC_MAC_VERSION=0.1.0 PUBLIC_MAC_RELEASE_DATE=2026-08-31 npm run build",
     "preview": "cross-env ASTRO_TELEMETRY_DISABLED=1 astro preview",
-    "test:e2e": "npm run build:fixture:active && playwright test",
+    "test:e2e": "npm run build:fixture:e2e && playwright test",
     "test:e2e:built": "playwright test"
   },
   "dependencies": {

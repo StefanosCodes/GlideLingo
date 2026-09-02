@@ -8,7 +8,9 @@ const {
   PRODUCTION_CLERK_ORIGIN,
   PACKAGED_RENDERER_ORIGIN,
   buildContentSecurityPolicy,
+  dispatchSupportedAppUrl,
   findAuthCallbackUrl,
+  findSupportedAppUrl,
   isAllowedAuthPopupNavigation,
   isAllowedAuthWindowUrl,
   isAllowedNavigation,
@@ -16,7 +18,13 @@ const {
   isSafeExternalUrl,
   installAuthPopupNavigationSecurity,
   mapAuthCallbackToRendererUrl,
+  mapReferralAppUrlToRendererUrl,
+  mapSupportedAppUrlToRendererUrl,
   parseAuthCallbackUrl,
+  parseReferralAppUrl,
+  parseSupportedAppUrl,
+  redactUrlForLogging,
+  resolveAffiliateReferralsEnabled,
   resolveRendererPath,
   validateDevelopmentUrl,
   validateProductionApiOrigin,
@@ -278,6 +286,118 @@ test('accepted OS callbacks translate to the exact packaged HTTPS renderer', () 
     ),
     null,
   );
+});
+
+test('referral app URLs require the exact route and one 256-bit base64url handoff', () => {
+  const token = 'aB_9-'.repeat(8) + 'xyz';
+  const valid = `glidelingo://app/referral?handoff=${token}`;
+
+  assert.equal(token.length, 43);
+  assert.equal(parseReferralAppUrl(valid), valid);
+  for (const invalid of [
+    'glidelingo://other/referral?handoff=' + token,
+    'glidelingo://app:123/referral?handoff=' + token,
+    'glidelingo://user:pass@app/referral?handoff=' + token,
+    'https://app/referral?handoff=' + token,
+    'glidelingo://app/Referral?handoff=' + token,
+    'glidelingo://app/referral/?handoff=' + token,
+    'glidelingo://app/referral?handoff=' + 'x'.repeat(42),
+    'glidelingo://app/referral?handoff=' + 'x'.repeat(44),
+    'glidelingo://app/referral?handoff=' + 'x'.repeat(42) + '=',
+    `glidelingo://app/referral?handoff=${token}&handoff=${token}`,
+    `glidelingo://app/referral?handoff=${token}&next=evil`,
+    `glidelingo://app/referral?handoff=${token}#fragment`,
+  ]) {
+    assert.equal(parseReferralAppUrl(invalid), null, invalid);
+  }
+});
+
+test('referral dispatch defaults off while authentication callbacks remain accepted', () => {
+  const token = 'r'.repeat(43);
+  const referral = `glidelingo://app/referral?handoff=${token}`;
+  const auth = 'glidelingo://app/sso-callback?state=opaque';
+
+  assert.equal(parseSupportedAppUrl(referral), null);
+  assert.deepEqual(parseSupportedAppUrl(referral, { referralsEnabled: true }), {
+    kind: 'referral', url: referral,
+  });
+  assert.deepEqual(parseSupportedAppUrl(auth), { kind: 'auth', url: auth });
+  assert.equal(parseAuthCallbackUrl(referral), null);
+  assert.equal(parseReferralAppUrl(auth), null);
+});
+
+test('desktop referral activation uses the build environment in development and packaged metadata in releases', () => {
+  assert.equal(resolveAffiliateReferralsEnabled({
+    developmentUrl: 'http://localhost:8081', environmentValue: undefined, packagedValue: true,
+  }), false);
+  assert.equal(resolveAffiliateReferralsEnabled({
+    developmentUrl: 'http://localhost:8081', environmentValue: 'true', packagedValue: false,
+  }), true);
+  assert.equal(resolveAffiliateReferralsEnabled({
+    developmentUrl: null, environmentValue: 'true', packagedValue: false,
+  }), false);
+  assert.equal(resolveAffiliateReferralsEnabled({
+    developmentUrl: null, environmentValue: undefined, packagedValue: 'true',
+  }), true);
+});
+
+test('cold-start argv and warm dispatch use the same exact referral parser', () => {
+  const token = 'c'.repeat(43);
+  const referral = `glidelingo://app/referral?handoff=${token}`;
+  const found = findSupportedAppUrl(['/Applications/GlideLingo.app', referral], {
+    referralsEnabled: true,
+  });
+
+  assert.deepEqual(found, { kind: 'referral', url: referral });
+  assert.equal(
+    mapSupportedAppUrlToRendererUrl(found),
+    `${PACKAGED_RENDERER_ORIGIN}/referral#handoff=${token}`,
+  );
+  assert.equal(
+    mapReferralAppUrlToRendererUrl(referral),
+    `${PACKAGED_RENDERER_ORIGIN}/referral#handoff=${token}`,
+  );
+  assert.equal(findSupportedAppUrl(['/Applications/GlideLingo.app', referral]), null);
+});
+
+test('cold referral dispatch stores one validated pending URL and warm dispatch activates and loads it', () => {
+  const token = 'w'.repeat(43);
+  const referral = `glidelingo://app/referral?handoff=${token}`;
+  let windowAvailable = false;
+  let pending = null;
+  const activated = [];
+  const loaded = [];
+  const dependencies = {
+    activateWindow: () => activated.push(true),
+    hasWindow: () => windowAvailable,
+    loadRendererUrl: (url) => loaded.push(url),
+    referralsEnabled: true,
+    storePendingUrl: (url) => { pending = url; },
+  };
+
+  assert.equal(dispatchSupportedAppUrl(referral, dependencies), true);
+  assert.deepEqual(pending, { kind: 'referral', url: referral });
+  assert.deepEqual(activated, []);
+  assert.deepEqual(loaded, []);
+
+  windowAvailable = true;
+  assert.equal(dispatchSupportedAppUrl(pending, dependencies), true);
+  assert.deepEqual(activated, [true]);
+  assert.deepEqual(loaded, [`${PACKAGED_RENDERER_ORIGIN}/referral#handoff=${token}`]);
+  assert.equal(dispatchSupportedAppUrl(`${referral}&next=evil`, dependencies), false);
+});
+
+test('renderer logging drops referral and authentication parameters and fragments', () => {
+  const token = 'z'.repeat(43);
+  assert.equal(
+    redactUrlForLogging(`${PACKAGED_RENDERER_ORIGIN}/referral#handoff=${token}`),
+    `${PACKAGED_RENDERER_ORIGIN}/referral`,
+  );
+  assert.equal(
+    redactUrlForLogging(`${PACKAGED_RENDERER_ORIGIN}/sso-callback?state=secret`),
+    `${PACKAGED_RENDERER_ORIGIN}/sso-callback`,
+  );
+  assert.equal(redactUrlForLogging('not a URL'), '[invalid-url]');
 });
 
 test('packaged renderer URLs require the exact virtual HTTPS origin', () => {

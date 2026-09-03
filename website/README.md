@@ -18,13 +18,13 @@ npx playwright install chromium webkit
 npm run dev
 ```
 
-## Mac hero CTA
+## Mac start CTAs
 
-The Apple `Download for Mac` button always remains visible. Without release metadata it is safely disabled. Set `PUBLIC_MAC_DOWNLOAD_STATE=active` together with `PUBLIC_MAC_DOWNLOAD_URL`, `PUBLIC_MAC_CHECKSUM_URL`, `PUBLIC_MAC_VERSION`, and `PUBLIC_MAC_RELEASE_DATE` only after the signed and notarized release is ready. The existing release resolver validates that all metadata identifies the same GitHub Release before emitting the DMG link.
+The `Start speaking` and plan CTAs use the validated macOS download URL when a release is active. Without active release metadata they remain real links and fall back to the repository's GitHub Releases page without exposing a disabled or rolled-back asset URL. Set `PUBLIC_MAC_DOWNLOAD_STATE=active` together with `PUBLIC_MAC_DOWNLOAD_URL`, `PUBLIC_MAC_CHECKSUM_URL`, `PUBLIC_MAC_VERSION`, and `PUBLIC_MAC_RELEASE_DATE` only after the signed and notarized release is ready. The existing release resolver validates that all metadata identifies the same GitHub Release before emitting the DMG link.
 
 ## Blog
 
-The blog is a static Astro content collection. Add a Markdown file to `src/data/blog` with these frontmatter fields: `title`, `description`, `publishedAt`, `category`, `readMinutes`, `heroImage`, `heroAlt`, and `draft`. Categories are intentionally limited to `Learning`, `Product`, and `Company`; update the schema in `src/content.config.mjs` when the editorial taxonomy genuinely expands.
+The blog is a static Astro content collection. Add a Markdown file to `src/data/blog` with these frontmatter fields: `title`, `description`, `publishedAt`, `category`, `readMinutes`, `heroImage`, `heroAlt`, and `draft`. Categories are intentionally limited to `Learning`, `Speaking`, `Product`, and `Company`; update the schema in `src/content.config.mjs` when the editorial taxonomy genuinely expands.
 
 Published entries automatically appear newest-first on `/blog/` and receive a static route at `/blog/<filename>/`. Set `draft: true` to keep an entry out of both the index and generated routes. Store editorial images under `public/images/blog` so production pages remain first-party and independent of a remote image service.
 
@@ -66,4 +66,4 @@ npm run test:e2e
 npm run build:fixture:rollback
 ```
 
-The production-state fixtures verify both the linked and safely disabled hero CTA. The browser suite covers Chromium at mobile, tablet, and desktop widths plus WebKit at desktop width. These checks never download fixture assets.
+The production-state fixtures verify both the direct-download and GitHub Releases fallback CTA states. The browser suite covers Chromium at mobile, tablet, and desktop widths plus WebKit at desktop width. These checks never download fixture assets.

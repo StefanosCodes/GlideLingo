@@ -4,8 +4,8 @@ description: "Vocabulary matters. But fluency begins when words become choices y
 publishedAt: 2026-08-31
 category: Learning
 readMinutes: 5
-heroImage: /images/blog/from-words-to-conversation.webp
-heroAlt: "Translucent blue and aqua fragments flowing together into one continuous ribbon"
+heroImage: /images/blog/language-in-use-gradient.jpg
+heroAlt: "Soft coral, apricot, and lavender light blending across an abstract landscape"
 draft: false
 ---
 

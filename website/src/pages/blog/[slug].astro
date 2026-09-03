@@ -31,15 +31,15 @@ const canonicalPath = `/blog/${post.id}/`;
 ---
 
 <BaseLayout
-  title={`${post.data.title} — GlideLingo`}
+  title={`${post.data.title} | GlideLingo`}
   description={post.data.description}
   canonicalPath={canonicalPath}
   ogType="article"
   publishedAt={post.data.publishedAt}
   socialImage={post.data.heroImage}
   socialImageAlt={post.data.heroAlt}
-  socialImageWidth={1672}
-  socialImageHeight={941}
+  socialImageWidth={1456}
+  socialImageHeight={1092}
 >
   <SiteHeader activePage="blog" />
 
@@ -56,10 +56,6 @@ const canonicalPath = `/blog/${post.id}/`;
         <p>{post.data.description}</p>
       </header>
 
-      <figure class="shell article-hero">
-        <img src={post.data.heroImage} width="1672" height="941" alt={post.data.heroAlt} />
-      </figure>
-
       <div class="article-body">
         <Content />
       </div>
@@ -67,7 +63,7 @@ const canonicalPath = `/blog/${post.id}/`;
 
     <aside class="shell article-cta" aria-labelledby="article-cta-heading">
       <p class="eyebrow">Keep moving</p>
-      <h2 id="article-cta-heading">Learn the language. Enter the world.</h2>
+      <h2 id="article-cta-heading">Learn a language. Speak with confidence.</h2>
       <a class="button button-primary" href="/#demo">See how GlideLingo works</a>
     </aside>
   </main>

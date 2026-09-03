@@ -8,7 +8,9 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 const posts = (await getCollection('blog', ({ data }) => !data.draft)).sort(
   (a, b) => b.data.publishedAt.valueOf() - a.data.publishedAt.valueOf(),
 );
-const [featuredPost, ...morePosts] = posts;
+const recentPosts = posts.slice(0, 3);
+const storyPosts = posts;
+const categories = ['Speaking', 'Learning', 'Product', 'Company'];
 const formatDate = (date: Date) =>
   new Intl.DateTimeFormat('en-US', {
     day: 'numeric',
@@ -20,71 +22,118 @@ const description =
   'Ideas from GlideLingo about learning languages, building better practice, and joining real conversations.';
 ---
 
-<BaseLayout title="Blog — GlideLingo" description={description} canonicalPath="/blog/">
+<BaseLayout title="Blog | GlideLingo" description={description} canonicalPath="/blog/">
   <SiteHeader activePage="blog" />
 
   <main id="main-content" class="blog-index">
-    <section class="shell blog-masthead" aria-labelledby="blog-heading">
-      <h1 id="blog-heading">Blog</h1>
-      <p>Ideas for learning with purpose and speaking with confidence.</p>
-    </section>
-
     {
-      featuredPost && (
-        <section class="shell blog-latest" aria-labelledby="latest-heading">
-          <div class="blog-section-heading">
-            <h2 id="latest-heading">Latest</h2>
-          </div>
-
-          <a class="featured-post" href={`/blog/${featuredPost.id}/`}>
-            <span class="featured-post-image">
-              <img
-                src={featuredPost.data.heroImage}
-                width="1672"
-                height="941"
-                alt={featuredPost.data.heroAlt}
-              />
-            </span>
-            <span class="featured-post-copy">
-              <span class="post-meta">
-                <span>{featuredPost.data.category}</span>
-                <time datetime={featuredPost.data.publishedAt.toISOString()}>
-                  {formatDate(featuredPost.data.publishedAt)}
-                </time>
-                <span>{featuredPost.data.readMinutes} min read</span>
-              </span>
-              <span class="featured-post-title">{featuredPost.data.title}</span>
-              <span class="featured-post-description">{featuredPost.data.description}</span>
-              <span class="post-link-label">Read story <span aria-hidden="true">↗</span></span>
-            </span>
-          </a>
-        </section>
-      )
-    }
-
-    {
-      morePosts.length > 0 && (
-        <section class="shell more-stories" aria-labelledby="more-stories-heading">
-          <div class="blog-section-heading">
-            <h2 id="more-stories-heading">More stories</h2>
-          </div>
-          <div class="story-grid">
-            {morePosts.map((post) => (
-              <a class="story-card" href={`/blog/${post.id}/`}>
-                <img src={post.data.heroImage} width="1672" height="941" alt={post.data.heroAlt} />
-                <span class="post-meta">
-                  <span>{post.data.category}</span>
-                  <time datetime={post.data.publishedAt.toISOString()}>{formatDate(post.data.publishedAt)}</time>
+      recentPosts.length > 0 && (
+        <section class="shell recent-stories" aria-labelledby="recent-heading">
+          <h1 id="recent-heading">Recent</h1>
+          <div class="recent-grid">
+            {recentPosts.map((post, index) => (
+              <a class="recent-card" href={`/blog/${post.id}/`}>
+                <span class="recent-card-image">
+                  <img
+                    src={post.data.heroImage}
+                    width="1456"
+                    height="1092"
+                    alt={post.data.heroAlt}
+                    loading={index === 0 ? 'eager' : 'lazy'}
+                  />
                 </span>
-                <span class="story-card-title">{post.data.title}</span>
-                <span class="story-card-description">{post.data.description}</span>
+                <span class="recent-card-copy">
+                  <span class="recent-card-title">{post.data.title}</span>
+                  <span class="post-meta">
+                    <span>{post.data.category}</span>
+                    <time datetime={post.data.publishedAt.toISOString()}>{formatDate(post.data.publishedAt)}</time>
+                  </span>
+                </span>
               </a>
             ))}
           </div>
         </section>
       )
     }
+
+    {
+      storyPosts.length > 0 && (
+        <section class="shell more-stories" id="stories" aria-labelledby="more-stories-heading">
+          <div class="blog-feed-heading">
+            <div>
+              <p class="eyebrow">Explore</p>
+              <h2 id="more-stories-heading">All stories</h2>
+            </div>
+            <p aria-live="polite" aria-atomic="true" data-blog-count>
+              {storyPosts.length} {storyPosts.length === 1 ? 'story' : 'stories'}
+            </p>
+          </div>
+
+          <div class="blog-toolbar">
+            <div class="topic-filters" role="group" aria-label="Filter stories by topic">
+              <button type="button" class="topic-filter" data-blog-filter="all" aria-pressed="true" aria-controls="story-grid">
+                All <span>{storyPosts.length}</span>
+              </button>
+              {categories.map((category) => {
+                const categoryCount = storyPosts.filter((post) => post.data.category === category).length;
+                return (
+                  <button
+                    type="button"
+                    class="topic-filter"
+                    data-blog-filter={category.toLowerCase()}
+                    aria-pressed="false"
+                    aria-controls="story-grid"
+                  >
+                    {category} <span>{categoryCount}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div class="story-grid" id="story-grid">
+            {storyPosts.map((post) => (
+              <a
+                class="story-card"
+                href={`/blog/${post.id}/`}
+                data-blog-card
+                data-category={post.data.category.toLowerCase()}
+              >
+                <span class="story-card-image">
+                  <img
+                    src={post.data.heroImage}
+                    width="1456"
+                    height="1092"
+                    alt={post.data.heroAlt}
+                    loading="lazy"
+                  />
+                </span>
+                <span class="story-card-copy">
+                  <span class="post-meta">
+                    <span>{post.data.category}</span>
+                    <time datetime={post.data.publishedAt.toISOString()}>{formatDate(post.data.publishedAt)}</time>
+                  </span>
+                  <span class="story-card-title">{post.data.title}</span>
+                  <span class="story-card-description">{post.data.description}</span>
+                  <span class="story-card-read">
+                    {post.data.readMinutes} min read <span aria-hidden="true">↗</span>
+                  </span>
+                </span>
+              </a>
+            ))}
+          </div>
+        </section>
+      )
+    }
+
+    <section class="shell blog-closing" aria-labelledby="blog-closing-heading">
+      <p class="eyebrow">Turn ideas into practice</p>
+      <h2 id="blog-closing-heading">Learn a language. Speak with confidence.</h2>
+      <p>See how GlideLingo connects guided learning, speaking practice, and focused review.</p>
+      <a class="button button-primary" href="/#demo">See how it works</a>
+    </section>
   </main>
 
   <SiteFooter />
+  <script src="/scripts/blog-filter.js" defer is:inline></script>
 </BaseLayout>

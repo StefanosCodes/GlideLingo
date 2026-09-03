@@ -6,9 +6,9 @@ export const CLERK_ALLOWED_OPAQUE_REDIRECT_ORIGINS = [/^null$/];
 export const ALLOWED_AUTH_REDIRECT_PROTOCOLS = ['glidelingo:'];
 
 export function selectWebOauthFlow({
-  hasElectronBridge,
+  usesElectronNativeAuth,
 }: {
-  hasElectronBridge: boolean;
+  usesElectronNativeAuth: boolean;
 }): 'popup' | 'redirect' {
-  return hasElectronBridge ? 'redirect' : 'popup';
+  return usesElectronNativeAuth ? 'redirect' : 'popup';
 }

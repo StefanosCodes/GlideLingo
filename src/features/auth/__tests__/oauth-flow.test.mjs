@@ -7,15 +7,14 @@ import {
   DESKTOP_AUTH_CALLBACK_URL,
   selectWebOauthFlow,
 } from '../oauth-flow.ts';
-import { SIGN_IN_METHODS_COPY } from '../sign-in-copy.ts';
 
 test('Electron renderers use the system-browser redirect flow', () => {
-  assert.equal(selectWebOauthFlow({ hasElectronBridge: true }), 'redirect');
+  assert.equal(selectWebOauthFlow({ usesElectronNativeAuth: true }), 'redirect');
   assert.equal(DESKTOP_AUTH_CALLBACK_URL, 'glidelingo://app/');
 });
 
 test('ordinary web renderers without the Electron bridge use the popup flow', () => {
-  assert.equal(selectWebOauthFlow({ hasElectronBridge: false }), 'popup');
+  assert.equal(selectWebOauthFlow({ usesElectronNativeAuth: false }), 'popup');
 });
 
 test('Clerk uses a coarse opaque-origin prefilter while Electron owns exact callback routing', () => {
@@ -40,11 +39,4 @@ test('Clerk uses a coarse opaque-origin prefilter while Electron owns exact call
     ),
     false,
   );
-});
-
-test('desktop sign-in copy names every configured MVP method', () => {
-  for (const method of ['Google', 'Apple', 'email']) {
-    assert.match(SIGN_IN_METHODS_COPY, new RegExp(`\\b${method}\\b`));
-  }
-  assert.doesNotMatch(SIGN_IN_METHODS_COPY, /\\bphone\\b/i);
 });

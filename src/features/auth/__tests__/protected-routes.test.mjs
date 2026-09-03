@@ -17,6 +17,13 @@ test('signed-out direct navigation cannot enter any learning, profile, billing, 
   assert.doesNotMatch(protectedBlock, /name=["']\(auth\)["']/);
 });
 
+test('root layout waits for Clerk before choosing signed-in or signed-out routes', () => {
+  assert.match(rootLayout, /if \(!isLoaded\) \{\s*return \(/);
+  assert.match(rootLayout, /<AuthLoadingScreen \/>/);
+  assert.match(rootLayout, /testID="auth-session-loading"/);
+  assert.doesNotMatch(rootLayout, /const signedIn = isLoaded && isSignedIn && Boolean\(userId\)/);
+});
+
 test('previously distributed learning routes remain authenticated redirects', () => {
   assert.match(legacyPath, /<Redirect href=["']\/quests["']/);
   assert.match(legacyReview, /<Redirect href=["']\/phrases["']/);

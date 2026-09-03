@@ -1,1 +1,1 @@
-export { useAuth, useClerk, useUser } from '@clerk/expo';
+export { useAuth, useClerk, useSignIn, useSignUp, useUser } from '@clerk/expo';

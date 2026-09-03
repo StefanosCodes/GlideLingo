@@ -5,7 +5,7 @@ import { DarkTheme, DefaultTheme, Stack, ThemeProvider as NavigationThemeProvide
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useLayoutEffect, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { setApiAccessTokenProvider } from '@/api/auth-token';
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
@@ -55,7 +55,15 @@ function ClerkApp() {
     [],
   );
 
-  const signedIn = isLoaded && isSignedIn && Boolean(userId);
+  if (!isLoaded) {
+    return (
+      <BillingProvider userId={null}>
+        <AuthLoadingScreen />
+      </BillingProvider>
+    );
+  }
+
+  const signedIn = isSignedIn && Boolean(userId);
 
   return (
     <BillingProvider userId={signedIn ? userId : null}>
@@ -69,6 +77,24 @@ function ClerkApp() {
         <AppNavigation signedIn={false} />
       )}
     </BillingProvider>
+  );
+}
+
+function AuthLoadingScreen() {
+  const colors = useTheme();
+
+  return (
+    <View
+      accessibilityLabel="Checking GlideLingo session"
+      accessibilityRole="progressbar"
+      style={[styles.authLoadingScreen, { backgroundColor: colors.background }]}
+      testID="auth-session-loading"
+    >
+      <ActivityIndicator color={colors.tint} size="large" />
+      <ThemedText type="body" themeColor="textSecondary">
+        Checking your GlideLingo session…
+      </ThemedText>
+    </View>
   );
 }
 
@@ -125,6 +151,13 @@ function MissingClerkConfiguration() {
 }
 
 const styles = StyleSheet.create({
+  authLoadingScreen: {
+    alignItems: 'center',
+    flex: 1,
+    gap: Spacing.two,
+    justifyContent: 'center',
+    padding: Spacing.threeHalf,
+  },
   configurationCopy: { maxWidth: 520, textAlign: 'center' },
   configurationScreen: {
     alignItems: 'center',

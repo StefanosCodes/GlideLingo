@@ -1,1 +1,1 @@
-export { useAuth, useClerk, useUser } from '@clerk/react';
+export { useAuth, useClerk, useSignIn, useSignUp, useUser } from '@clerk/react';

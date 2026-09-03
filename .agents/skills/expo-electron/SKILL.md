@@ -24,8 +24,11 @@ GlideLingo is a single unified TypeScript codebase delivering native Android and
    - Files reside in `desktop/` (`desktop/main.cjs`, `desktop/runtime.cjs`).
    - Renderer Node.js integration is strictly disabled (`nodeIntegration: false`).
    - Context isolation (`contextIsolation: true`) and Chromium sandbox are enabled.
-   - Production packages serve files over the custom `glidelingo://` protocol.
+   - Production packages serve bundled files from the virtual HTTPS origin `https://desktop.glidelingo.com`.
+   - The `glidelingo://` protocol is reserved for validated authentication callbacks; it is not the renderer origin.
    - Dev mode loads `http://localhost:8081` served by Expo web with `BROWSER=none`.
+   - A preload bridge may be present in both modes. Never use bridge presence alone to select native authentication:
+     loopback HTTP(S) renderers use the web provider, while packaged renderer origins use the Electron provider.
 
 ## Canonical Commands
 
@@ -81,6 +84,8 @@ Before considering changes complete:
 - [ ] Electron changes pass `npm run test:desktop` and `npm run desktop:export`.
 - [ ] Full pre-merge check passes `npm run verify:full`.
 - [ ] Tested on target runtimes (mobile simulator/emulator and Electron desktop).
+- [ ] Auth changes prove the complete browser and Electron lifecycle—signup, verification, persistence, sign-out,
+      sign-in, recovery, and relaunch—before packaging or pushing a release branch.
 
 For a desktop release, treat each published format as a separate consumer boundary:
 

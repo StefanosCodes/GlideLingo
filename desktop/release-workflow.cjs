@@ -5,9 +5,12 @@ const { spawnSync } = require('node:child_process');
 
 const { version } = require('./package.json');
 const { validateReleaseTag } = require('./release.cjs');
+const { resolveBillingMode } = require('./release-secrets.cjs');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const FULL_COMMIT_PATTERN = /^[0-9a-f]{40}$/i;
+const DRAFT_LOOKUP_ATTEMPTS = 10;
+const DRAFT_LOOKUP_DELAY_MS = 2_000;
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -244,10 +247,8 @@ function inspectLocalAssets(releaseDirectory, desktopVersion = version) {
   return assets;
 }
 
-function assertRemoteDraft(release, localAssets, releaseTag) {
-  if (!release || release.tag_name !== releaseTag || release.draft !== true) {
-    throw new Error('The converged GitHub release must exist and remain a draft.');
-  }
+function assertRemoteDraft(release, localAssets, selection) {
+  assertDraftIdentity(release, selection);
 
   const remoteAssets = release.assets || [];
   assertExactNames(
@@ -265,6 +266,34 @@ function assertRemoteDraft(release, localAssets, releaseTag) {
     ) {
       throw new Error(`Remote release asset ${asset.name} is incomplete or does not match locally.`);
     }
+  }
+}
+
+function releaseTitle(selection) {
+  return selection.billingMode === 'sandbox'
+    ? `GlideLingo ${selection.releaseTag} (internal sandbox)`
+    : `GlideLingo ${selection.releaseTag}`;
+}
+
+function assertDraftIdentity(release, selection, allowUntagged = false) {
+  const tagMatches =
+    release?.tag_name === selection.releaseTag ||
+    (allowUntagged && /^untagged-[0-9a-f]+$/i.test(release?.tag_name || ''));
+  if (
+    !release ||
+    !Number.isSafeInteger(release.id) ||
+    release.id <= 0 ||
+    release.draft !== true ||
+    !tagMatches ||
+    release.name !== releaseTitle(selection) ||
+    release.target_commitish !== selection.commitSha
+  ) {
+    throw new Error('The GitHub release must match the exact unpublished draft identity.');
+  }
+  if (release.prerelease !== (selection.billingMode === 'sandbox')) {
+    throw new Error(
+      `The ${selection.billingMode} draft prerelease flag does not match its release channel.`,
+    );
   }
 }
 
@@ -291,8 +320,30 @@ function findReleaseByTagPages(pages, tag) {
   return null;
 }
 
+function findDraftBySelectionPages(pages, selection) {
+  if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) {
+    throw new Error('GitHub paginated releases response must be an array of pages.');
+  }
+
+  const matches = pages
+    .flat()
+    .filter((release) => {
+      try {
+        assertDraftIdentity(release, selection, true);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  if (matches.length > 1) {
+    throw new Error(`Multiple GitHub drafts match ${selection.releaseTag}.`);
+  }
+  return matches[0] ?? null;
+}
+
 async function convergeDraftRelease(selection, localAssets, github) {
-  let release = await github.getRelease(selection.releaseTag);
+  resolveBillingMode(selection.billingMode);
+  let release = await github.getRelease(selection);
 
   if (release && release.draft !== true) {
     throw new Error(`Release ${selection.releaseTag} is already published and cannot be replaced.`);
@@ -300,30 +351,35 @@ async function convergeDraftRelease(selection, localAssets, github) {
 
   if (!release) {
     release = await github.createDraft(selection);
-  } else {
-    await github.updateDraft(release.id, selection);
   }
 
   if (!release) {
     throw new Error(`Draft release ${selection.releaseTag} could not be created.`);
   }
+  assertDraftIdentity(release, selection, true);
+  await github.updateDraft(release.id, selection);
+  release = await github.getReleaseById(release.id);
+  assertDraftIdentity(release, selection);
 
   for (const asset of release.assets || []) {
     await github.deleteAsset(asset.id);
   }
 
-  await github.uploadAssets(selection.releaseTag, localAssets.map((asset) => asset.path));
-  const converged = await github.getRelease(selection.releaseTag);
-  assertRemoteDraft(converged, localAssets, selection.releaseTag);
+  await github.uploadAssets(release.id, localAssets.map((asset) => asset.path));
+  const converged = await github.getReleaseById(release.id);
+  assertRemoteDraft(converged, localAssets, selection);
   return converged;
 }
 
 function createGitHubAdapter(
   repository,
   api = (args, options) => run('gh', ['api', ...args], options),
+  execute = (args) => run('gh', args),
+  wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
 ) {
   return {
-    async getRelease(tag) {
+    async getRelease(selection) {
+      const tag = selection.releaseTag;
       const endpoint = `repos/${repository}/releases/tags/${encodeURIComponent(tag)}`;
       const result = api([endpoint], { allowFailure: true });
       if (result.status !== 0) {
@@ -334,14 +390,21 @@ function createGitHubAdapter(
             '--slurp',
             `repos/${repository}/releases?per_page=100`,
           ]);
-          return findReleaseByTagPages(JSON.parse(listed.stdout), tag);
+          const pages = JSON.parse(listed.stdout);
+          return findReleaseByTagPages(pages, tag) ?? findDraftBySelectionPages(pages, selection);
         }
         throw new Error(`Unable to inspect draft release ${tag}: ${detail.trim()}`);
       }
       return JSON.parse(result.stdout);
     },
+    async getReleaseById(releaseId) {
+      if (!Number.isSafeInteger(releaseId) || releaseId <= 0) {
+        throw new Error('GitHub release id must be a positive safe integer.');
+      }
+      return JSON.parse(api([`repos/${repository}/releases/${releaseId}`]).stdout);
+    },
     async createDraft(selection) {
-      run('gh', [
+      const args = [
         'release',
         'create',
         selection.releaseTag,
@@ -352,27 +415,71 @@ function createGitHubAdapter(
         '--target',
         selection.commitSha,
         '--title',
-        `GlideLingo ${selection.releaseTag}`,
-        '--generate-notes',
-      ]);
-      return this.getRelease(selection.releaseTag);
+        releaseTitle(selection),
+      ];
+      if (selection.billingMode === 'sandbox') {
+        args.push(
+          '--prerelease',
+          '--notes',
+          'INTERNAL SANDBOX BUILD. Do not publish or link from the public website.',
+        );
+      } else {
+        args.push('--generate-notes');
+      }
+      execute(args);
+      for (let attempt = 1; attempt <= DRAFT_LOOKUP_ATTEMPTS; attempt += 1) {
+        const release = await this.getRelease(selection);
+        if (release) {
+          return release;
+        }
+        if (attempt < DRAFT_LOOKUP_ATTEMPTS) {
+          await wait(DRAFT_LOOKUP_DELAY_MS);
+        }
+      }
+      return null;
     },
     async updateDraft(releaseId, selection) {
-      api([
+      const args = [
         '--method',
         'PATCH',
         `repos/${repository}/releases/${releaseId}`,
         '-f',
-        `name=GlideLingo ${selection.releaseTag}`,
+        `tag_name=${selection.releaseTag}`,
+        '-f',
+        `target_commitish=${selection.commitSha}`,
+        '-f',
+        `name=${releaseTitle(selection)}`,
         '-F',
         'draft=true',
-      ]);
+        '-F',
+        `prerelease=${selection.billingMode === 'sandbox'}`,
+      ];
+      if (selection.billingMode === 'sandbox') {
+        args.push(
+          '-f',
+          'body=INTERNAL SANDBOX BUILD. Do not publish or link from the public website.',
+        );
+      }
+      api(args);
     },
     async deleteAsset(assetId) {
       api(['--method', 'DELETE', `repos/${repository}/releases/assets/${assetId}`]);
     },
-    async uploadAssets(tag, assetPaths) {
-      run('gh', ['release', 'upload', tag, '--repo', repository, '--clobber', ...assetPaths]);
+    async uploadAssets(releaseId, assetPaths) {
+      for (const assetPath of assetPaths) {
+        const assetName = path.basename(assetPath);
+        api([
+          '--method',
+          'POST',
+          '--header',
+          'Accept: application/vnd.github+json',
+          '--header',
+          'Content-Type: application/octet-stream',
+          '--input',
+          assetPath,
+          `https://uploads.github.com/repos/${repository}/releases/${releaseId}/assets?name=${encodeURIComponent(assetName)}`,
+        ]);
+      }
     },
   };
 }
@@ -418,6 +525,7 @@ async function main(argv = process.argv.slice(2), environment = process.env) {
   if (command === 'stage-draft') {
     const commitSha = environment.GLIDELINGO_RELEASE_COMMIT;
     const releaseTag = environment.GLIDELINGO_RELEASE_TAG;
+    const billingMode = resolveBillingMode(environment.GLIDELINGO_BILLING_MODE);
     if (!FULL_COMMIT_PATTERN.test(commitSha || '')) {
       throw new Error('GLIDELINGO_RELEASE_COMMIT must be an exact commit SHA.');
     }
@@ -427,7 +535,7 @@ async function main(argv = process.argv.slice(2), environment = process.env) {
       throw new Error('GITHUB_REPOSITORY must identify the release repository.');
     }
     await convergeDraftRelease(
-      { commitSha, releaseTag, version },
+      { billingMode, commitSha, releaseTag, version },
       inspectLocalAssets(releaseDirectory),
       createGitHubAdapter(repository),
     );

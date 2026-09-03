@@ -250,7 +250,14 @@ function mapAuthCallbackToRendererUrl(
   } catch {
     return null;
   }
-  if (!isExactPackagedRendererUrl(renderer)) return null;
+  const isPackagedRenderer = isExactPackagedRendererUrl(renderer);
+  let isDevelopmentRenderer = false;
+  try {
+    isDevelopmentRenderer = Boolean(validateDevelopmentUrl(rendererOrigin));
+  } catch {
+    isDevelopmentRenderer = false;
+  }
+  if (!isPackagedRenderer && !isDevelopmentRenderer) return null;
 
   const callback = new URL(callbackUrl);
   const translated = new URL(callback.pathname, renderer);

@@ -10,6 +10,7 @@ directories:
 
 files:
   - main.cjs
+  - preload.cjs
   - runtime.cjs
   - updater.cjs
   - package.json
@@ -33,6 +34,11 @@ mac:
   hardenedRuntime: true
   icon: ../assets/images/desktop-icon.png
   notarize: false
+  # These ordinary resource types are sealed by their enclosing bundle. Signing
+  # them individually stores com.apple.cs.* data in extended attributes that a
+  # ZIP updater payload does not preserve. Keep this list narrow so future native
+  # code under Resources (for example .node or .dylib files) is still signed.
+  signIgnore: '/Resources/.*\.(?:asar|bin|dat|ico|icns|mp3|nib|pak|png|ttf)$'
   target:
     - target: dmg
       arch: universal

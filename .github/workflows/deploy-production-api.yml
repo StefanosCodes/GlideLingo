@@ -1,0 +1,301 @@
+name: Deploy production API
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact 40-character commit from protected main to deploy
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-production-api
+  cancel-in-progress: false
+
+env:
+  GCP_REPOSITORY: glidelingo-containers
+  GCP_SERVICE: glidelingo-api-production
+  IMAGE_NAME: glidelingo-api
+
+jobs:
+  stage:
+    name: Verify, build, and stage candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production-staging
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION || 'us-west1' }}
+      TARGET_COMMIT_SHA: ${{ inputs.commit_sha }}
+    outputs:
+      candidate_tag: ${{ steps.stage.outputs.candidate_tag }}
+      candidate_revision: ${{ steps.stage.outputs.candidate_revision }}
+      candidate_url: ${{ steps.stage.outputs.candidate_url }}
+      staged_generation: ${{ steps.stage.outputs.staged_generation }}
+      previous_revision: ${{ steps.stage.outputs.previous_revision }}
+      service_url: ${{ steps.stage.outputs.service_url }}
+      revenuecat_enabled: ${{ steps.stage.outputs.revenuecat_enabled }}
+      revenuecat_environment: ${{ steps.stage.outputs.revenuecat_environment }}
+      project_id: ${{ steps.stage.outputs.project_id }}
+      region: ${{ steps.stage.outputs.region }}
+      cors_origins: ${{ steps.stage.outputs.cors_origins }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Verify immutable main commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${TARGET_COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "${TARGET_COMMIT_SHA}"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "${TARGET_COMMIT_SHA}" origin/main
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          working-directory: backend
+
+      - name: Verify backend
+        run: npm run setup:backend && npm run api:verify
+
+      - name: Authenticate to isolated production project
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Install Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+
+      - name: Verify environment scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${GCP_PROJECT_ID}" in
+            glidelingo-prod-50843312405) ;;
+            *) echo "Refusing non-production project ${GCP_PROJECT_ID}." >&2; exit 1 ;;
+          esac
+          test "$(gcloud config get-value project 2>/dev/null)" = "${GCP_PROJECT_ID}"
+
+      - name: Configure Artifact Registry authentication
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+      - id: image
+        name: Build and push immutable image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_tag="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_REPOSITORY}/${IMAGE_NAME}:${TARGET_COMMIT_SHA}"
+          docker build --file backend/Dockerfile --tag "${image_tag}" .
+          docker push "${image_tag}"
+          digest="$(gcloud artifacts docker images describe "${image_tag}" --format='value(image_summary.digest)')"
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "uri=${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_REPOSITORY}/${IMAGE_NAME}@${digest}" >> "${GITHUB_OUTPUT}"
+
+      - id: stage
+        name: Stage and smoke zero-traffic candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_tag="c-${TARGET_COMMIT_SHA:0:19}"
+          if (( ${#GCP_SERVICE} + ${#candidate_tag} > 46 )); then
+            echo "Cloud Run service and candidate tag exceed the 46-character combined limit." >&2
+            exit 1
+          fi
+          initial_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
+          initial_state="$(./infra/gcp/scripts/read-production-deploy-state.sh <<< "${initial_json}")"
+          initial_generation="$(jq -r .generation <<< "${initial_state}")"
+          previous_revision="$(jq -r .live_revision <<< "${initial_state}")"
+          service_url="$(jq -r .service_url <<< "${initial_state}")"
+          revenuecat_enabled="$(jq -r .revenuecat_enabled <<< "${initial_state}")"
+          revenuecat_environment="$(jq -r .revenuecat_environment <<< "${initial_state}")"
+          cors_origins="$(jq -r .cors_origins <<< "${initial_state}")"
+
+          cleanup() {
+            if [[ "${staged_successfully:-false}" != true ]]; then
+              gcloud run services update-traffic "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --remove-tags="${candidate_tag}" --quiet >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          gcloud run deploy "${GCP_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --image="${{ steps.image.outputs.uri }}" \
+            --no-traffic \
+            --tag="${candidate_tag}" \
+            --quiet
+
+          staged_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
+          staged_state="$(./infra/gcp/scripts/read-production-deploy-state.sh "${candidate_tag}" <<< "${staged_json}")"
+          staged_generation="$(jq -r .generation <<< "${staged_state}")"
+          candidate_revision="$(jq -r .candidate_revision <<< "${staged_state}")"
+          candidate_url="$(jq -r .candidate_url <<< "${staged_state}")"
+          test "${staged_generation}" = "$((10#${initial_generation} + 1))"
+          test "$(jq -r .live_revision <<< "${staged_state}")" = "${previous_revision}"
+          test "$(jq -r .service_url <<< "${staged_state}")" = "${service_url}"
+          test "$(jq -r .revenuecat_enabled <<< "${staged_state}")" = "${revenuecat_enabled}"
+          test "$(jq -r .revenuecat_environment <<< "${staged_state}")" = "${revenuecat_environment}"
+          test "$(jq -r .cors_origins <<< "${staged_state}")" = "${cors_origins}"
+
+          curl --fail --retry 6 --retry-all-errors --retry-delay 5 "${candidate_url}/health/live"
+          curl --fail --retry 6 --retry-all-errors --retry-delay 5 "${candidate_url}/health/ready"
+          auth_status="$(curl --silent --show-error --output /dev/null --header 'Authorization: Bearer invalid-deployment-smoke-token' --write-out '%{http_code}' "${candidate_url}/v1/auth/session")"
+          test "${auth_status}" = "401"
+
+          staged_successfully=true
+          echo "candidate_tag=${candidate_tag}" >> "${GITHUB_OUTPUT}"
+          echo "candidate_revision=${candidate_revision}" >> "${GITHUB_OUTPUT}"
+          echo "candidate_url=${candidate_url}" >> "${GITHUB_OUTPUT}"
+          echo "staged_generation=${staged_generation}" >> "${GITHUB_OUTPUT}"
+          echo "previous_revision=${previous_revision}" >> "${GITHUB_OUTPUT}"
+          echo "service_url=${service_url}" >> "${GITHUB_OUTPUT}"
+          echo "revenuecat_enabled=${revenuecat_enabled}" >> "${GITHUB_OUTPUT}"
+          echo "revenuecat_environment=${revenuecat_environment}" >> "${GITHUB_OUTPUT}"
+          echo "project_id=${GCP_PROJECT_ID}" >> "${GITHUB_OUTPUT}"
+          echo "region=${GCP_REGION}" >> "${GITHUB_OUTPUT}"
+          echo "cors_origins=${cors_origins}" >> "${GITHUB_OUTPUT}"
+
+  promote:
+    name: Approve, detect drift, and promote
+    needs: stage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      CANDIDATE_REVISION: ${{ needs.stage.outputs.candidate_revision }}
+      CANDIDATE_TAG: ${{ needs.stage.outputs.candidate_tag }}
+      EXPECTED_CANDIDATE_URL: ${{ needs.stage.outputs.candidate_url }}
+      EXPECTED_CORS_ORIGINS: ${{ needs.stage.outputs.cors_origins }}
+      EXPECTED_PROJECT_ID: ${{ needs.stage.outputs.project_id }}
+      EXPECTED_REGION: ${{ needs.stage.outputs.region }}
+      EXPECTED_REVENUECAT_ENABLED: ${{ needs.stage.outputs.revenuecat_enabled }}
+      EXPECTED_REVENUECAT_ENVIRONMENT: ${{ needs.stage.outputs.revenuecat_environment }}
+      EXPECTED_SERVICE_URL: ${{ needs.stage.outputs.service_url }}
+      EXPECTED_STAGED_GENERATION: ${{ needs.stage.outputs.staged_generation }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION || 'us-west1' }}
+      PREVIOUS_REVISION: ${{ needs.stage.outputs.previous_revision }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Authenticate to isolated production project
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Install Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+
+      - name: Verify unchanged candidate and promote
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${GCP_PROJECT_ID}" in
+            glidelingo-prod-50843312405) ;;
+            *) echo "Refusing non-production project ${GCP_PROJECT_ID}." >&2; exit 1 ;;
+          esac
+          test "${GCP_PROJECT_ID}" = "${EXPECTED_PROJECT_ID}"
+          test "${GCP_REGION}" = "${EXPECTED_REGION}"
+          test "$(gcloud config get-value project 2>/dev/null)" = "${GCP_PROJECT_ID}"
+          current_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
+          current_state="$(./infra/gcp/scripts/read-production-deploy-state.sh "${CANDIDATE_TAG}" <<< "${current_json}")"
+          test "$(jq -r .generation <<< "${current_state}")" = "${EXPECTED_STAGED_GENERATION}"
+          test "$(jq -r .live_revision <<< "${current_state}")" = "${PREVIOUS_REVISION}"
+          test "$(jq -r .service_url <<< "${current_state}")" = "${EXPECTED_SERVICE_URL}"
+          test "$(jq -r .candidate_revision <<< "${current_state}")" = "${CANDIDATE_REVISION}"
+          test "$(jq -r .candidate_url <<< "${current_state}")" = "${EXPECTED_CANDIDATE_URL}"
+          test "$(jq -r .revenuecat_enabled <<< "${current_state}")" = "${EXPECTED_REVENUECAT_ENABLED}"
+          test "$(jq -r .revenuecat_environment <<< "${current_state}")" = "${EXPECTED_REVENUECAT_ENVIRONMENT}"
+          test "$(jq -r .cors_origins <<< "${current_state}")" = "${EXPECTED_CORS_ORIGINS}"
+
+          rollback() {
+            gcloud run services update-traffic "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --to-revisions="${PREVIOUS_REVISION}=100" --quiet || true
+          }
+          if ! gcloud run services update-traffic "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --to-revisions="${CANDIDATE_REVISION}=100" --quiet; then
+            rollback
+            exit 1
+          fi
+          if ! curl --fail --retry 6 --retry-all-errors --retry-delay 5 "${EXPECTED_SERVICE_URL}/health/live" || \
+             ! curl --fail --retry 6 --retry-all-errors --retry-delay 5 "${EXPECTED_SERVICE_URL}/health/ready"; then
+            rollback
+            exit 1
+          fi
+          auth_status="$(curl --silent --show-error --output /dev/null --header 'Authorization: Bearer invalid-deployment-smoke-token' --write-out '%{http_code}' "${EXPECTED_SERVICE_URL}/v1/auth/session")"
+          if [[ "${auth_status}" != "401" ]]; then
+            rollback
+            exit 1
+          fi
+          gcloud run services update-traffic "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --remove-tags="${CANDIDATE_TAG}" --quiet
+
+  cleanup:
+    name: Clean abandoned candidate tag
+    if: ${{ always() && needs.stage.result == 'success' }}
+    needs: [stage, promote]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-staging
+    env:
+      CANDIDATE_REVISION: ${{ needs.stage.outputs.candidate_revision }}
+      CANDIDATE_TAG: ${{ needs.stage.outputs.candidate_tag }}
+      EXPECTED_PROJECT_ID: ${{ needs.stage.outputs.project_id }}
+      EXPECTED_REGION: ${{ needs.stage.outputs.region }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION || 'us-west1' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Authenticate for exact candidate cleanup
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Install Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+
+      - name: Remove only the recorded abandoned tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GCP_PROJECT_ID}" = "${EXPECTED_PROJECT_ID}"
+          test "${GCP_REGION}" = "${EXPECTED_REGION}"
+          service_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
+          cleanup_generation="$(jq -r '.metadata.generation // empty' <<< "${service_json}")"
+          action="$(./infra/gcp/scripts/classify-production-candidate-cleanup.sh \
+            "${CANDIDATE_TAG}" \
+            "${CANDIDATE_REVISION}" <<< "${service_json}")"
+          if [[ "${action}" == "absent" ]]; then exit 0; fi
+          test "${action}" = "remove"
+          precleanup_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
+          test "$(jq -r '.metadata.generation // empty' <<< "${precleanup_json}")" = "${cleanup_generation}"
+          test "$(./infra/gcp/scripts/classify-production-candidate-cleanup.sh \
+            "${CANDIDATE_TAG}" \
+            "${CANDIDATE_REVISION}" <<< "${precleanup_json}")" = "remove"
+          gcloud run services update-traffic "${GCP_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --remove-tags="${CANDIDATE_TAG}" \
+            --quiet
+          updated_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
+          test "$(./infra/gcp/scripts/classify-production-candidate-cleanup.sh \
+            "${CANDIDATE_TAG}" \
+            "${CANDIDATE_REVISION}" <<< "${updated_json}")" = "absent"

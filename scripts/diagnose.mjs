@@ -53,6 +53,10 @@ const [metroStatus, apiStatus, databaseStatus] = await Promise.all([
   checkPort(8123),
   checkPort(databasePort),
 ]);
+const environmentCheck = spawnSync('npm', ['run', '--silent', 'env:check'], {
+  cwd: projectRoot,
+  encoding: 'utf8',
+});
 
 console.log('GlideLingo environment');
 console.log(`Project:   ${projectRoot}`);
@@ -68,9 +72,11 @@ console.log(`uv:        ${uvVersion}`);
 console.log(`Docker:    ${dockerVersion}`);
 console.log(`Xcode:     ${xcodeVersion}`);
 console.log(`ADB:       ${adbVersion}`);
+console.log(`Local env: ${environmentCheck.status === 0 ? 'verified' : 'not verified — run npm run env:check'}`);
 console.log('');
 console.log('Next checks:');
 console.log('  npm run verify        lint, types, and tests');
+console.log('  npm run env:check     verify local development configuration provenance');
 console.log('  npm run api:verify    backend lint, types, and unit tests');
 console.log('  npm run db:up         start the GlideLingo PostgreSQL container');
 console.log('  npm run doctor        Expo dependency and configuration checks');

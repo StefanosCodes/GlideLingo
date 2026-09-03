@@ -57,39 +57,6 @@ function buildNotarizeOptions(appPath, environment = process.env) {
   return null;
 }
 
-function selectDeveloperIdIdentity(securityOutput) {
-  const identities = [
-    ...securityOutput.matchAll(/^[ \t]*\d+\)[ \t]+[A-F0-9]{40}[ \t]+"(Developer ID Application:[^"]+)"/gim),
-  ].map((match) => match[1]);
-  const uniqueIdentities = [...new Set(identities)];
-
-  if (uniqueIdentities.length !== 1) {
-    throw new Error(
-      `Expected exactly one Developer ID Application identity, found ${uniqueIdentities.length}.`,
-    );
-  }
-
-  return uniqueIdentities[0];
-}
-
-function buildFinalCodesignArgs(appPath, identity, keychainFile) {
-  const args = [
-    '--force',
-    '--deep',
-    '--timestamp',
-    '--preserve-metadata=identifier,requirements,flags,entitlements',
-    '--sign',
-    identity,
-  ];
-
-  if (keychainFile) {
-    args.push('--keychain', keychainFile);
-  }
-
-  args.push(appPath);
-  return args;
-}
-
 function verifySignature(appPath) {
   execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath], {
     stdio: 'inherit',
@@ -105,23 +72,7 @@ async function afterSign(context) {
     context.appOutDir,
     `${context.packager.appInfo.productFilename}.app`,
   );
-  const signingInfo = await context.packager.codeSigningInfo.value;
-  const identityArguments = ['find-identity', '-v', '-p', 'codesigning'];
-
-  if (signingInfo?.keychainFile) {
-    identityArguments.push(signingInfo.keychainFile);
-  }
-
-  const identity = selectDeveloperIdIdentity(
-    execFileSync('/usr/bin/security', identityArguments, { encoding: 'utf8' }),
-  );
-
-  console.log('[desktop-release] Applying final universal-bundle signature.');
-  execFileSync(
-    '/usr/bin/codesign',
-    buildFinalCodesignArgs(appPath, identity, signingInfo?.keychainFile),
-    { stdio: 'inherit' },
-  );
+  console.log('[desktop-release] Verifying electron-builder signature before notarization.');
   verifySignature(appPath);
 
   const notarizeOptions = buildNotarizeOptions(appPath);
@@ -137,6 +88,4 @@ async function afterSign(context) {
 }
 
 module.exports = afterSign;
-module.exports.buildFinalCodesignArgs = buildFinalCodesignArgs;
 module.exports.buildNotarizeOptions = buildNotarizeOptions;
-module.exports.selectDeveloperIdIdentity = selectDeveloperIdIdentity;

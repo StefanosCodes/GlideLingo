@@ -27,7 +27,7 @@ Use the personal **Stefanos Sophocleous** Apple Developer team that owns GlideLi
 
 The `.p12`, its password, the app-specific password, and their encoded contents are secrets. Never commit them, add them to an Expo public variable, paste them into logs, or attach them to a pull request.
 
-## GitHub configuration
+## GitHub and GCP configuration
 
 Create a protected GitHub Actions environment named exactly `desktop-release-signing` before
 enabling this workflow. Configure at least one required reviewer who is not the person starting
@@ -41,38 +41,63 @@ an exact commit in the complete `main` history. The workflow enforces the commit
 again before any credential-bearing build step, but the ruleset is still required to prevent a
 time-of-check/time-of-use tag change.
 
-Configure these as environment secrets on `desktop-release-signing`, not as unprotected
-repository-level secrets:
+GitHub holds no Apple, Clerk-key, RevenueCat-key, service-account JSON, or other long-lived release
+secret. The signing job obtains a short-lived GCP identity through Workload Identity Federation and
+reads exact Secret Manager versions after environment approval. Grant its dedicated release service
+account `roles/secretmanager.secretAccessor` only on the seven release secret containers.
+
+Configure these non-secret environment variables on `desktop-release-signing`:
 
 | Name | Value |
 | --- | --- |
-| `MACOS_CERTIFICATE_BASE64` | Base64-encoded Developer ID `.p12` |
-| `MACOS_CERTIFICATE_PASSWORD` | Password used when exporting the `.p12` |
-| `APPLE_ID` | Personal Stefanos Sophocleous Apple Account email |
-| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password created for GlideLingo notarization |
-| `APPLE_TEAM_ID` | Personal Stefanos Sophocleous Apple Developer Team ID |
-
-Configure these environment variables on `desktop-release-signing`. They are public client values,
-not secrets, but the protected environment keeps the complete release configuration under the same
-approval boundary as signing:
-
-| Name | Value |
-| --- | --- |
+| `GLIDELINGO_GCP_PROJECT_ID` | Isolated production project ID, currently `glidelingo-prod-50843312405` |
+| `GLIDELINGO_GCP_WORKLOAD_IDENTITY_PROVIDER` | Full production release WIF provider resource name |
+| `GLIDELINGO_GCP_DESKTOP_RELEASE_SERVICE_ACCOUNT` | Dedicated production desktop-release service account |
 | `GLIDELINGO_PRODUCTION_API_ORIGIN` | Public HTTPS FastAPI base URL used by the production client |
 | `GLIDELINGO_PRODUCTION_CLERK_ORIGIN` | Exact HTTPS Clerk frontend origin allowed by the packaged shell |
-| `GLIDELINGO_CLERK_PUBLISHABLE_KEY` | Clerk public production publishable key for that exact frontend origin |
-| `GLIDELINGO_REVENUECAT_WEB_API_KEY` | RevenueCat public Web SDK key used by Electron |
+| `GLIDELINGO_BILLING_MODE` | Exactly `sandbox` for internal prelaunch drafts or `production` for a live candidate |
+
+The release validator reads
+`infra/gcp/environments/production/identity.json`, the same committed identity contract consumed
+by production Terraform. The project ID, release service-account email, numeric project number,
+WIF pool, and WIF provider must exactly match that manifest; production-looking prefixes are not
+accepted. The manifest deliberately keeps `project_number` null until the production project
+exists, which disables release authentication. After bootstrap, copy Terraform's resolved
+`production_contract.project_number` into the manifest through a reviewed PR before configuring
+these GitHub variables. The fallback project is not implicitly accepted; changing the production
+identity requires changing this single reviewed manifest.
+
+Configure each of these variables as a full Secret Manager resource ending in a positive numeric
+version such as `projects/<production-project>/secrets/<secret>/versions/3`. `latest`, shorthand
+selectors, and selectors from another project are rejected before any secret is read:
+
+| Name | Value |
+| --- | --- |
+| `GLIDELINGO_MACOS_CERTIFICATE_SECRET_VERSION` | `glidelingo-desktop-macos-certificate-base64`; base64-encoded Developer ID `.p12` |
+| `GLIDELINGO_MACOS_CERTIFICATE_PASSWORD_SECRET_VERSION` | `glidelingo-desktop-macos-certificate-password`; `.p12` password |
+| `GLIDELINGO_APPLE_ID_SECRET_VERSION` | `glidelingo-desktop-apple-id`; Apple Account used for notarization |
+| `GLIDELINGO_APPLE_APP_SPECIFIC_PASSWORD_SECRET_VERSION` | `glidelingo-desktop-apple-app-specific-password`; notarization password |
+| `GLIDELINGO_APPLE_TEAM_ID_SECRET_VERSION` | `glidelingo-desktop-apple-team-id`; Apple Developer Team ID |
+| `GLIDELINGO_CLERK_PUBLISHABLE_KEY_SECRET_VERSION` | `glidelingo-desktop-clerk-publishable-key`; Clerk production publishable key |
+| `GLIDELINGO_REVENUECAT_WEB_API_KEY_SECRET_VERSION` | `glidelingo-revenuecat-<mode>-web-public-key`; RevenueCat Web public SDK key |
+
+The RevenueCat secret ID must be exactly `glidelingo-revenuecat-sandbox-web-public-key` or
+`glidelingo-revenuecat-production-web-public-key` matching `GLIDELINGO_BILLING_MODE`. Use distinct Secret Manager containers for the two environments; do not
+put sandbox and production values into versions of one container. The public SDK values are not
+confidential, but storing their pinned build inputs in GCP gives the signed package one auditable
+configuration source.
 
 The Clerk publishable key must begin with `pk_live_`; the release command rejects development
-`pk_test_` keys. In Clerk's production Native application, allowlist exactly
-`glidelingo://app/sign-in` and `glidelingo://app/sso-callback`. Do not use wildcard custom-protocol
-redirects or alternate authorities.
+`pk_test_` keys. In Clerk's production Native application, allowlist the official Electron SDK callback
+`glidelingo://app/`. Keep the legacy `glidelingo://app/sign-in` and
+`glidelingo://app/sso-callback` entries until older installed builds are no longer supported. Do not use
+wildcard custom-protocol redirects or alternate authorities.
 
 On macOS, `base64 < file | pbcopy` copies a file's encoded value without writing another secret file. Keep the originals in an approved secure location until credential rotation, then remove unsecured copies.
 
 ## Build and publish
 
-For a signed local build, install the Developer ID identity in the login keychain, expose one supported notarization credential set, set `EXPO_PUBLIC_API_BASE_URL`, `GLIDELINGO_CLERK_ORIGIN`, `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`, and `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY`, and run:
+For a signed local build, install the Developer ID identity in the login keychain, expose one supported notarization credential set, set `EXPO_PUBLIC_API_BASE_URL`, `GLIDELINGO_CLERK_ORIGIN`, `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`, `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY`, and `GLIDELINGO_BILLING_MODE`, and run:
 
 ```bash
 npm run desktop:release
@@ -94,11 +119,16 @@ desktop-v1.0.0 ↔ desktop/package.json version 1.0.0
 ```
 
 Pushing that tag runs non-secret verification first and then waits for approval on the
-`desktop-release-signing` environment. After signing and notarization, the workflow creates or
-updates a **draft** GitHub Release. Reruns delete stale or partial draft assets, upload exactly
+`desktop-release-signing` environment. After approval it exchanges GitHub's OIDC token for the
+dedicated GCP release identity, validates every pinned secret selector, and reads the seven release
+inputs from Secret Manager. After signing and notarization, the workflow creates or updates a
+**draft** GitHub Release. Reruns delete stale or partial draft assets, upload exactly
 `GlideLingo-<version>-universal.dmg`, `GlideLingo-<version>-universal.zip`, both matching
 `.blockmap` files, `latest-mac.yml`, and `SHA256SUMS.txt`. It verifies the names, upload state,
 byte sizes, and GitHub SHA-256 digests. A run refuses to replace an already-published release.
+Sandbox drafts are additionally marked as internal prereleases and carry a do-not-publish warning.
+The workflow contains no public-publish or website-activation step. Only a production-mode draft
+may proceed to the separately approved clean-Mac promotion process.
 
 The packaged updater is fixed to the public `StefanosCodes/GlideLingo` GitHub Releases channel.
 It runs once at launch only from a packaged, currently validly signed macOS app. Development,
@@ -118,6 +148,9 @@ new published version on their next launch.
 
 The automated workflow proves:
 
+- the exact updater ZIP extracts to a valid Developer ID-signed, notarized universal app (not
+  merely that the pre-archive build directory was valid);
+
 - repository tests pass;
 - Expo's web renderer exports successfully;
 - electron-builder finds a Developer ID Application identity;
@@ -128,13 +161,14 @@ The automated workflow proves:
 - DMG and ZIP checksums are generated before upload.
 - updater metadata and both blockmaps are present before the draft can converge.
 
-Before linking a release from the public landing page, download the DMG onto a second clean Mac, drag GlideLingo to Applications, launch it normally, and exercise the critical lesson, audio, persistence, and production API flows. With the installed signed app, prove the system-browser OAuth callback both while GlideLingo is already running (warm callback) and while it is fully closed (cold callback). These installed OAuth smokes remain activation gates even after unit and packaging checks pass.
+Before linking a release from the public landing page, download the DMG onto a second clean Mac, drag GlideLingo to Applications, launch it normally, and exercise the critical lesson, audio, persistence, and production API flows. With the installed signed app, prove the system-browser OAuth callback while GlideLingo is already running, then quit and relaunch to prove the stored Clerk session restores cleanly. This installed OAuth smoke remains an activation gate even after unit and packaging checks pass.
 
 The clean-Mac smoke test is currently external, so the workflow intentionally leaves every
-release in draft state and contains no publish step. Do not publish the draft or set
+release in draft state and contains no publish step. A sandbox build must remain a draft even when
+its tests pass. Do not publish any sandbox draft or set
 `PUBLIC_MAC_DOWNLOAD_STATE=active` until a later promotion lane can consume machine-verifiable
-clean-Mac evidence and an authorized approval. Until then, the landing page remains in its
-explicit disabled state.
+clean-Mac evidence from a production-mode build and an authorized approval. Until then, the landing
+page remains in its explicit disabled state.
 
 Before calling automatic updates release-ready, complete one real forward-update acceptance test:
 install and launch the published signed/notarized `1.0.0`, publish a separately signed/notarized
@@ -153,4 +187,9 @@ to the configured Clerk origin, and mock billing is rejected by release validati
 
 ## Credential rotation and failure behavior
 
-Replace the affected GitHub secret when a certificate or app-specific password is revoked, expires, or may have been exposed. Do not weaken the workflow to ship an unsigned or unnotarized build. A failed client release is corrected by incrementing the desktop version and publishing a new forward release; installed clients update only after explicit user confirmation.
+Create a new GCP Secret Manager version and update the protected environment's exact version
+selector when a certificate or app-specific password is revoked, expires, or may have been exposed.
+Disable the affected old version after the replacement build succeeds. Do not weaken the workflow
+to ship an unsigned or unnotarized build. A failed client release is corrected by incrementing the
+desktop version and publishing a new forward release; installed clients update only after explicit
+user confirmation.

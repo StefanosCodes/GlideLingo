@@ -2,6 +2,8 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
+const { createClerkBridge } = require('@clerk/electron');
+const { storage: createClerkStorage } = require('@clerk/electron/storage');
 const { app, BrowserWindow, dialog, net, protocol, session, shell } = require('electron');
 
 const {
@@ -48,21 +50,21 @@ let pendingAuthCallbackUrl = findAuthCallbackUrl(process.argv);
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
+  if (process.env.ELECTRON_AUTH_FLOW_TEST === '1' || process.env.ELECTRON_SMOKE_TEST === '1') {
+    console.error('[desktop-auth-flow] another GlideLingo desktop instance is already running');
+    app.exit(1);
+  }
   app.quit();
 }
 
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: APP_SCHEME,
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-      stream: true,
-    },
-  },
-]);
+const clerkBridge = hasSingleInstanceLock
+  ? createClerkBridge({
+      manageSingleInstanceLock: false,
+      renderer: { scheme: APP_SCHEME, host: 'app' },
+      storage: createClerkStorage({ name: 'clerk-tokens' }),
+      userAgent: `GlideLingo/${app.getVersion()}`,
+    })
+  : null;
 
 app.enableSandbox();
 
@@ -131,7 +133,7 @@ function openExternalUrl(targetUrl) {
 
 function handleAuthCallback(targetUrl) {
   const acceptedCallbackUrl = parseAuthCallbackUrl(targetUrl);
-  const callbackUrl = mapAuthCallbackToRendererUrl(targetUrl);
+  const callbackUrl = mapAuthCallbackToRendererUrl(targetUrl, RENDERER_URL);
   if (!acceptedCallbackUrl || !callbackUrl) return false;
 
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -195,6 +197,7 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.cjs'),
       sandbox: true,
       webSecurity: true,
     },
@@ -241,16 +244,147 @@ function createWindow() {
     openExternalUrl(url);
   });
 
-  if (process.env.ELECTRON_SMOKE_TEST === '1') {
+  if (process.env.ELECTRON_AUTH_FLOW_TEST === '1') {
     window.webContents.once('did-finish-load', () => {
+      const inspectRenderer = async () => window.webContents.executeJavaScript(`(() => {
+        const alert = document.querySelector('[role="alert"]');
+        return {
+          accountSummary: Boolean(document.querySelector('[data-testid="account-summary"]')),
+          authenticated: Boolean(document.querySelector('[data-testid="start-lesson"]')),
+          authLoading: Boolean(document.querySelector('[data-testid="auth-session-loading"]')),
+          completingProfile: Boolean(document.querySelector('[data-testid="first-name-completion"]')),
+          electronBridge: Boolean(window.__clerk_internal_electron),
+          hasCreateAccountLink: Boolean(document.querySelector('[data-testid="auth-create-account-link"]')),
+          hasSignOutButton: Boolean(document.querySelector('[data-testid="sign-out"], [data-testid="profile-completion-sign-out"]')),
+          hasWindowClerkSignOut: typeof window.Clerk?.signOut === 'function',
+          href: window.location.href,
+          origin: window.location.origin,
+          signedOut: Boolean(document.querySelector('[data-testid="auth-sign-in"]')),
+          signUpScreen: Boolean(document.querySelector('[data-testid="auth-sign-up"]')),
+          userVisibleError: alert?.textContent?.replace(/\\s+/g, ' ').trim().slice(0, 180) ?? null,
+        };
+      })()`);
+
+      const waitForRenderer = (description, accept, timeoutMs = 15000) => new Promise((resolve, reject) => {
+        const startedAt = Date.now();
+        const poll = async () => {
+          try {
+            const state = await inspectRenderer();
+            if (accept(state)) {
+              resolve(state);
+              return;
+            }
+            if (Date.now() - startedAt > timeoutMs) {
+              reject(new Error(
+                `${description} timed out with state ${JSON.stringify({
+                  accountSummary: state.accountSummary,
+                  authenticated: state.authenticated,
+                  authLoading: state.authLoading,
+                  completingProfile: state.completingProfile,
+                  hasCreateAccountLink: state.hasCreateAccountLink,
+                  hasSignOutButton: state.hasSignOutButton,
+                  hasWindowClerkSignOut: state.hasWindowClerkSignOut,
+                  href: state.href,
+                  signedOut: state.signedOut,
+                  signUpScreen: state.signUpScreen,
+                  userVisibleError: state.userVisibleError,
+                })}`,
+              ));
+              return;
+            }
+            setTimeout(poll, 500);
+          } catch (error) {
+            reject(error);
+          }
+        };
+        void poll();
+      });
+
       setTimeout(async () => {
         try {
-          const rendered = await window.webContents.executeJavaScript(`({
-            authenticated: Boolean(document.querySelector('[data-testid="start-lesson"]')),
-            completingProfile: Boolean(document.querySelector('[data-testid="first-name-completion"]')),
-            origin: window.location.origin,
-            signedOut: Boolean(document.querySelector('[data-testid="auth-sign-in"]')),
-          })`);
+          const initial = await waitForRenderer(
+            'initial auth state',
+            (state) =>
+              state.electronBridge &&
+              !state.authLoading &&
+              (state.authenticated || state.accountSummary || state.completingProfile || state.signedOut),
+          );
+
+          if (initial.authenticated || initial.accountSummary || initial.completingProfile) {
+            const signOutAction = await window.webContents.executeJavaScript(`(async () => {
+              if (typeof window.Clerk?.signOut === 'function') {
+                await window.Clerk.signOut();
+                return 'window.Clerk.signOut';
+              }
+              const button = document.querySelector('[data-testid="sign-out"], [data-testid="profile-completion-sign-out"]');
+              if (!button) return 'missing-sign-out-control';
+              button.click();
+              return 'dom-click';
+            })()`);
+
+            if (signOutAction === 'missing-sign-out-control') {
+              throw new Error('signed-in state did not expose a sign-out control');
+            }
+
+            await waitForRenderer('signed-out screen after sign-out', (state) => state.signedOut && state.hasCreateAccountLink);
+          }
+
+          await waitForRenderer('signed-out screen before signup navigation', (state) => state.signedOut && state.hasCreateAccountLink);
+
+          await window.webContents.executeJavaScript(`(() => {
+            const link = document.querySelector('[data-testid="auth-create-account-link"]');
+            if (link) {
+              link.click();
+              return;
+            }
+            window.location.href = '/sign-up';
+          })()`);
+          await waitForRenderer('sign-up screen after create-account navigation', (state) => state.signUpScreen);
+
+          await window.webContents.executeJavaScript(`(() => {
+            const link = Array.from(document.querySelectorAll('a'))
+              .find((anchor) => anchor.textContent?.trim() === 'Sign in');
+            if (link) {
+              link.click();
+              return;
+            }
+            window.location.href = '/sign-in';
+          })()`);
+          await waitForRenderer('signed-out screen after returning from sign-up', (state) => state.signedOut && state.hasCreateAccountLink);
+
+          console.log('[desktop-auth-flow] verified sign-out, sign-in screen, sign-up navigation, and return-to-sign-in');
+          app.quit();
+        } catch (error) {
+          console.error('[desktop-auth-flow] verification failed:', error);
+          app.exit(1);
+        }
+      }, 500);
+    });
+  } else if (process.env.ELECTRON_SMOKE_TEST === '1') {
+    window.webContents.once('did-finish-load', () => {
+      const smokeStartedAt = Date.now();
+      const inspectRenderer = async () => window.webContents.executeJavaScript(`(() => {
+        const alert = document.querySelector('[role="alert"]');
+        return {
+          authenticated: Boolean(document.querySelector('[data-testid="start-lesson"]')),
+          authLoading: Boolean(document.querySelector('[data-testid="auth-session-loading"]')),
+          completingProfile: Boolean(document.querySelector('[data-testid="first-name-completion"]')),
+          electronBridge: Boolean(window.__clerk_internal_electron),
+          origin: window.location.origin,
+          signedOut: Boolean(document.querySelector('[data-testid="auth-sign-in"]')),
+          userVisibleError: alert?.textContent?.replace(/\\s+/g, ' ').trim().slice(0, 180) ?? null,
+        };
+      })()`);
+
+      const verifyRenderer = async () => {
+        try {
+          const rendered = await inspectRenderer();
+
+          if (!rendered.electronBridge) {
+            console.error('[desktop-smoke] Clerk Electron preload bridge was not exposed');
+            app.exit(1);
+            return;
+          }
 
           if (!DEVELOPMENT_URL && rendered.origin !== PACKAGED_RENDERER_ORIGIN) {
             console.error(`[desktop-smoke] unexpected renderer origin: ${rendered.origin}`);
@@ -258,8 +392,20 @@ function createWindow() {
             return;
           }
 
+          if (rendered.authLoading && Date.now() - smokeStartedAt < 10000) {
+            setTimeout(verifyRenderer, 500);
+            return;
+          }
+
           if (!rendered.authenticated && !rendered.completingProfile && !rendered.signedOut) {
-            console.error('[desktop-smoke] renderer loaded without a valid signed-in or signed-out screen');
+            console.error(
+              '[desktop-smoke] renderer loaded without a valid signed-in, signed-out, or profile-completion screen',
+              JSON.stringify({
+                authLoading: rendered.authLoading,
+                userVisibleError: rendered.userVisibleError,
+                url: window.webContents.getURL(),
+              }),
+            );
             app.exit(1);
             return;
           }
@@ -273,7 +419,9 @@ function createWindow() {
           console.error('[desktop-smoke] renderer verification failed:', error);
           app.exit(1);
         }
-      }, 1500);
+      };
+
+      setTimeout(verifyRenderer, 500);
     });
 
     window.webContents.once('did-fail-load', (_event, code, description) => {
@@ -345,4 +493,8 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('before-quit', () => {
+  clerkBridge?.cleanup();
 });

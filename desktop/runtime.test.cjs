@@ -280,6 +280,23 @@ test('accepted OS callbacks translate to the exact packaged HTTPS renderer', () 
   );
 });
 
+test('accepted OS callbacks translate to the exact active loopback development renderer', () => {
+  assert.equal(
+    mapAuthCallbackToRendererUrl(
+      'glidelingo://app/sso-callback?rotating_token_nonce=nonce',
+      'http://127.0.0.1:8081/',
+    ),
+    'http://127.0.0.1:8081/sso-callback?rotating_token_nonce=nonce',
+  );
+  assert.equal(
+    mapAuthCallbackToRendererUrl(
+      'glidelingo://app/sso-callback?rotating_token_nonce=nonce',
+      'http://localhost:9000/',
+    ),
+    null,
+  );
+});
+
 test('packaged renderer URLs require the exact virtual HTTPS origin', () => {
   assert.equal(isExactPackagedRendererUrl(`${PACKAGED_RENDERER_ORIGIN}/sign-in`), true);
   assert.equal(isExactPackagedRendererUrl('http://desktop.glidelingo.com/sign-in'), false);

@@ -1,26 +1,22 @@
 import '@/providers/install-local-storage';
 
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-google-fonts/inter';
-import { ClerkProvider, useAuth } from '@clerk/expo';
-import { tokenCache } from '@clerk/expo/token-cache';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider as NavigationThemeProvider } from 'expo-router';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useLayoutEffect, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { setApiAccessTokenProvider } from '@/api/auth-token';
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { FirstNameCompletionGate } from '@/features/auth/first-name-completion-gate';
-import {
-  ALLOWED_AUTH_REDIRECT_PROTOCOLS,
-  CLERK_ALLOWED_OPAQUE_REDIRECT_ORIGINS,
-} from '@/features/auth/oauth-flow';
 import { useTheme, useThemeController } from '@/hooks/use-theme';
 import { AppThemeProvider } from '@/providers/app-theme-provider';
 import { BillingProvider } from '@/providers/billing-provider';
+import { GlideLingoClerkProvider } from '@/providers/clerk-provider';
+import { useAuth } from '@/providers/clerk-runtime';
 import { LearningProvider } from '@/providers/learning-provider';
 
 SplashScreen.preventAutoHideAsync();
@@ -34,17 +30,12 @@ export default function RootLayout() {
   if (!fontsLoaded && !fontError) return null;
 
   const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim();
-
   return (
     <AppThemeProvider>
       {publishableKey ? (
-        <ClerkProvider
-          allowedRedirectOrigins={CLERK_ALLOWED_OPAQUE_REDIRECT_ORIGINS}
-          allowedRedirectProtocols={ALLOWED_AUTH_REDIRECT_PROTOCOLS}
-          publishableKey={publishableKey}
-          tokenCache={tokenCache}>
+        <GlideLingoClerkProvider publishableKey={publishableKey}>
           <ClerkApp />
-        </ClerkProvider>
+        </GlideLingoClerkProvider>
       ) : (
         <MissingClerkConfiguration />
       )}
@@ -64,7 +55,15 @@ function ClerkApp() {
     [],
   );
 
-  const signedIn = isLoaded && isSignedIn && Boolean(userId);
+  if (!isLoaded) {
+    return (
+      <BillingProvider userId={null}>
+        <AuthLoadingScreen />
+      </BillingProvider>
+    );
+  }
+
+  const signedIn = isSignedIn && Boolean(userId);
 
   return (
     <BillingProvider userId={signedIn ? userId : null}>
@@ -78,6 +77,24 @@ function ClerkApp() {
         <AppNavigation signedIn={false} />
       )}
     </BillingProvider>
+  );
+}
+
+function AuthLoadingScreen() {
+  const colors = useTheme();
+
+  return (
+    <View
+      accessibilityLabel="Checking GlideLingo session"
+      accessibilityRole="progressbar"
+      style={[styles.authLoadingScreen, { backgroundColor: colors.background }]}
+      testID="auth-session-loading"
+    >
+      <ActivityIndicator color={colors.tint} size="large" />
+      <ThemedText type="body" themeColor="textSecondary">
+        Checking your GlideLingo session…
+      </ThemedText>
+    </View>
   );
 }
 
@@ -134,6 +151,13 @@ function MissingClerkConfiguration() {
 }
 
 const styles = StyleSheet.create({
+  authLoadingScreen: {
+    alignItems: 'center',
+    flex: 1,
+    gap: Spacing.two,
+    justifyContent: 'center',
+    padding: Spacing.threeHalf,
+  },
   configurationCopy: { maxWidth: 520, textAlign: 'center' },
   configurationScreen: {
     alignItems: 'center',

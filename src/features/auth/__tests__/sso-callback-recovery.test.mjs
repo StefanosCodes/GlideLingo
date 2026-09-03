@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { wasSsoCallbackCancelled } from '../sso-callback-recovery.ts';
+import {
+  rotatingTokenNonceFromSsoCallback,
+  wasSsoCallbackCancelled,
+} from '../sso-callback-recovery.ts';
 
 test('SSO callback recovery recognizes provider cancellation in query or hash parameters', () => {
   assert.equal(
@@ -32,4 +35,20 @@ test('SSO callback recovery does not misclassify ordinary errors or malformed UR
     false,
   );
   assert.equal(wasSsoCallbackCancelled('not a URL'), false);
+});
+
+test('SSO callback recovery extracts only a bounded rotating token nonce', () => {
+  assert.equal(
+    rotatingTokenNonceFromSsoCallback(
+      'https://desktop.glidelingo.com/sso-callback?rotating_token_nonce=nonce-123',
+    ),
+    'nonce-123',
+  );
+  assert.equal(rotatingTokenNonceFromSsoCallback('not a URL'), null);
+  assert.equal(
+    rotatingTokenNonceFromSsoCallback(
+      `https://desktop.glidelingo.com/sso-callback?rotating_token_nonce=${'x'.repeat(2049)}`,
+    ),
+    null,
+  );
 });

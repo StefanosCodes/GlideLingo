@@ -7,6 +7,7 @@ const {
   PRODUCTION_API_ORIGIN,
   PRODUCTION_CLERK_ORIGIN,
   PACKAGED_RENDERER_ORIGIN,
+  POSTHOG_INGESTION_ORIGINS,
   buildContentSecurityPolicy,
   findAuthCallbackUrl,
   isAllowedAuthPopupNavigation,
@@ -417,7 +418,7 @@ test('packaged Clerk access is restricted to one exact HTTPS origin', () => {
   }
 });
 
-test('packaged CSP permits only the configured API and Clerk origins', () => {
+test('packaged CSP permits configured API, Clerk, and exact PostHog ingestion origins', () => {
   const policy = buildContentSecurityPolicy({
     apiOrigin: 'https://api.release.glidelingo.com',
     clerkOrigin: 'https://clerk.release.glidelingo.com',
@@ -429,6 +430,10 @@ test('packaged CSP permits only the configured API and Clerk origins', () => {
   assert.match(connectDirective, /https:\/\/clerk\.release\.glidelingo\.com/);
   assert.doesNotMatch(policy, new RegExp(PRODUCTION_API_ORIGIN.replaceAll('.', '\\.')));
   assert.doesNotMatch(policy, new RegExp(PRODUCTION_CLERK_ORIGIN.replaceAll('.', '\\.')));
+  for (const origin of POSTHOG_INGESTION_ORIGINS) {
+    assert.match(connectDirective, new RegExp(origin.replaceAll('.', '\\.')));
+  }
+  assert.doesNotMatch(connectDirective, /\*\.posthog\.com/);
   assert.equal(
     isAllowedAuthWindowUrl(
       'https://clerk.glidelingo.com/v1/oauth_callback',

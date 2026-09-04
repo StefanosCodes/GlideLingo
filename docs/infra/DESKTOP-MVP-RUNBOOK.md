@@ -100,15 +100,17 @@ For a desktop release:
 
 The preflight produces unsigned local DMG/ZIP/update metadata and proves the package shape. Draft
 acceptance downloads and verifies the exact signed artifacts. Neither replaces the first real
-published `N → N+1` updater acceptance test. Drafts are invisible to installed apps, and macOS
-automatic updates require a signed application.
+published `N → N+1` updater acceptance test. Drafts are invisible to installed apps; the release
+pipeline remains responsible for signing and validating every distributed application and updater payload.
 
 Do not publish the draft until installed-app credential authentication, onboarding, sandbox or live
 checkout, entitlement reconciliation, launch, and applicable update acceptance have passed. Publishing
 the approved GitHub release makes it visible to already-installed apps and the website's fallback
 GitHub Releases page. Activating the website's direct DMG link is a separate approved deployment.
-Installed apps check for a newer published release on launch, ask before downloading, and ask again
-before restarting to install.
+Packaged macOS apps check once per launch and download a newer published release automatically. When
+the update is ready, the learner can restart immediately or choose Later; the restart action remains
+available in the sidebar. The public API can mark versions below its reviewed numeric-SemVer minimum
+as required, which removes Later while preserving retry, official-download, and quit recovery paths.
 
 ## Current fail-closed gates
 

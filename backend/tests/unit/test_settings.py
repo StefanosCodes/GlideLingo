@@ -69,6 +69,35 @@ def test_revenuecat_server_authorization_is_disabled_by_default() -> None:
     assert settings.revenuecat_entitlement_freshness_seconds == 900
 
 
+def test_desktop_minimum_supported_version_defaults_to_zero() -> None:
+    assert Settings(_env_file=None).desktop_minimum_supported_version == "0.0.0"
+
+
+def test_desktop_minimum_supported_version_loads_from_environment(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GLIDELINGO_DESKTOP_MINIMUM_SUPPORTED_VERSION", "12.34.56")
+
+    assert Settings(_env_file=None).desktop_minimum_supported_version == "12.34.56"
+
+
+@pytest.mark.parametrize(
+    "version",
+    [
+        "1.2",
+        "v1.2.3",
+        "01.2.3",
+        "1.2.3-beta",
+        "1.2.3+build",
+        " 1.2.3",
+        f"1.2.{('3' * 65)}",
+    ],
+)
+def test_desktop_minimum_supported_version_requires_numeric_semver(version: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, desktop_minimum_supported_version=version)
+
+
 def test_enabled_revenuecat_requires_all_server_only_secrets() -> None:
     with pytest.raises(ValidationError, match="RevenueCat API key"):
         Settings(_env_file=None, revenuecat_enabled=True)

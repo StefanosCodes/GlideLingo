@@ -83,6 +83,9 @@ done
 grep -Fq 'for_each = var.revenuecat_enabled ? local.selected_revenuecat_secrets : {}' "${production}/main.tf"
 grep -Fq 'name  = "GLIDELINGO_CORS_ORIGINS"' "${production}/main.tf"
 grep -Fq 'value = jsonencode(["https://desktop.glidelingo.com"])' "${production}/main.tf"
+grep -Fq 'name  = "GLIDELINGO_DESKTOP_MINIMUM_SUPPORTED_VERSION"' "${production}/main.tf"
+grep -Fq 'value = var.desktop_minimum_supported_version' "${production}/main.tf"
+grep -Fq 'length(var.desktop_minimum_supported_version) <= 64' "${production}/variables.tf"
 if ! sed -n '/resource "google_sql_database" "application"/,/^}/p' "${production}/main.tf" \
   | grep -Fq 'prevent_destroy = true'; then
   echo "Production application database lacks destruction protection." >&2
@@ -150,6 +153,9 @@ if grep -F '${{ needs.stage.outputs.' "${workflow}" \
 fi
 grep -Fq 'EXPECTED_CORS_ORIGINS: ${{ needs.stage.outputs.cors_origins }}' "${workflow}"
 grep -Fq 'test "$(jq -r .cors_origins <<< "${current_state}")" = "${EXPECTED_CORS_ORIGINS}"' "${workflow}"
+grep -Fq 'EXPECTED_DESKTOP_MINIMUM_SUPPORTED_VERSION: ${{ needs.stage.outputs.desktop_minimum_supported_version }}' "${workflow}"
+grep -Fq 'test "$(jq -r .desktop_minimum_supported_version <<< "${current_state}")" = "${EXPECTED_DESKTOP_MINIMUM_SUPPORTED_VERSION}"' "${workflow}"
+grep -Fq '${candidate_url}/v1/desktop/update-policy?current_version=0.0.0' "${workflow}"
 cors_round_trip_fixture='["https://desktop.glidelingo.com"]'
 shell_sentinel='$(printf should-not-execute)'
 round_trip="$(
@@ -169,7 +175,8 @@ fixture='{
   "spec":{"template":{"spec":{"containers":[{"env":[
     {"name":"GLIDELINGO_REVENUECAT_ENABLED","value":"false"},
     {"name":"GLIDELINGO_REVENUECAT_ENVIRONMENT","value":"SANDBOX"},
-    {"name":"GLIDELINGO_CORS_ORIGINS","value":"[\"https://desktop.glidelingo.com\"]"}
+    {"name":"GLIDELINGO_CORS_ORIGINS","value":"[\"https://desktop.glidelingo.com\"]"},
+    {"name":"GLIDELINGO_DESKTOP_MINIMUM_SUPPORTED_VERSION","value":"1.2.3"}
   ]}]}}},
   "status":{"observedGeneration":7,"url":"https://api.example","traffic":[
     {"revisionName":"api-00001","percent":100},
@@ -177,9 +184,24 @@ fixture='{
   ]}
 }'
 state="$("${state_reader}" candidate-deadbeef <<< "${fixture}")"
-jq -e '.generation == "7" and .live_revision == "api-00001" and .candidate_revision == "api-00002"' <<< "${state}" >/dev/null
+jq -e '.generation == "7" and .live_revision == "api-00001" and .candidate_revision == "api-00002" and .desktop_minimum_supported_version == "1.2.3"' <<< "${state}" >/dev/null
 if "${state_reader}" candidate-deadbeef <<< "$(jq '(.spec.template.spec.containers[0].env[] | select(.name == "GLIDELINGO_CORS_ORIGINS") | .value) = "[\\\"https://evil.example\\\"]"' <<< "${fixture}")" >/dev/null 2>&1; then
   echo "Deploy-state reader accepted a noncanonical production CORS origin." >&2
+  exit 1
+fi
+for invalid_minimum in 'v1.2.3' '01.2.3' '1.2' '1.2.3-beta' ''; do
+  if "${state_reader}" candidate-deadbeef <<< "$(jq --arg value "${invalid_minimum}" '(.spec.template.spec.containers[0].env[] | select(.name == "GLIDELINGO_DESKTOP_MINIMUM_SUPPORTED_VERSION") | .value) = $value' <<< "${fixture}")" >/dev/null 2>&1; then
+    echo "Deploy-state reader accepted invalid desktop minimum ${invalid_minimum}." >&2
+    exit 1
+  fi
+done
+long_minimum="$(printf '9%.0s' {1..63}).0.0"
+if "${state_reader}" candidate-deadbeef <<< "$(jq --arg value "${long_minimum}" '(.spec.template.spec.containers[0].env[] | select(.name == "GLIDELINGO_DESKTOP_MINIMUM_SUPPORTED_VERSION") | .value) = $value' <<< "${fixture}")" >/dev/null 2>&1; then
+  echo "Deploy-state reader accepted an overlong desktop minimum." >&2
+  exit 1
+fi
+if "${state_reader}" candidate-deadbeef <<< "$(jq '.spec.template.spec.containers[0].env += [{"name":"GLIDELINGO_DESKTOP_MINIMUM_SUPPORTED_VERSION","value":"1.2.3"}]' <<< "${fixture}")" >/dev/null 2>&1; then
+  echo "Deploy-state reader accepted a duplicate desktop minimum." >&2
   exit 1
 fi
 if "${state_reader}" candidate-deadbeef <<< "$(jq '.status.observedGeneration = 6' <<< "${fixture}")" >/dev/null 2>&1; then

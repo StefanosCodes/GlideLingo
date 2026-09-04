@@ -457,6 +457,353 @@ The largest current gaps are:
 9. No implemented organic or AI-referral measurement, and the current CSP blocks ordinary client analytics connections.
 10. CDN/WAF access for legitimate search and AI crawlers remains an external production verification gate.
 
+## Strategy to compete for number-one visibility
+
+No document, vendor, or implementation can guarantee the number-one result for a query. Ranking is query-dependent,
+location-dependent, device-dependent, and continuously recalculated. The operating target is therefore:
+
+> Become the most useful, demonstrable, and externally validated answer for the highest-value language-learning
+> questions, win narrow intent clusters first, and use that authority to compete for broader category terms.
+
+### Strategic thesis
+
+GlideLingo should not attempt to win by publishing the most pages or repeating "AI language tutor" more often than
+competitors. The defensible path is to own the intersection competitors usually separate:
+
+1. A structured course with a trustworthy next step.
+2. Real speaking and conversation practice.
+3. Feedback that identifies what changed and what to do next.
+4. Review that makes language available during real use.
+5. Evidence of progress tied to capability rather than activity alone.
+6. A premium, calm product experience.
+
+Every acquisition page should prove some part of that system. The public method and product should reinforce each other.
+
+### Query portfolio
+
+Until GlideLingo has first-party Search Console data and access to a reliable keyword dataset, query priority is a
+hypothesis based on product fit and visible search competition, not claimed search volume. Re-score the portfolio using
+impressions, click-through rate, conversion, competitive difficulty, and product readiness after launch.
+
+#### Tier 1: category-defining commercial queries
+
+These are the largest strategic targets and the hardest to win. They require strong product proof, external authority,
+and supporting topic clusters.
+
+| Query cluster | Intended page owner | Searcher need | Required proof |
+| --- | --- | --- | --- |
+| AI language learning app | \`/ai-language-tutor/\` | Find an AI-enabled product that teaches rather than merely chats | Working product demonstration, supported languages, method, limitations, pricing, and real learner evidence |
+| Best AI language learning app | Independent editorial coverage plus a transparent comparison resource | Decide between products | Honest comparison methodology, repeatable tests, current product data, and third-party validation |
+| AI language tutor | \`/ai-language-tutor/\` | Get personalized explanation, practice, and feedback | Clear tutor workflow, examples, safety limits, and immediate product access |
+| Language-learning app for speaking | \`/speaking-practice/\` | Become able to respond in real conversations | Voice demo, scenario examples, feedback loop, progression, and reviewed claims |
+| Language app with structured courses | \`/courses/\` | Avoid an unstructured chatbot experience | Public course model, sample curriculum, lesson flow, and connection to speaking and review |
+| Best language-learning app | Homepage and third-party coverage | Choose a complete platform | Broad product maturity, reviews, language coverage, brand demand, and trusted independent mentions |
+
+GlideLingo should not expect the broadest terms to move first. They are the result of accumulated authority, not the
+starting point.
+
+#### Tier 2: product-differentiating commercial queries
+
+These are the first realistic category opportunities because they match GlideLingo's core product thesis more precisely.
+
+| Query cluster | Intended page owner | Core angle |
+| --- | --- | --- |
+| AI speaking practice | \`/speaking-practice/\` | Guided output, correction, retry, and continued conversation |
+| AI conversation practice for language learning | \`/speaking-practice/\` | Real multi-turn scenarios connected to course progress |
+| Structured AI language course | \`/courses/\` | A full learning path rather than open-ended chat |
+| AI language tutor with curriculum | \`/ai-language-tutor/\` | Tutor behavior grounded in a planned course |
+| Language app that teaches conversation | \`/speaking-practice/\` | Conversation as a trained sequence, not a final bonus |
+| Language-learning app with feedback | \`/method/\` | Evidence-based correction and targeted next steps |
+| Language-learning app for adults | A dedicated audience page only when product evidence supports it | Premium, calm, practical learning without childish pressure |
+| Desktop language-learning app | \`/download/\` | A first-class desktop learning workflow |
+
+#### Tier 3: high-intent problem queries
+
+These queries can create earlier wins and introduce GlideLingo before the searcher has chosen a product category.
+
+| Problem cluster | Canonical resource |
+| --- | --- |
+| I understand a language but cannot speak it | A definitive guide linked to speaking practice |
+| How to practice speaking a language alone | A practical guide with a usable exercise or demo |
+| How to stop translating in your head | A method guide with retrieval and production exercises |
+| How to stop freezing when speaking another language | A speaking-confidence guide with recovery practice |
+| How to become conversational in another language | A realistic capability roadmap |
+| How to remember vocabulary while speaking | A review and retrieval guide |
+| How to build a language-learning routine | A repeatable weekly plan connected to the product |
+| Why language apps do not make me fluent | A balanced explanation of product limitations and missing practice |
+| How much speaking practice do I need | An evidence-backed planning guide that avoids false precision |
+| How to measure language-learning progress | A capability-based framework tied to GlideLingo's method |
+
+Each problem page must solve the problem without requiring a purchase. Its product CTA should be the natural next action,
+not a substitute for the answer.
+
+#### Tier 4: supported-language queries
+
+Every released language can create a focused path into the broader platform:
+
+- \`AI {language} tutor\`
+- \`learn {language} online\`
+- \`{language} course for beginners\`
+- \`{language} speaking practice\`
+- \`{language} pronunciation practice\`
+- \`how to start speaking {language}\`
+- \`best app to learn {language} for conversation\`
+- \`{language} for travel\`
+- \`{language} for heritage speakers\` when the course and review expertise support that audience
+
+Only instantiate these pages for languages with real, reviewed content. Template reuse is allowed for structure and
+components; page copy, examples, audio, reviewer evidence, and learning guidance must be language-specific.
+
+### Competitive ladder
+
+The ranking program advances through four stages.
+
+#### Stage 1: eligibility
+
+Goal: search and answer systems can reliably retrieve the right canonical pages.
+
+Exit criteria:
+
+- Priority pages return \`200\`, render useful static HTML, self-canonicalize, appear in the sitemap, and are linked.
+- Google Search Console and Bing Webmaster Tools verify indexing.
+- Desired search and answer crawlers reach production without CDN or WAF denial.
+- Structured data validates and matches visible content.
+- Conversion and referral events are measurable.
+
+#### Stage 2: relevance
+
+Goal: GlideLingo has the clearest page for each chosen intent.
+
+Exit criteria:
+
+- One canonical page owns each query cluster.
+- Titles, headings, introductions, examples, and internal links clearly establish the subject.
+- Supporting pages form coherent clusters around courses, speaking, feedback, review, progress, and supported languages.
+- Search impressions begin appearing for non-brand queries.
+- Pages do not cannibalize one another for the same intent.
+
+#### Stage 3: superiority
+
+Goal: priority pages are materially more useful than the current leading results.
+
+Before publishing, compare the page with the leading results for the target query. It must exceed them in at least two
+defensible dimensions:
+
+- First-party product proof.
+- Original data or repeatable testing.
+- Expert or native-speaker review.
+- Practical utility or an interactive tool.
+- Depth and clarity of explanation.
+- Better examples, audio, transcripts, or visual demonstrations.
+- More accurate and transparent comparison.
+- More current product information.
+- Stronger connection between advice and an actionable learning system.
+
+If the proposed page merely summarizes what the existing results already say, do not publish it.
+
+#### Stage 4: authority
+
+Goal: independent sources validate GlideLingo as a credible answer.
+
+Exit criteria:
+
+- Qualified teachers, creators, reviewers, communities, or publications mention and link to useful GlideLingo resources.
+- Branded search demand grows.
+- Independent comparisons include GlideLingo based on real access and testing.
+- First-party research or public tools earn legitimate citations.
+- GlideLingo begins appearing as a linked source across a fixed set of relevant AI questions.
+- Qualified organic and AI-referred traffic converts into course starts and subscriptions.
+
+### Page-winning formula
+
+Each strategic page should be built as a complete answer and product proof surface.
+
+1. **Answer:** Give the direct answer or value proposition immediately.
+2. **Demonstrate:** Let the visitor see, hear, or try the relevant experience.
+3. **Explain:** Show how the method works and why each step exists.
+4. **Prove:** Add first-party evidence, reviewed examples, transparent testing, or credible sources.
+5. **Compare:** Explain where the approach is stronger, weaker, or different without misleading claims.
+6. **Resolve objections:** Address price, language availability, level, device support, privacy, limitations, and human
+   teacher compatibility when relevant.
+7. **Connect:** Link to the parent hub and adjacent supporting resources.
+8. **Convert:** Offer a CTA that matches the visitor's intent and the product's real release state.
+9. **Maintain:** Display accurate dates and update the page when the product or evidence changes.
+
+### Citation-worthy assets
+
+Articles alone will not create a durable advantage. GlideLingo should build assets that other pages and answer systems
+have a reason to reference.
+
+Priority assets:
+
+1. **The GlideLingo learning method:** Publish the full Course → Mission → Lesson → Experience → Evidence → Review model
+   and the Encounter → Notice → Retrieve → Produce → Perform → Revisit learning cycle with concrete examples.
+2. **A public speaking demo:** Let a visitor experience a short representative conversation or watch a precise,
+   transcript-supported first-party demonstration without creating an account.
+3. **Conversation readiness framework:** Define observable capabilities for beginning, responding, recovering, and
+   continuing rather than publishing an unsupported numeric fluency score.
+4. **Language-specific pronunciation libraries:** Use reviewed audio, stress, transliteration where useful, common errors,
+   and practical examples.
+5. **Original learner insight reports:** Publish only sufficiently aggregated, privacy-reviewed findings, such as common
+   speaking breakdowns or which forms of review lead to successful later retrieval.
+6. **Transparent product evaluations:** Compare structured lessons, conversation quality, correction quality, review,
+   progress evidence, language coverage, and cost using a repeatable methodology. Disclose GlideLingo's authorship and
+   never disguise marketing as independent research.
+7. **Reusable practice resources:** Scenario checklists, recovery phrase guides, weekly plans, and printable or
+   interactive exercises that remain useful outside the product.
+
+### Authority and distribution plan
+
+Ranking number one for valuable commercial queries requires trusted references beyond glidelingo.com.
+
+#### Expert network
+
+- Recruit qualified language educators and native-speaker reviewers for supported-language clusters.
+- Publish real reviewer biographies, scope, and review dates.
+- Invite experts to contribute examples or explanations with editorial control and attribution.
+- Build relationships with cultural organizations, language departments, tutors, and heritage communities.
+
+#### Creator and affiliate network
+
+- Give relevant language and travel creators real product access.
+- Encourage honest demonstrations and reviews rather than scripted praise.
+- Provide deep links to the most relevant language or speaking page.
+- Disclose affiliate relationships.
+- Track which external placements produce course starts and retained subscribers, not only clicks.
+
+#### Editorial and digital public relations
+
+- Pitch original findings, public tools, meaningful product releases, and learner resources.
+- Target language-learning publications, education technology coverage, travel media, diaspora publications, newsletters,
+  podcasts, and app reviewers.
+- Maintain a current public press and product-facts page so third parties cite accurate claims.
+- Do not purchase links or publish fake "independent" rankings.
+
+#### Community participation
+
+- Participate where learners already discuss real problems.
+- Answer the question fully before mentioning the product.
+- Do not automate promotional replies or manufacture community consensus.
+- Use recurring questions and objections as research for stronger first-party pages.
+
+### Twelve-week launch sequence
+
+The sequence assumes the product and claims exposed by each page are real. Defer any page whose required proof is not
+ready.
+
+#### Weeks 1–2: make the site eligible and measurable
+
+- Complete the P0 technical foundation.
+- Verify Google and Bing properties and submit the sitemap.
+- Resolve production crawl, canonical, redirect, schema, and measurement issues.
+- Define the first 40-query search and AI prompt benchmark.
+- Record the initial indexation, ranking, citation, and conversion baseline.
+
+#### Weeks 3–4: establish category ownership
+
+Publish or materially rebuild:
+
+- Homepage.
+- \`/method/\`.
+- \`/courses/\`.
+- \`/speaking-practice/\`.
+- \`/ai-language-tutor/\`.
+- \`/languages/\`.
+- \`/pricing/\`.
+- \`/download/\`.
+- \`/about/\`.
+
+The homepage remains multi-language. Each supporting page owns one specific product job and links to the others through a
+clear hub structure.
+
+#### Weeks 5–8: win differentiated and problem intent
+
+- Publish the first six to eight Tier 2 and Tier 3 resources.
+- Replace generic claims with reviewed examples, demos, and product evidence.
+- Add the first complete supported-language hub and only the spokes supported by real material.
+- Begin expert, creator, and editorial outreach around the strongest public resource.
+- Refresh pages based on actual queries and visitor behavior rather than adding volume blindly.
+
+#### Weeks 9–12: create authority
+
+- Release one citation-worthy first-party asset or transparent report.
+- Secure legitimate expert contributions and product evaluations.
+- Expand the first supported-language cluster based on measured demand.
+- Update comparison and product pages with verified evidence.
+- Review the 40-query benchmark across Google, Bing/Copilot, ChatGPT, and Perplexity.
+- Decide the next cluster using conversion opportunity, evidence readiness, and competitive gaps.
+
+### Publishing cadence
+
+The default ceiling during the first twelve weeks is:
+
+- One strategic commercial or product page when the product proof is ready.
+- One or two substantial supporting resources per week.
+- One meaningful refresh or evidence upgrade per week.
+- Ongoing distribution for existing assets.
+
+This is not a quota. Publish nothing when the proposed work does not improve the best available answer.
+
+### Search and AI benchmark
+
+Maintain a versioned benchmark of at least 40 questions divided across:
+
+- Broad category discovery.
+- Speaking and conversation practice.
+- Structured-course discovery.
+- Problem and pain-point questions.
+- Supported-language discovery.
+- Comparisons.
+- Brand and product verification.
+
+For each query and answer system, record:
+
+- Whether GlideLingo appears.
+- Linked citation versus unlinked mention.
+- Position or prominence.
+- Which GlideLingo URL appears.
+- Which competitors appear.
+- Which sources support those competitors.
+- Whether the answer accurately describes GlideLingo.
+- Landing-page conversion from measurable referrals.
+
+Run the benchmark from a consistent environment. AI responses vary, so use repeated observations and trends rather than
+treating one answer as a stable ranking.
+
+### Decision score for new pages
+
+Before authorizing a strategic page, score each dimension from 0–3:
+
+| Dimension | Question |
+| --- | --- |
+| Product fit | Does GlideLingo solve this exact need today? |
+| Commercial value | Is the searcher plausibly choosing or using a language-learning product? |
+| Evidence readiness | Can the page demonstrate or substantiate its claims? |
+| Differentiation | Can GlideLingo provide something leading pages do not? |
+| Authority potential | Would a credible third party have a reason to cite this page? |
+| Cluster support | Does the page strengthen an existing hub rather than create an isolated topic? |
+| Maintainability | Can the information remain accurate as the product changes? |
+
+Prioritize pages with the strongest combined score. A high estimated search volume cannot compensate for weak product fit
+or absent evidence.
+
+### Number-one scorecard
+
+The program is moving toward number-one visibility when:
+
+- Priority URLs are indexed and receiving non-brand impressions.
+- GlideLingo owns top positions for narrow Tier 3 or Tier 4 queries.
+- Those wins expand into Tier 2 commercial clusters.
+- External sites cite the method, tools, examples, or research.
+- AI systems cite GlideLingo for relevant questions without being prompted with the brand name.
+- Organic and AI traffic produces course starts, repeat learning activity, and paid conversion.
+- Branded search demand and direct mentions grow.
+- Broader Tier 1 rankings improve after authority is established.
+
+The goal is not to report a vanity ranking while the page produces no learners. The business outcome is qualified
+discovery that turns into speaking practice, course progression, retention, and revenue.
+
+
 ## Implementation plan
 
 ### P0: discovery and measurement foundation

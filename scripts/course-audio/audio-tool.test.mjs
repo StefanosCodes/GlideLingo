@@ -8,11 +8,23 @@ import {
   estimateClips,
   generateAudio,
   hashClip,
+  normalizeAudioLessons,
   selectClips,
   validateDefinitions,
   validateGenerated,
   withRetry,
 } from './audio-tool.mjs';
+
+test('schema missions and compatibility presentation share one audio lesson boundary', () => {
+  const lessons = normalizeAudioLessons(
+    [{ lessons: [{ id: 'lesson-1', activities: [{ id: 'hear', audioId: 'hello' }] }] }],
+    [{ lessonId: 'lesson-1', blocks: [{ type: 'listen', audioId: 'goodbye' }] }],
+  );
+  assert.deepEqual(lessons, [{
+    lessonId: 'lesson-1',
+    blocks: [{ id: 'hear', audioId: 'hello' }, { type: 'listen', audioId: 'goodbye' }],
+  }]);
+});
 
 function fixture(root) {
   const profile = {

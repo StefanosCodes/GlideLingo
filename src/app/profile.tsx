@@ -6,6 +6,7 @@ import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { ProgressBar } from '@/components/ui/progress-bar';
+import { availableModulesForCourse } from '@/constants/catalog';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
 import { AccountSummary } from '@/features/auth/account-summary';
 import {
@@ -55,18 +56,32 @@ export default function ProfileScreen() {
   const percent = Math.round(progress * 100);
   const capabilities = strongestCapabilityEvidence(lessonEvidence);
   const strongest = capabilities[0] ?? null;
+  const availableUnitCount = enrolledCourse ? availableModulesForCourse(enrolledCourse).length : 0;
 
   function setRhythm(goal: WeeklyPracticeGoal) {
     setWeeklyPracticeGoal(goal);
   }
 
+  function goBack() {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace('/');
+  }
+
   return (
     <ScreenFrame>
+      <Pressable accessibilityLabel="Back to learning" accessibilityRole="button" onPress={goBack} style={styles.back}>
+        <ThemedText type="footnote" themeColor="textSecondary">
+          ← Back to learning
+        </ThemedText>
+      </Pressable>
       <View style={styles.intro}>
         <ThemedText type="eyebrow" themeColor="textSecondary">
           PROFILE · {language.name.toUpperCase()}
         </ThemedText>
-        <ThemedText type="display">Your learning, kept in one place.</ThemedText>
+        <ThemedText type="display">Your learning in one place.</ThemedText>
         <ThemedText type="body" themeColor="textSecondary" style={styles.introCopy}>
           Course completion, practice rhythm, and demonstrated ability stay separate so every claim remains meaningful.
         </ThemedText>
@@ -80,7 +95,7 @@ export default function ProfileScreen() {
           <ThemedText type="title2">{enrolledCourse?.title ?? `${language.name} learner`}</ThemedText>
           <ThemedText type="footnote" themeColor="textSecondary">
             {enrolledCourse
-              ? `${completedModuleIds.length} of ${enrolledCourse.modules.length} quests complete · ${percent}% of the course path`
+              ? `${completedModuleIds.length} of ${availableUnitCount} authored ${availableUnitCount === 1 ? 'unit' : 'units'} complete · ${percent}% of available lessons`
               : language.available
                 ? 'Choose a course to begin building your profile.'
                 : 'No published course is available yet.'}
@@ -103,7 +118,7 @@ export default function ProfileScreen() {
             {strongest?.capability.canDo
               ?? currentModule?.canDo
               ?? (language.available
-                ? 'Start a quest to collect ability evidence.'
+                ? 'Start a lesson to collect ability evidence.'
                 : `${language.name} has no published capability path yet.`)}
           </ThemedText>
           <ThemedText type="footnote" themeColor="textSecondary">
@@ -114,7 +129,7 @@ export default function ProfileScreen() {
                   ? 'Built with support or recovery. A fresh first attempt can demonstrate it.'
                   : 'Encountered with instruction. It still needs useful practice.'
               : currentModule
-                ? `Current quest: ${currentModule.title}. This is the target, not evidence yet.`
+                ? `Current unit: ${currentModule.title}. This is the target, not evidence yet.`
                 : 'Nothing is inferred from time spent or empty taps.'}
           </ThemedText>
         </GlideSurface>
@@ -266,6 +281,7 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
+  back: { alignSelf: 'flex-start', justifyContent: 'center', minHeight: 44 },
   intro: { gap: Spacing.two, paddingBottom: Spacing.one },
   introCopy: { maxWidth: 560 },
   identityCard: { alignItems: 'center', flexDirection: 'row', gap: Spacing.three },

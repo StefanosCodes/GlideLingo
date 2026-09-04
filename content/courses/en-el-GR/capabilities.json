@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "capabilities": [
+    {
+      "schemaVersion": 1,
+      "id": "el-script-vowels-a-e-i",
+      "version": "1.0.0",
+      "courseId": "el-from-zero",
+      "canDo": "I can recognize α, ε, and ι in a new Greek syllable.",
+      "domain": "Script access",
+      "situation": "Reading a new bounded Greek syllable",
+      "communicationModes": ["listening", "reading"],
+      "prerequisiteCapabilityIds": [],
+      "linguisticResources": ["α", "ε", "ι", "να", "νε", "νι", "αν", "ιν"],
+      "pragmaticCulturalResources": ["No pragmatic claim is made by this script-access capability"],
+      "teachingMissionIds": ["el-letters-sound-map"],
+      "practiceEvidence": {
+        "minimumOpportunities": 2,
+        "criteria": ["Recognize an authored grapheme or sound pattern with support"]
+      },
+      "demonstrationCriteria": {
+        "minimumOpportunities": 2,
+        "criteria": ["Read a varied syllable correctly on the first attempt"],
+        "permittedSupport": []
+      },
+      "retentionCriteria": {
+        "minimumOpportunities": 2,
+        "criteria": ["Read a changed syllable after a delay"],
+        "minimumDelayHours": 24,
+        "permittedSupport": []
+      },
+      "permittedSupport": ["Saved audio", "Constrained choice", "Authored corrective feedback"],
+      "sourceRefs": ["https://www.greek-language.gr/"]
+    }
+  ]
+}

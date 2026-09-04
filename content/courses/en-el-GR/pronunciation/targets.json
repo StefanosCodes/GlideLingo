@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "targets": [
+    {
+      "schemaVersion": 1,
+      "id": "el-alpha-self-compare",
+      "version": "1.0.0",
+      "courseId": "el-from-zero",
+      "text": "α",
+      "locale": "el-GR",
+      "targetVariety": "Standard Modern Greek",
+      "syllables": ["α"],
+      "stressTarget": "No stress claim is assessed for this isolated grapheme.",
+      "targetAudioIds": ["el-letter-alpha"],
+      "acceptableVariants": ["Self-comparison only; no automated variant judgment"],
+      "commonLearnerErrors": ["No automated learner-error classification is enabled"],
+      "feedbackTemplates": [
+        {
+          "code": "self-compare-only",
+          "template": "Listen again and compare your recording without an automated score."
+        }
+      ],
+      "assessmentEligibility": {
+        "eligible": false
+      },
+      "review": {
+        "reviewer": "pending-qualified-review",
+        "status": "pending",
+        "reviewedAt": null
+      }
+    }
+  ]
+}

@@ -5,7 +5,7 @@ import { ScreenFrame } from '@/components/screen-frame';
 import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
-import { getCourse } from '@/constants/catalog';
+import { availableLessonsForModule, availableModulesForCourse, getCourse } from '@/constants/catalog';
 import { Spacing } from '@/constants/theme';
 import { useLearning } from '@/providers/learning-provider';
 
@@ -36,7 +36,13 @@ export default function CoursePreviewScreen() {
     );
   }
 
-  const live = language.available && course.languageId === language.id;
+  const availableLessonCount = course.modules.reduce(
+    (sum, module) => sum + availableLessonsForModule(module).length,
+    0,
+  );
+  const availableModuleCount = availableModulesForCourse(course).length;
+  const plannedModuleCount = course.modules.length - availableModuleCount;
+  const live = language.available && course.languageId === language.id && availableLessonCount > 0;
   const enrolled = enrolledCourse?.id === course.id;
 
   return (
@@ -59,13 +65,16 @@ export default function CoursePreviewScreen() {
 
       <GlideSurface padding="roomy" style={styles.block}>
         <ThemedText type="eyebrow" themeColor="textSecondary">
-          YOU WILL BE ABLE TO
+          PLANNED COURSE OUTCOMES
         </ThemedText>
         {course.canDos.map((item) => (
           <ThemedText key={item} type="callout">
             {item}
           </ThemedText>
         ))}
+        <ThemedText type="footnote" themeColor="textSecondary">
+          These outcomes describe the roadmap. Only the authored content counted below is available now.
+        </ThemedText>
       </GlideSurface>
 
       <GlideSurface padding="roomy" style={styles.block}>
@@ -73,12 +82,12 @@ export default function CoursePreviewScreen() {
           STRUCTURE
         </ThemedText>
         <ThemedText type="title3">
-          {course.modules.length} quests · {course.modules.reduce((sum, module) => sum + module.lessons.length, 0)}{' '}
-          lessons
+          {availableModuleCount} authored {availableModuleCount === 1 ? 'unit' : 'units'} · {availableLessonCount} authored {availableLessonCount === 1 ? 'lesson' : 'lessons'}
         </ThemedText>
         <ThemedText type="footnote" themeColor="textSecondary">
-          Each quest is a real-world job. Lessons inside it stay 8–15 minutes. The path is authored, not generated
-          when you start.
+          {plannedModuleCount > 0
+            ? `${plannedModuleCount} planned ${plannedModuleCount === 1 ? 'unit is' : 'units are'} not available. Future outlines cannot be started until their learning content is authored and reviewed.`
+            : 'Each authored unit builds toward a real-world ability.'}
         </ThemedText>
       </GlideSurface>
 

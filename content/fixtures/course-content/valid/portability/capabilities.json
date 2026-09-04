@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "capabilities": [
+    {
+      "schemaVersion": 1,
+      "id": "portable-request-item",
+      "version": "1.0.0",
+      "courseId": "en-x-glide-portability",
+      "canDo": "I can make one fictional item request and confirm the intended meaning.",
+      "domain": "Portability fixture",
+      "situation": "A bounded fictional service exchange",
+      "communicationModes": ["reading", "written-production", "spoken-interaction"],
+      "prerequisiteCapabilityIds": [],
+      "linguisticResources": ["sipa", "sipa na"],
+      "pragmaticCulturalResources": ["Use the authored neutral fixture form"],
+      "teachingMissionIds": ["portable-request-mission"],
+      "practiceEvidence": {
+        "minimumOpportunities": 2,
+        "criteria": ["Retrieve or construct the request with authored support"]
+      },
+      "demonstrationCriteria": {
+        "minimumOpportunities": 2,
+        "criteria": ["Complete varied authored request checks"],
+        "permittedSupport": ["One authored hint"]
+      },
+      "retentionCriteria": {
+        "minimumOpportunities": 2,
+        "criteria": ["Retrieve the request after a delay in a changed prompt"],
+        "minimumDelayHours": 24,
+        "permittedSupport": []
+      },
+      "permittedSupport": ["Authored model", "Constrained choice", "One authored hint"],
+      "sourceRefs": ["https://example.invalid/glidelingo/portability-fixture"]
+    }
+  ]
+}

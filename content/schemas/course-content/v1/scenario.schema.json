@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glidelingo.app/schemas/course-content/v1/scenario.schema.json",
+  "title": "GlideLingo guided scenario record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "version",
+    "courseId",
+    "moduleId",
+    "targetCapabilityIds",
+    "supportingCapabilityIds",
+    "setting",
+    "learnerGoal",
+    "role",
+    "languageLevel",
+    "allowedResources",
+    "authoredOpening",
+    "hintLadder",
+    "correctionPolicy",
+    "targetTurnRange",
+    "maximumDurationSeconds",
+    "successObservations",
+    "completionRule",
+    "evidenceMapping",
+    "safeExits",
+    "conversationProfileId"
+  ],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "id": { "$ref": "common.schema.json#/$defs/id" },
+    "version": { "$ref": "common.schema.json#/$defs/version" },
+    "courseId": { "$ref": "common.schema.json#/$defs/id" },
+    "moduleId": { "$ref": "common.schema.json#/$defs/id" },
+    "targetCapabilityIds": { "$ref": "common.schema.json#/$defs/nonEmptyIdList" },
+    "supportingCapabilityIds": { "$ref": "common.schema.json#/$defs/idList" },
+    "setting": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "learnerGoal": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "persona"],
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "persona": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+      }
+    },
+    "languageLevel": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "allowedResources": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+    "authoredOpening": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "hintLadder": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+    "correctionPolicy": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "targetTurnRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "maximum"],
+      "properties": {
+        "minimum": { "type": "integer", "minimum": 1 },
+        "maximum": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "maximumDurationSeconds": { "type": "integer", "minimum": 30, "maximum": 3600 },
+    "successObservations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "description"],
+        "properties": {
+          "id": { "$ref": "common.schema.json#/$defs/id" },
+          "description": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+        }
+      }
+    },
+    "completionRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "requiredObservationIds"],
+      "properties": {
+        "type": { "const": "all-required-observations" },
+        "requiredObservationIds": { "$ref": "common.schema.json#/$defs/nonEmptyIdList" }
+      }
+    },
+    "evidenceMapping": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["observationId", "capabilityId", "level"],
+        "properties": {
+          "observationId": { "$ref": "common.schema.json#/$defs/id" },
+          "capabilityId": { "$ref": "common.schema.json#/$defs/id" },
+          "level": { "enum": ["practice", "demonstration"] }
+        }
+      }
+    },
+    "safeExits": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+    "conversationProfileId": { "$ref": "common.schema.json#/$defs/id" }
+  }
+}

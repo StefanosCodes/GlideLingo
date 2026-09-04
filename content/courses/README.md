@@ -32,6 +32,7 @@ Create a directory such as `content/courses/en-fr-FR` containing:
 
 - `audio-profiles.json` with the locale, voice, encoding, and current price assumption;
 - `audio-manifest.json` with globally unique clip IDs, lesson IDs, profile IDs, and source text;
-- `missions/*.json` with lesson blocks that reference those clip IDs.
+- schema-based `missions/*.json` with lesson activities that reference those clip IDs;
+- optional `compatibility/*.json` presentation blocks while an existing lesson is being migrated.
 
 The generator discovers audio-enabled course directories automatically and writes locale-scoped assets plus one static Metro registry. No playback code or provider URL changes are needed. Revisit the pricing assumption before a large batch; estimates are safeguards, not invoices.

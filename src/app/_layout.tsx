@@ -129,10 +129,16 @@ function AppNavigation({ signedIn }: { signedIn: boolean }) {
           <Stack.Screen name="(app)" />
           <Stack.Screen name="course/[id]" />
           <Stack.Screen name="lesson/[id]" />
+          <Stack.Screen name="profile" />
           <Stack.Screen name="rhythm" />
           <Stack.Screen name="kit" />
           <Stack.Screen name="diagnostics" />
           <Stack.Screen name="subscription" />
+          <Stack.Screen name="letters" />
+          <Stack.Screen name="path" />
+          <Stack.Screen name="phrases" />
+          <Stack.Screen name="quests" />
+          <Stack.Screen name="review" />
         </Stack.Protected>
         <Stack.Screen name="sso-callback" />
       </Stack>

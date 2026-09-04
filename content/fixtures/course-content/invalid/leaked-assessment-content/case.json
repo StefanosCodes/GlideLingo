@@ -1,0 +1,14 @@
+{
+  "description": "A checkpoint activity is reused in the delayed review pool.",
+  "operations": [
+    {
+      "op": "replace",
+      "file": "missions/portable-request-mission.json",
+      "path": "/reviewActivityIds/0",
+      "value": "portable-checkpoint"
+    }
+  ],
+  "expectedCode": "assessment-leak",
+  "expectedFile": "missions/portable-request-mission.json",
+  "expectedPointer": "/reviewActivityIds/0"
+}

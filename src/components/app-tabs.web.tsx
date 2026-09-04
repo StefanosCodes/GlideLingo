@@ -1,22 +1,25 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { Image } from 'expo-image';
-import { usePathname } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { Tabs, TabList, TabTrigger, TabSlot, type TabListProps, type TabTriggerSlotProps } from 'expo-router/ui';
 import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
+import { CoursePicker } from './course-picker';
 import { ThemedText } from './themed-text';
 import {
+  ChartIcon,
   HouseIcon,
-  LettersIcon,
   MapIcon,
   MoonIcon,
   PanelLeftIcon,
   PhrasesIcon,
   ProfileIcon,
+  ReviewIcon,
   SunIcon,
 } from './ui/hackathon-icons.web';
 
 import { Fonts, Radii } from '@/constants/theme';
+import { primaryDestinations, type PrimaryDestinationId } from '@/features/product-shell/navigation';
 import { useTheme, useThemeController } from '@/hooks/use-theme';
 import { useDesktopUpdate } from '@/features/desktop-update/context';
 import { DesktopUpdateSidebarStatus } from '@/features/desktop-update/desktop-update-view.web';
@@ -39,21 +42,11 @@ export default function AppTabs() {
     <Tabs style={styles.shell}>
       <TabList asChild>
         <Sidebar>
-          <TabTrigger name="home" href="/" asChild>
-            <TabButton icon="home">Home</TabButton>
-          </TabTrigger>
-          <TabTrigger name="quests" href="/quests" asChild>
-            <TabButton icon="quests">Quests</TabButton>
-          </TabTrigger>
-          <TabTrigger name="letters" href="/letters" asChild>
-            <TabButton icon="letters">Letters</TabButton>
-          </TabTrigger>
-          <TabTrigger name="phrases" href="/phrases" asChild>
-            <TabButton icon="phrases">Phrases</TabButton>
-          </TabTrigger>
-          <TabTrigger name="profile" href="/profile" asChild>
-            <TabButton icon="profile">Profile</TabButton>
-          </TabTrigger>
+          {primaryDestinations.map((destination) => (
+            <TabTrigger key={destination.id} name={destination.id} href={destination.href} asChild>
+              <TabButton icon={destination.id}>{destination.label}</TabButton>
+            </TabTrigger>
+          ))}
         </Sidebar>
       </TabList>
       <TabSlot style={styles.slot} />
@@ -67,7 +60,7 @@ function TabButton({
   icon,
   onPress,
   ...props
-}: TabTriggerSlotProps & { icon: 'home' | 'quests' | 'letters' | 'phrases' | 'profile' }) {
+}: TabTriggerSlotProps & { icon: PrimaryDestinationId }) {
   const theme = useTheme();
   const collapsed = useContext(CollapsedContext);
   const color = isFocused ? theme.text : theme.textSecondary;
@@ -99,6 +92,7 @@ function TabButton({
 }
 
 function Sidebar(props: TabListProps) {
+  const router = useRouter();
   const theme = useTheme();
   const { scheme, toggleTheme } = useThemeController();
   const { width } = useWindowDimensions();
@@ -170,25 +164,47 @@ function Sidebar(props: TabListProps) {
           {props.children}
         </ScrollView>
 
-        <DesktopUpdateSidebarStatus collapsed={collapsed} />
-
-        <Pressable
-          accessibilityLabel={`Switch to ${switchingToDark ? 'dark' : 'light'} mode`}
-          accessibilityRole="button"
-          accessibilityState={{ selected: scheme === 'dark' }}
-          onPress={toggleTheme}
-          style={({ pressed, hovered }: PressState) => [
-            styles.footerButton,
-            collapsed && styles.footerButtonCollapsed,
-            { backgroundColor: pressed || hovered ? theme.backgroundSelected : 'transparent' },
-          ]}>
-          {switchingToDark ? <MoonIcon color={theme.textSecondary} /> : <SunIcon color={theme.textSecondary} />}
-          {!collapsed && (
-            <ThemedText style={styles.footerLabel} themeColor="textSecondary">
-              {switchingToDark ? 'Dark mode' : 'Light mode'}
-            </ThemedText>
-          )}
-        </Pressable>
+        <View style={styles.footer}>
+          {!collapsed ? (
+            <View style={styles.coursePicker}>
+              <CoursePicker />
+            </View>
+          ) : null}
+          <DesktopUpdateSidebarStatus collapsed={collapsed} />
+          <Pressable
+            accessibilityLabel="Profile and settings"
+            accessibilityRole="button"
+            onPress={() => router.push('/profile')}
+            style={({ pressed, hovered }: PressState) => [
+              styles.footerButton,
+              collapsed && styles.footerButtonCollapsed,
+              { backgroundColor: pressed || hovered ? theme.backgroundSelected : 'transparent' },
+            ]}>
+            <ProfileIcon color={theme.textSecondary} />
+            {!collapsed && (
+              <ThemedText style={styles.footerLabel} themeColor="textSecondary">
+                Profile and settings
+              </ThemedText>
+            )}
+          </Pressable>
+          <Pressable
+            accessibilityLabel={`Switch to ${switchingToDark ? 'dark' : 'light'} mode`}
+            accessibilityRole="button"
+            accessibilityState={{ selected: scheme === 'dark' }}
+            onPress={toggleTheme}
+            style={({ pressed, hovered }: PressState) => [
+              styles.footerButton,
+              collapsed && styles.footerButtonCollapsed,
+              { backgroundColor: pressed || hovered ? theme.backgroundSelected : 'transparent' },
+            ]}>
+            {switchingToDark ? <MoonIcon color={theme.textSecondary} /> : <SunIcon color={theme.textSecondary} />}
+            {!collapsed && (
+              <ThemedText style={styles.footerLabel} themeColor="textSecondary">
+                {switchingToDark ? 'Dark mode' : 'Light mode'}
+              </ThemedText>
+            )}
+          </Pressable>
+        </View>
       </View>
     </CollapsedContext.Provider>
   );
@@ -198,14 +214,14 @@ function NavGlyph({
   name,
   color,
 }: {
-  name: 'home' | 'quests' | 'letters' | 'phrases' | 'profile';
+  name: PrimaryDestinationId;
   color: string;
 }) {
   if (name === 'home') return <HouseIcon color={color} />;
-  if (name === 'quests') return <MapIcon color={color} />;
-  if (name === 'letters') return <LettersIcon color={color} />;
-  if (name === 'phrases') return <PhrasesIcon color={color} />;
-  return <ProfileIcon color={color} />;
+  if (name === 'course') return <MapIcon color={color} />;
+  if (name === 'speak') return <PhrasesIcon color={color} />;
+  if (name === 'practice') return <ReviewIcon color={color} />;
+  return <ChartIcon color={color} />;
 }
 
 const styles = StyleSheet.create({
@@ -285,4 +301,6 @@ const styles = StyleSheet.create({
   },
   footerButtonCollapsed: { justifyContent: 'center', paddingHorizontal: 0 },
   footerLabel: { fontFamily: Fonts.sans, fontSize: 14, lineHeight: 20 },
+  footer: { gap: 2 },
+  coursePicker: { alignItems: 'stretch', paddingBottom: 4, paddingHorizontal: 4 },
 });

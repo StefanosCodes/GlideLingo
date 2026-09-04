@@ -1,10 +1,16 @@
-import elLettersOne from '../../content/courses/en-el-GR/missions/el-letters-1.json';
-
 import type {
   CommunicationMode,
   EvidenceLevel,
   LessonCapability,
 } from '@/features/learning-progress/evidence-policy';
+import {
+  bridgeCoursePackageLesson,
+  type CompatibilityPresentation,
+} from '@/features/course-catalog/compat/catalog-adapter';
+import {
+  enElGrCompatibilityPresentation,
+  enElGrPackageSource,
+} from '@/features/course-catalog/loader/course-packages.generated';
 
 export type LanguageId = 'el' | 'es' | 'fr';
 
@@ -45,6 +51,7 @@ export type Lesson = {
   id: string;
   title: string;
   durationMin: number;
+  contentStatus?: 'authored' | 'placeholder';
   blocks?: LessonBlock[];
   beats?: SittingBeat[];
   reviewBeats?: SittingBeat[];
@@ -75,7 +82,7 @@ export const languages: Language[] = [
   { id: 'fr', name: 'French', region: 'France', flag: '🇫🇷', code: 'FR', available: false },
 ];
 
-export const courses: Course[] = [
+const compatibilityCatalog: Course[] = [
   {
     id: 'el-from-zero',
     languageId: 'el',
@@ -97,11 +104,6 @@ export const courses: Course[] = [
             id: 'el-letters-1',
             title: 'The sound of Greek',
             durationMin: 8,
-            blocks: elLettersOne.blocks as LessonBlock[],
-            beats: elLettersOne.beats as SittingBeat[],
-            reviewBeats: elLettersOne.reviewBeats as SittingBeat[],
-            capability: elLettersOne.capability as LessonCapability,
-            introducedModes: elLettersOne.introducedModes as CommunicationMode[],
           },
           { id: 'el-letters-2', title: 'The alphabet', durationMin: 10 },
           { id: 'el-letters-3', title: 'First words', durationMin: 8 },
@@ -211,6 +213,12 @@ export const courses: Course[] = [
   },
 ];
 
+export const courses = bridgeCoursePackageLesson(
+  compatibilityCatalog,
+  enElGrPackageSource,
+  enElGrCompatibilityPresentation as CompatibilityPresentation,
+);
+
 export function getLanguage(id: LanguageId) {
   const language = languages.find((item) => item.id === id);
   if (!language) throw new Error(`Unknown language: ${id}`);
@@ -249,8 +257,26 @@ export function isLessonComplete(lessonId: string, completedLessonIds: string[])
   return completedLessonIds.includes(lessonId);
 }
 
+export function isLessonAvailable(lesson: Lesson) {
+  return lesson.contentStatus !== 'placeholder';
+}
+
+export function getAvailableLesson(course: Course, lessonId: string) {
+  const found = getLesson(course, lessonId);
+  return found && isLessonAvailable(found.lesson) ? found : null;
+}
+
+export function availableLessonsForModule(module: CourseModule) {
+  return module.lessons.filter(isLessonAvailable);
+}
+
+export function availableModulesForCourse(course: Course) {
+  return course.modules.filter((module) => availableLessonsForModule(module).length > 0);
+}
+
 export function isModuleComplete(module: CourseModule, completedLessonIds: string[]) {
-  return module.lessons.length > 0 && module.lessons.every((lesson) => completedLessonIds.includes(lesson.id));
+  const availableLessons = availableLessonsForModule(module);
+  return availableLessons.length > 0 && availableLessons.every((lesson) => completedLessonIds.includes(lesson.id));
 }
 
 export function completedModuleIdsFor(course: Course, completedLessonIds: string[]) {
@@ -258,32 +284,42 @@ export function completedModuleIdsFor(course: Course, completedLessonIds: string
 }
 
 export function courseProgress(course: Course, completedLessonIds: string[]) {
-  const total = course.modules.reduce((count, module) => count + module.lessons.length, 0);
+  const total = course.modules.reduce(
+    (count, module) => count + availableLessonsForModule(module).length,
+    0,
+  );
   if (total === 0) return 0;
   const done = course.modules.reduce(
-    (count, module) => count + module.lessons.filter((lesson) => completedLessonIds.includes(lesson.id)).length,
+    (count, module) => count + module.lessons.filter(
+      (lesson) => isLessonAvailable(lesson) && completedLessonIds.includes(lesson.id),
+    ).length,
     0,
   );
   return done / total;
 }
 
 export function currentModule(course: Course, completedLessonIds: string[]) {
-  return course.modules.find((module) => !isModuleComplete(module, completedLessonIds)) ?? null;
+  return course.modules.find(
+    (module) => availableLessonsForModule(module).length > 0 && !isModuleComplete(module, completedLessonIds),
+  ) ?? null;
 }
 
 export function nextLesson(course: Course, completedLessonIds: string[]) {
   for (const module of course.modules) {
-    const lesson = module.lessons.find((item) => !completedLessonIds.includes(item.id));
+    const lesson = module.lessons.find(
+      (item) => isLessonAvailable(item) && !completedLessonIds.includes(item.id),
+    );
     if (lesson) return { module, lesson };
   }
   return null;
 }
 
-export type ModuleStatus = 'complete' | 'current' | 'upcoming';
+export type ModuleStatus = 'complete' | 'current' | 'upcoming' | 'unavailable';
 
 export function moduleStatus(course: Course, moduleId: string, completedLessonIds: string[]): ModuleStatus {
   const module = getModule(course, moduleId);
   if (!module) return 'upcoming';
+  if (availableLessonsForModule(module).length === 0) return 'unavailable';
   if (isModuleComplete(module, completedLessonIds)) return 'complete';
   const current = currentModule(course, completedLessonIds);
   if (current?.id === moduleId) return 'current';

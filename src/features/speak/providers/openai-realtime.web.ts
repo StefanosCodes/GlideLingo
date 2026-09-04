@@ -1,0 +1,168 @@
+import type {
+  ConnectRealtimeOptions,
+  PreparedRealtimeConnection,
+  RealtimeTransport,
+} from './openai-realtime.types';
+
+export async function requestMicrophone(): Promise<MediaStream> {
+  if (!globalThis.navigator?.mediaDevices?.getUserMedia) {
+    throw new Error('Microphone capture is unavailable on this device.');
+  }
+  return navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+}
+
+export async function connectOpenAIRealtime({
+  admission,
+  prepared,
+  onConnected,
+  onConnectionLost,
+  onEvent,
+}: ConnectRealtimeOptions): Promise<RealtimeTransport> {
+  const { dataChannel, microphoneStream, peer } = prepared;
+  let closed = false;
+  let connectionLost = false;
+  let inputMuted = true;
+  const remoteAudio = document.createElement('audio');
+  remoteAudio.autoplay = true;
+  remoteAudio.setAttribute('aria-hidden', 'true');
+  peer.ontrack = (event) => {
+    remoteAudio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
+    void remoteAudio.play().catch(() => undefined);
+  };
+
+  dataChannel.addEventListener('message', (event) => {
+    try {
+      onEvent(JSON.parse(String(event.data)) as unknown);
+    } catch {
+      onEvent(null);
+    }
+  });
+  const handleConnectionLost = () => {
+    if (closed || connectionLost) return;
+    connectionLost = true;
+    onConnectionLost();
+  };
+  const handlePeerStateChange = () => {
+    if (peer.connectionState === 'disconnected' || peer.connectionState === 'failed') {
+      handleConnectionLost();
+    }
+  };
+  peer.addEventListener('connectionstatechange', handlePeerStateChange);
+
+  try {
+    await waitForDataChannel(dataChannel, async () => {
+      await peer.setRemoteDescription({
+        type: 'answer',
+        sdp: admission.connection.answer_sdp,
+      });
+    });
+    dataChannel.addEventListener('error', handleConnectionLost);
+    dataChannel.addEventListener('close', handleConnectionLost);
+    onConnected();
+  } catch (error) {
+    dataChannel.close();
+    peer.close();
+    microphoneStream.getTracks().forEach((track) => track.stop());
+    throw error;
+  }
+
+  return {
+    admission,
+    close() {
+      if (closed) return;
+      closed = true;
+      peer.removeEventListener('connectionstatechange', handlePeerStateChange);
+      dataChannel.removeEventListener('error', handleConnectionLost);
+      dataChannel.removeEventListener('close', handleConnectionLost);
+      dataChannel.close();
+      peer.close();
+      microphoneStream.getTracks().forEach((track) => track.stop());
+      remoteAudio.pause();
+      remoteAudio.srcObject = null;
+    },
+    interrupt() {
+      if (closed || dataChannel.readyState !== 'open') return false;
+      dataChannel.send(JSON.stringify({ type: 'response.cancel' }));
+      dataChannel.send(JSON.stringify({ type: 'output_audio_buffer.clear' }));
+      return true;
+    },
+    setMuted(muted: boolean, submitTurn = true) {
+      const finishedTurn = !inputMuted && muted && submitTurn;
+      inputMuted = muted;
+      microphoneStream.getAudioTracks().forEach((track) => {
+        track.enabled = !muted;
+      });
+      if (finishedTurn && !closed && dataChannel.readyState === 'open') {
+        dataChannel.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+        dataChannel.send(JSON.stringify({ type: 'response.create' }));
+      }
+    },
+  };
+}
+
+async function waitForDataChannel(
+  dataChannel: RTCDataChannel,
+  applyRemoteDescription: () => Promise<void>,
+): Promise<void> {
+  if (dataChannel.readyState === 'open') {
+    await applyRemoteDescription();
+    return;
+  }
+  let cleanup = () => undefined;
+  const opened = new Promise<void>((resolve, reject) => {
+    cleanup = () => {
+      dataChannel.removeEventListener('open', handleOpen);
+      dataChannel.removeEventListener('error', handleError);
+      dataChannel.removeEventListener('close', handleClose);
+    };
+    const handleOpen = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error('The Realtime data channel failed before opening.'));
+    };
+    const handleClose = () => {
+      cleanup();
+      reject(new Error('The Realtime data channel closed before opening.'));
+    };
+    dataChannel.addEventListener('open', handleOpen, { once: true });
+    dataChannel.addEventListener('error', handleError, { once: true });
+    dataChannel.addEventListener('close', handleClose, { once: true });
+  });
+  try {
+    await applyRemoteDescription();
+    await opened;
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
+
+export async function prepareOpenAIRealtime(
+  microphoneStream: MediaStream,
+): Promise<PreparedRealtimeConnection> {
+  const peer = new RTCPeerConnection();
+  const track = microphoneStream.getAudioTracks()[0];
+  if (!track) {
+    peer.close();
+    microphoneStream.getTracks().forEach((item) => item.stop());
+    throw new Error('No microphone audio track was available.');
+  }
+  // The V1 contract is push-to-talk/turn-based: never transmit before an explicit unmute.
+  track.enabled = false;
+  peer.addTrack(track, microphoneStream);
+  const dataChannel = peer.createDataChannel('oai-events');
+  try {
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    if (!offer.sdp) throw new Error('The realtime connection offer was empty.');
+    return { dataChannel, microphoneStream, offerSdp: offer.sdp, peer };
+  } catch (error) {
+    dataChannel.close();
+    peer.close();
+    microphoneStream.getTracks().forEach((item) => item.stop());
+    throw error;
+  }
+}

@@ -22,6 +22,14 @@ class LessonTutorTimeoutError(Exception):
     pass
 
 
+class VoiceRealtimeUnavailableError(Exception):
+    pass
+
+
+class VoiceRealtimeTimeoutError(Exception):
+    pass
+
+
 def _response(request: Request, status: int, code: str) -> JSONResponse:
     return JSONResponse(
         status_code=status,
@@ -39,3 +47,11 @@ async def tutor_unavailable(request: Request, _error: Exception) -> JSONResponse
 
 async def tutor_timeout(request: Request, _error: Exception) -> JSONResponse:
     return _response(request, 504, "lesson_tutor_timeout")
+
+
+async def voice_unavailable(request: Request, _error: Exception) -> JSONResponse:
+    return _response(request, 503, "voice_realtime_unavailable")
+
+
+async def voice_timeout(request: Request, _error: Exception) -> JSONResponse:
+    return _response(request, 504, "voice_realtime_timeout")

@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     lesson_tutor_concurrency_limit: int = Field(default=1, ge=1, le=3)
     lesson_tutor_daily_limit: int = Field(default=50, ge=1, le=1000)
     lesson_tutor_global_daily_turn_limit: int = Field(default=2000, ge=1, le=100000)
+    voice_enabled: bool = False
+    voice_service_url: str | None = None
+    voice_service_audience: str | None = None
+    voice_service_timeout_seconds: float = Field(default=11.0, gt=0, le=12)
+    voice_pseudonym_key: SecretStr | None = None
     revenuecat_enabled: bool = False
     revenuecat_environment: Literal["SANDBOX", "PRODUCTION"] = "SANDBOX"
     revenuecat_api_key: SecretStr | None = None
@@ -188,6 +193,42 @@ class Settings(BaseSettings):
                 or parsed.fragment
             ):
                 raise ValueError(f"{name} must be an HTTPS URL without credentials or query data")
+        return self
+
+    @model_validator(mode="after")
+    def validate_voice_configuration(self) -> Self:
+        for name, value in (
+            ("voice service URL", self.voice_service_url),
+            ("voice service audience", self.voice_service_audience),
+        ):
+            if value is None:
+                continue
+            parsed = urlsplit(value)
+            if (
+                parsed.scheme != "https"
+                or not parsed.netloc
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path not in {"", "/"}
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError(f"The {name} must be an HTTPS origin")
+        if not self.voice_enabled:
+            return self
+        if self.voice_service_url is None or self.voice_service_audience is None:
+            raise ValueError("Voice service URL and audience are required when enabled")
+        if self.voice_service_url.rstrip("/") != self.voice_service_audience.rstrip("/"):
+            raise ValueError("Voice service URL and audience must match exactly")
+        if (
+            self.voice_pseudonym_key is None
+            or len(self.voice_pseudonym_key.get_secret_value().encode()) < 32
+        ):
+            raise ValueError("A voice pseudonym key of at least 32 bytes is required when enabled")
+        if self.clerk_configuration is None:
+            raise ValueError("Clerk authentication must be configured when voice is enabled")
+        if not self.revenuecat_enabled:
+            raise ValueError("Server entitlement authorization must be enabled with voice")
         return self
 
     @model_validator(mode="after")

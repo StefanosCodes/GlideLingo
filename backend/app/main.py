@@ -22,6 +22,10 @@ from app.core.errors import (
     LessonTutorTimeoutError,
     LessonTutorUnavailableError,
     ProRequiredError,
+    VoiceSessionConflictError,
+    VoiceSessionNotFoundError,
+    VoiceSessionTimeoutError,
+    VoiceSessionUnavailableError,
     authentication_unavailable_handler,
     billing_unavailable_handler,
     dependency_unavailable_handler,
@@ -31,18 +35,25 @@ from app.core.errors import (
     lesson_tutor_timeout_handler,
     lesson_tutor_unavailable_handler,
     pro_required_handler,
+    voice_session_conflict_handler,
+    voice_session_not_found_handler,
+    voice_session_timeout_handler,
+    voice_session_unavailable_handler,
 )
 from app.core.logging import configure_logging
 from app.core.request_id import REQUEST_ID_HEADER, RequestIdMiddleware
 from app.db.engine import create_database_engine, create_database_probe
 from app.integrations.lesson_tutor.client import GoogleIdentityTokenProvider, LessonTutorHttpClient
 from app.integrations.revenuecat.client import RevenueCatHttpClient
+from app.integrations.voice_realtime.client import VoiceRealtimeHttpClient
 from app.modules.billing.repository import PostgresEntitlementRepository
 from app.modules.billing.router import router as billing_router
 from app.modules.billing.service import BillingService
 from app.modules.lesson_tutor.guard import GuardLimits, PostgresLessonTutorGuard
 from app.modules.lesson_tutor.router import router as lesson_tutor_router
 from app.modules.lesson_tutor.service import LessonTutorService
+from app.modules.voice_sessions.router import router as voice_sessions_router
+from app.modules.voice_sessions.service import VoiceSessionService
 
 
 def create_app(
@@ -50,6 +61,7 @@ def create_app(
     *,
     lesson_tutor_service: LessonTutorService | None = None,
     billing_service: BillingService | None = None,
+    voice_session_service: VoiceSessionService | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings.log_level)
@@ -79,6 +91,27 @@ def create_app(
         and settings.revenuecat_api_key is not None
         else None
     )
+    voice_gateway = (
+        VoiceRealtimeHttpClient(
+            base_url=settings.voice_service_url,
+            token_provider=GoogleIdentityTokenProvider(audience=settings.voice_service_audience),
+            timeout_seconds=settings.voice_service_timeout_seconds,
+        )
+        if voice_session_service is None
+        and settings.voice_enabled
+        and settings.voice_service_url is not None
+        and settings.voice_service_audience is not None
+        else None
+    )
+    voice_service = voice_session_service or VoiceSessionService(
+        enabled=settings.voice_enabled,
+        gateway=voice_gateway,
+        pseudonym_key=(
+            settings.voice_pseudonym_key.get_secret_value().encode()
+            if settings.voice_pseudonym_key is not None
+            else None
+        ),
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -93,7 +126,10 @@ def create_app(
                     if revenuecat_provider is not None:
                         await revenuecat_provider.close()
                 finally:
-                    database_engine.dispose()
+                    try:
+                        await voice_service.close()
+                    finally:
+                        database_engine.dispose()
 
     application = FastAPI(
         title="GlideLingo API",
@@ -148,6 +184,7 @@ def create_app(
         ),
         operation_deadline_seconds=settings.lesson_tutor_operation_deadline_seconds,
     )
+    application.state.voice_session_service = voice_service
     application.state.clerk_token_verifier = (
         ClerkTokenVerifier(
             issuer=clerk_configuration[0],
@@ -182,6 +219,12 @@ def create_app(
     application.add_exception_handler(LessonTutorLimitedError, lesson_tutor_limited_handler)
     application.add_exception_handler(ProRequiredError, pro_required_handler)
     application.add_exception_handler(BillingUnavailableError, billing_unavailable_handler)
+    application.add_exception_handler(
+        VoiceSessionUnavailableError, voice_session_unavailable_handler
+    )
+    application.add_exception_handler(VoiceSessionTimeoutError, voice_session_timeout_handler)
+    application.add_exception_handler(VoiceSessionConflictError, voice_session_conflict_handler)
+    application.add_exception_handler(VoiceSessionNotFoundError, voice_session_not_found_handler)
     application.add_middleware(InternalErrorMiddleware)
     application.add_middleware(
         CORSMiddleware,
@@ -197,6 +240,7 @@ def create_app(
     application.include_router(lesson_tutor_router)
     application.include_router(billing_router)
     application.include_router(auth_router)
+    application.include_router(voice_sessions_router)
     return application
 
 

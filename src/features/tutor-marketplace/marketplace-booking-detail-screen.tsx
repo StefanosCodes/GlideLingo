@@ -30,11 +30,16 @@ export function MarketplaceBookingDetailScreen() {
   const [reviewBody, setReviewBody] = useState('');
   const [operatorReason, setOperatorReason] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [state, setState] = useState<State>(enabled ? { kind: 'loading' } : { kind: 'error' });
   const disputeDeadline = state.kind === 'ready' && state.booking.disputeDeadlineAt
     ? Date.parse(state.booking.disputeDeadlineAt) : null;
-  const disputeOpen = disputeDeadline !== null && Date.now() <= disputeDeadline;
-  const reviewOpen = disputeDeadline !== null && Date.now() > disputeDeadline;
+  const disputeOpen = disputeDeadline !== null && currentTime <= disputeDeadline;
+  const reviewOpen = disputeDeadline !== null && currentTime > disputeDeadline;
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();

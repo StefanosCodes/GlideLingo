@@ -31,7 +31,6 @@ export function MarketplaceReviewsOperationsScreen() {
   useEffect(() => {
     const controller = new AbortController();
     const current = ++sequence.current;
-    setLoadingMore(false);
     void listMarketplaceReviews(controller.signal).then((page) => {
       if (!controller.signal.aborted && current === sequence.current) {
         setState({ kind: 'ready', reviews: page.items, nextOffset: page.nextOffset });
@@ -96,7 +95,7 @@ export function MarketplaceReviewsOperationsScreen() {
     {state.kind === 'error' ? <GlideSurface accessible accessibilityRole="alert" padding="roomy"
       style={styles.card} variant="tinted"><ThemedText type="title2">Reviews could not be loaded.</ThemedText>
       <GlideButton label="Try again" onPress={() => {
-        setState({ kind: 'loading' }); setRetry((value) => value + 1);
+        setLoadingMore(false); setState({ kind: 'loading' }); setRetry((value) => value + 1);
       }} variant="secondary" /></GlideSurface> : null}
     {state.kind === 'ready' && state.reviews.length === 0 ? <GlideSurface padding="roomy" style={styles.card}>
       <ThemedText type="title2">No verified reviews yet.</ThemedText></GlideSurface> : null}

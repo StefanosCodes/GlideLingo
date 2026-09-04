@@ -29,8 +29,6 @@ export function MarketplaceBookingsScreen() {
     if (!enabled) return;
     const controller = new AbortController();
     const current = ++sequence.current;
-    setLoadingMore(false);
-    setPageError(false);
     void listMarketplaceBookings(controller.signal).then((page) => {
       if (!controller.signal.aborted && current === sequence.current) setState({
         kind: 'ready', bookings: page.items, nextCursor: page.nextCursor,
@@ -74,7 +72,10 @@ export function MarketplaceBookingsScreen() {
     {state.kind === 'error' ? <GlideSurface accessible accessibilityRole="alert" padding="roomy" style={styles.card} variant="tinted">
       <ThemedText type="title2">Bookings are unavailable.</ThemedText>
       <ThemedText type="body" themeColor="textSecondary">No payment status is inferred while the server cannot be reached.</ThemedText>
-      {enabled ? <GlideButton label="Try again" onPress={() => { setState({ kind: 'loading' }); setRetry((value) => value + 1); }} variant="secondary" /> : null}
+      {enabled ? <GlideButton label="Try again" onPress={() => {
+        setLoadingMore(false); setPageError(false); setState({ kind: 'loading' });
+        setRetry((value) => value + 1);
+      }} variant="secondary" /> : null}
     </GlideSurface> : null}
     {state.kind === 'ready' && state.bookings.length === 0 ? <GlideSurface padding="roomy" style={styles.card}>
       <ThemedText type="title2">No tutor bookings yet.</ThemedText>{isHumanTutorMarketplaceAcquisitionEnabled() ? <GlideButton label="Find a tutor" onPress={() => router.push('/tutors')} variant="secondary" /> : <ThemedText type="body" themeColor="textSecondary">New tutor discovery is currently paused. Existing bookings and support remain available.</ThemedText>}

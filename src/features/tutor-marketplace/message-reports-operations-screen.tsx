@@ -34,7 +34,6 @@ export function MessageReportsOperationsScreen() {
   useEffect(() => {
     const controller = new AbortController();
     const current = ++sequence.current;
-    setLoadingMore(false);
     void listMarketplaceMessageReports(controller.signal).then((page) => {
       if (!controller.signal.aborted && current === sequence.current) setState({
         kind: 'ready', reports: page.items, nextOffset: page.nextOffset,
@@ -105,7 +104,9 @@ export function MessageReportsOperationsScreen() {
     {state.kind === 'loading' ? <GlideSurface accessible accessibilityLabel="Loading message reports" padding="roomy" style={styles.card}>
       <ActivityIndicator color={theme.tint} /><ThemedText type="headline">Loading reports…</ThemedText></GlideSurface> : null}
     {state.kind === 'error' ? <GlideSurface accessibilityRole="alert" padding="roomy" style={styles.card} variant="tinted">
-      <ThemedText type="title2">Reports could not be loaded.</ThemedText><GlideButton label="Try again" onPress={() => { setState({ kind: 'loading' }); setRetry((value) => value + 1); }} variant="secondary" />
+      <ThemedText type="title2">Reports could not be loaded.</ThemedText><GlideButton label="Try again" onPress={() => {
+        setLoadingMore(false); setState({ kind: 'loading' }); setRetry((value) => value + 1);
+      }} variant="secondary" />
     </GlideSurface> : null}
     {state.kind === 'ready' && state.reports.length === 0 ? <GlideSurface padding="roomy" style={styles.card} variant="success">
       <ThemedText type="title2">No message reports need review.</ThemedText></GlideSurface> : null}

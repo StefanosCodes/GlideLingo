@@ -39,7 +39,6 @@ export function TutorDiscoveryScreen() {
     if (!enabled) return;
     const controller = new AbortController();
     const current = ++sequence.current;
-    setLoadingMore(false);
     void listPublicTutors(filters, controller.signal)
       .then((result) => {
         if (!controller.signal.aborted && current === sequence.current) setState({ kind: 'ready', tutors: result.items, nextCursor: result.nextCursor });
@@ -130,7 +129,10 @@ export function TutorDiscoveryScreen() {
     </GlideSurface> : null}
     {state.kind === 'error' ? <GlideSurface accessible accessibilityRole="alert" padding="roomy" style={styles.card} variant="tinted">
       <ThemedText type="title2">Tutors could not be loaded.</ThemedText>
-      <GlideButton label="Try again" onPress={() => { setState({ kind: 'loading' }); setRetry((value) => value + 1); }} variant="secondary" />
+      <GlideButton label="Try again" onPress={() => {
+        setLoadingMore(false); setPageError(false); setState({ kind: 'loading' });
+        setRetry((value) => value + 1);
+      }} variant="secondary" />
     </GlideSurface> : null}
     {state.kind === 'ready' && state.tutors.length === 0 ? <GlideSurface padding="roomy" style={styles.card} variant="tinted">
       <ThemedText type="title2">No tutors match these filters yet.</ThemedText>

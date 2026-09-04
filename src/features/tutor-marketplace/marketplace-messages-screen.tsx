@@ -45,8 +45,6 @@ export function MarketplaceMessagesScreen() {
     if (!enabled) return;
     const controller = new AbortController();
     const current = ++sequence.current;
-    setLoadingMore(false);
-    setPageError(false);
     void Promise.all([
       listMarketplaceConversations(controller.signal),
       getMarketplaceMessageEmailPreference(controller.signal),
@@ -129,7 +127,10 @@ export function MarketplaceMessagesScreen() {
       {state.kind === 'error' ? (
         <GlideSurface accessibilityRole="alert" padding="roomy" style={styles.card} variant="tinted">
           <ThemedText type="title2">Conversations could not be loaded.</ThemedText>
-          <GlideButton label="Try again" onPress={() => { setState({ kind: 'loading' }); setRetry((value) => value + 1); }} variant="secondary" />
+          <GlideButton label="Try again" onPress={() => {
+            setLoadingMore(false); setPageError(false); setState({ kind: 'loading' });
+            setRetry((value) => value + 1);
+          }} variant="secondary" />
         </GlideSurface>
       ) : null}
       {state.kind === 'ready' && state.conversations.length === 0 ? (

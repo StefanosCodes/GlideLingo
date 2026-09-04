@@ -111,19 +111,37 @@ test('opens a participant-scoped conversation when messaging is enabled', async 
 test('creates one server-authoritative hold and opens only the parsed Stripe checkout', async () => {
   process.env.EXPO_PUBLIC_HUMAN_TUTOR_COMMERCE_ENABLED = 'true';
   const slot = { startsAt: '2026-09-05T15:00:00Z', endsAt: '2026-09-05T15:25:00Z' };
+  const checkout = { bookingId: 'f8d97d12-3e8a-49c6-bb22-55c49956c8b9', checkoutUrl: 'https://checkout.stripe.com/c/pay/reviewed123' };
+  let resolveCheckout: (value: typeof checkout) => void = () => undefined;
+  let resolveOpen: (value: boolean) => void = () => undefined;
+  const checkoutPromise = new Promise<typeof checkout>((resolve) => { resolveCheckout = resolve; });
+  const openPromise = new Promise<boolean>((resolve) => { resolveOpen = resolve; });
   mockGetTutor.mockResolvedValue(tutor);
   mockGetSlots.mockResolvedValue({ tutorId: tutor.tutorId, timeZone: tutor.timeZone, source: 'manual', freshness: 'current', slots: [slot] });
-  mockCheckout.mockResolvedValue({ bookingId: 'f8d97d12-3e8a-49c6-bb22-55c49956c8b9', checkoutUrl: 'https://checkout.stripe.com/c/pay/reviewed123' });
-  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+  mockCheckout.mockReturnValue(checkoutPromise);
+  const open = jest.spyOn(Linking, 'openURL').mockReturnValue(openPromise);
   const screen = await render(<SafeAreaProvider initialMetrics={metrics}><TutorPublicProfileScreen /></SafeAreaProvider>);
 
   await waitFor(() => expect(screen.getByText('Book')).toBeTruthy());
-  await fireEvent.press(screen.getByText('Book'));
-  await waitFor(() => expect(mockCheckout).toHaveBeenCalledTimes(1));
+  const bookButton = screen.getByRole('button', { name: 'Book' });
+  const pressBook = bookButton.props.onClick ?? bookButton.props.onResponderRelease;
+  expect(typeof pressBook).toBe('function');
+  await act(() => {
+    pressBook({ nativeEvent: {} });
+    pressBook({ nativeEvent: {} });
+  });
+  expect(mockCheckout).toHaveBeenCalledTimes(1);
   expect(mockCheckout.mock.calls[0]?.[0]).toBe(tutor.tutorId);
   expect(mockCheckout.mock.calls[0]?.[1]).toBe(slot.startsAt);
   expect(mockCheckout.mock.calls[0]?.[2]).toMatch(/^[0-9a-f-]{36}$/i);
   expect(mockCheckout.mock.calls[0]?.[3]).toBe(tutor.offeringId);
+  await act(async () => {
+    resolveCheckout(checkout);
+    await checkoutPromise;
+    await Promise.resolve();
+    resolveOpen(true);
+    await openPromise;
+  });
   expect(mockPush).toHaveBeenCalledWith('/bookings/f8d97d12-3e8a-49c6-bb22-55c49956c8b9');
   expect(open).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/reviewed123');
 });
@@ -172,7 +190,10 @@ test('preserves favorite state across an overlapping offering request and checks
   });
   await waitFor(() => expect(screen.getByText('Remove from favorites')).toBeTruthy());
   await waitFor(() => expect(screen.getByText(`Times below are for ${secondOffering.title} · ${tutor.timeZone}`)).toBeTruthy());
-  fireEvent.press(screen.getByText('Book'));
+  await act(async () => {
+    fireEvent.press(screen.getByText('Book'));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
   await waitFor(() => expect(mockCheckout).toHaveBeenCalledTimes(1));
   expect(mockCheckout.mock.calls[0]?.[3]).toBe(secondOffering.offeringId);
   await waitFor(() => expect(screen.getByText('Book')).toBeTruthy());

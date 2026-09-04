@@ -30,6 +30,7 @@ export function TutorPublicProfileScreen() {
   const [startingConversation, setStartingConversation] = useState(false);
   const [bookingSlot, setBookingSlot] = useState<string | null>(null);
   const favoriteInFlight = useRef(false);
+  const bookingInFlight = useRef(false);
   const idempotencyKeys = useRef(new Map<string, string>());
   const [actionError, setActionError] = useState<string | null>(null);
   const [state, setState] = useState<State>({ kind: 'loading' });
@@ -91,7 +92,8 @@ export function TutorPublicProfileScreen() {
     } finally { setStartingConversation(false); }
   };
   const book = async (slot: TutorSlot) => {
-    if (bookingSlot) return;
+    if (bookingInFlight.current || bookingSlot) return;
+    bookingInFlight.current = true;
     setBookingSlot(slot.startsAt); setActionError(null);
     const operationKey = `${state.tutor.tutorId}:${state.selectedOfferingId}:${slot.startsAt}`;
     let idempotencyKey = idempotencyKeys.current.get(operationKey);
@@ -99,26 +101,25 @@ export function TutorPublicProfileScreen() {
       idempotencyKey = createMarketplaceClientId();
       idempotencyKeys.current.set(operationKey, idempotencyKey);
     }
-    let booking;
     try {
-      booking = await createBookingCheckout(
+      const booking = await createBookingCheckout(
         state.tutor.tutorId, slot.startsAt, idempotencyKey, state.selectedOfferingId,
       );
       idempotencyKeys.current.delete(operationKey);
       router.push(`/bookings/${booking.bookingId}`);
+      if (booking.checkoutUrl) {
+        try {
+          await Linking.openURL(booking.checkoutUrl);
+        } catch {
+          setActionError('Your booking was created, but checkout could not be opened. Continue it from the booking page.');
+        }
+      }
     } catch {
       setActionError('Checkout could not be started. Your card was not assumed charged; retry safely.');
+    } finally {
+      bookingInFlight.current = false;
       setBookingSlot(null);
-      return;
     }
-    if (booking.checkoutUrl) {
-      try {
-        await Linking.openURL(booking.checkoutUrl);
-      } catch {
-        setActionError('Your booking was created, but checkout could not be opened. Continue it from the booking page.');
-      }
-    }
-    setBookingSlot(null);
   };
   const selectOffering = async (offeringId: string) => {
     if (offeringId === state.selectedOfferingId) return;

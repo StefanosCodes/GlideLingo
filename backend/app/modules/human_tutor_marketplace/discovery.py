@@ -133,7 +133,6 @@ class DiscoveryRepository(Protocol):
         maximum_amount_minor: int | None,
         verified_credential: bool,
         minimum_rating: float | None = None,
-        after_headline: str | None = None,
         after_tutor_id: UUID | None = None,
         limit: int = 201,
     ) -> list[StoredPublicTutor]: ...
@@ -404,7 +403,6 @@ class PostgresDiscoveryRepository:
         maximum_amount_minor: int | None,
         verified_credential: bool,
         minimum_rating: float | None = None,
-        after_headline: str | None = None,
         after_tutor_id: UUID | None = None,
         limit: int = 201,
     ) -> list[StoredPublicTutor]:
@@ -417,7 +415,6 @@ class PostgresDiscoveryRepository:
         ]
         parameters: dict[str, object] = {
             "learner_actor_ref": learner_actor_ref,
-            "after_headline": after_headline,
             "after_tutor_id": after_tutor_id,
             "limit": limit,
         }
@@ -466,10 +463,8 @@ class PostgresDiscoveryRepository:
         if minimum_rating is not None:
             conditions.append("review.rating >= :minimum_rating")
             parameters["minimum_rating"] = minimum_rating
-        if after_headline is not None and after_tutor_id is not None:
-            conditions.append(
-                "(lower(profile.headline), profile.tutor_id) > (:after_headline, :after_tutor_id)"
-            )
+        if after_tutor_id is not None:
+            conditions.append("profile.tutor_id > :after_tutor_id")
         try:
             with self._engine.connect() as connection:
                 rows = (
@@ -496,7 +491,7 @@ class PostgresDiscoveryRepository:
                         ) AS review ON true
                         WHERE """
                             + " AND ".join(conditions)
-                            + " ORDER BY lower(profile.headline), profile.tutor_id LIMIT :limit"
+                            + " ORDER BY profile.tutor_id LIMIT :limit"
                         ),
                         parameters,
                     )
@@ -901,9 +896,7 @@ class MarketplaceDiscoveryService:
     ) -> TutorSearchResponse:
         self._require_acquisition()
         actor_ref = self._actor_ref(principal)
-        cursor_value = self._decode_cursor(cursor) if cursor is not None else None
-        after_headline = cursor_value[0] if cursor_value is not None else None
-        after_tutor_id = UUID(cursor_value[1]) if cursor_value is not None else None
+        after_tutor_id = self._decode_cursor(cursor) if cursor is not None else None
         now = datetime.now(UTC)
         selected: list[StoredPublicTutor] = []
         exhausted = False
@@ -926,7 +919,6 @@ class MarketplaceDiscoveryService:
                 maximum_amount_minor=maximum_amount_minor,
                 minimum_rating=minimum_rating,
                 verified_credential=verified_credential,
-                after_headline=after_headline,
                 after_tutor_id=after_tutor_id,
                 limit=batch_limit,
             )
@@ -936,7 +928,7 @@ class MarketplaceDiscoveryService:
             for tutor in tutors:
                 scanned += 1
                 last_scanned = tutor
-                after_headline, after_tutor_id = tutor.headline.casefold(), tutor.tutor_id
+                after_tutor_id = tutor.tutor_id
                 if favorite and not tutor.is_favorite:
                     continue
                 if available_before is None:
@@ -1345,13 +1337,11 @@ class MarketplaceDiscoveryService:
 
     @staticmethod
     def _encode_cursor(tutor: StoredPublicTutor) -> str:
-        payload = json.dumps(
-            [tutor.headline.casefold(), str(tutor.tutor_id)], separators=(",", ":")
-        ).encode()
+        payload = json.dumps([str(tutor.tutor_id)], separators=(",", ":")).encode()
         return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
     @staticmethod
-    def _decode_cursor(cursor: str) -> tuple[str, str]:
+    def _decode_cursor(cursor: str) -> UUID:
         try:
             if len(cursor) > 512:
                 raise ValueError
@@ -1359,11 +1349,10 @@ class MarketplaceDiscoveryService:
             value = json.loads(payload)
             if (
                 not isinstance(value, list)
-                or len(value) != 2
+                or len(value) != 1
                 or not all(isinstance(item, str) for item in value)
             ):
                 raise ValueError
-            UUID(value[1])
-            return value[0], value[1]
+            return UUID(value[0])
         except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
             raise TutorApplicationConflictError from None

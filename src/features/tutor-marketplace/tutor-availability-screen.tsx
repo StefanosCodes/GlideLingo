@@ -25,6 +25,8 @@ export function TutorAvailabilityScreen() {
   const theme = useTheme();
   const sequence = useRef(0);
   const completedOAuthState = useRef<string | null>(null);
+  const saveInFlight = useRef(false);
+  const calendarInFlight = useRef(false);
   const [retry, setRetry] = useState(0);
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [saving, setSaving] = useState(false);
@@ -75,38 +77,55 @@ export function TutorAvailabilityScreen() {
   useEffect(() => {
     if (!calendarEnabled || !calendarCode || !calendarState || completedOAuthState.current === calendarState) return;
     completedOAuthState.current = calendarState;
+    calendarInFlight.current = true;
     setCalendarBusy(true);
     void completeTutorCalendarOAuth(calendarState, calendarCode, calendarRedirectUri())
       .then((value) => setCalendar(value))
       .catch(() => setCalendarError(true))
-      .finally(() => setCalendarBusy(false));
+      .finally(() => {
+        calendarInFlight.current = false;
+        setCalendarBusy(false);
+      });
   }, [calendarCode, calendarEnabled, calendarState]);
 
   const connectCalendar = async () => {
-    if (calendarBusy) return;
+    if (calendarInFlight.current || calendarBusy) return;
+    calendarInFlight.current = true;
     setCalendarBusy(true); setCalendarError(false);
     try {
       const result = await startTutorCalendarOAuth(calendarRedirectUri());
       await Linking.openURL(result.authorizationUrl);
-    } catch { setCalendarError(true); } finally { setCalendarBusy(false); }
+    } catch { setCalendarError(true); } finally {
+      calendarInFlight.current = false;
+      setCalendarBusy(false);
+    }
   };
 
   const refreshCalendar = async () => {
-    if (calendarBusy) return;
+    if (calendarInFlight.current || calendarBusy) return;
+    calendarInFlight.current = true;
     setCalendarBusy(true); setCalendarError(false);
     try { setCalendar(await refreshTutorCalendar()); } catch { setCalendarError(true); }
-    finally { setCalendarBusy(false); }
+    finally {
+      calendarInFlight.current = false;
+      setCalendarBusy(false);
+    }
   };
 
   const disconnectCalendar = async () => {
-    if (calendarBusy) return;
+    if (calendarInFlight.current || calendarBusy) return;
+    calendarInFlight.current = true;
     setCalendarBusy(true); setCalendarError(false);
     try { setCalendar(await revokeTutorCalendar()); } catch { setCalendarError(true); }
-    finally { setCalendarBusy(false); }
+    finally {
+      calendarInFlight.current = false;
+      setCalendarBusy(false);
+    }
   };
 
   const save = async () => {
-    if (state.kind !== 'ready' || saving) return;
+    if (state.kind !== 'ready' || saveInFlight.current || saving) return;
+    saveInFlight.current = true;
     setSaving(true);
     try {
       const availability = await replaceOwnManualAvailability({
@@ -126,7 +145,10 @@ export function TutorAvailabilityScreen() {
       });
     } catch {
       setState({ kind: 'error' });
-    } finally { setSaving(false); }
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
+    }
   };
 
   if (state.kind === 'loading') return <ScreenFrame><GlideSurface accessible accessibilityLabel="Loading tutor availability" padding="roomy" style={styles.card}><ActivityIndicator color={theme.tint} /><ThemedText type="headline">Loading availability…</ThemedText></GlideSurface></ScreenFrame>;

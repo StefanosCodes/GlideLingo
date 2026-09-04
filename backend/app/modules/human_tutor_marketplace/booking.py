@@ -1014,14 +1014,33 @@ class PostgresBookingRepository:
             return None
         try:
             with self._engine.begin() as connection:
-                previous_state = connection.execute(
-                    text(
-                        "SELECT state FROM marketplace_booking "
-                        "WHERE booking_id = :booking_id AND learner_actor_ref = :learner "
-                        "FOR UPDATE"
-                    ),
-                    {"booking_id": booking_id, "learner": learner_actor_ref},
-                ).scalar_one_or_none()
+                existing = (
+                    connection.execute(
+                        text(
+                            "SELECT * FROM marketplace_booking "
+                            "WHERE booking_id = :booking_id AND learner_actor_ref = :learner "
+                            "FOR UPDATE"
+                        ),
+                        {"booking_id": booking_id, "learner": learner_actor_ref},
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if existing is None:
+                    return None
+                environment = "PRODUCTION" if checkout.livemode else "SANDBOX"
+                if existing["state"] in {"payment_pending", "confirmed"}:
+                    return (
+                        self._booking(existing)
+                        if existing["provider_checkout_id"] == checkout.checkout_id
+                        and existing["provider_payment_intent_id"] == checkout.payment_intent_id
+                        and existing["provider_environment"] == environment
+                        and existing["provider_platform_account_id"] == checkout.platform_account_id
+                        and existing["amount_minor"] == checkout.amount_minor
+                        and existing["currency"] == checkout.currency
+                        else None
+                    )
+                previous_state = existing["state"]
                 row = (
                     connection.execute(
                         text(
@@ -1044,7 +1063,7 @@ class PostgresBookingRepository:
                             "checkout_id": checkout.checkout_id,
                             "payment_intent_id": checkout.payment_intent_id,
                             "checkout_url": checkout.url,
-                            "environment": "PRODUCTION" if checkout.livemode else "SANDBOX",
+                            "environment": environment,
                             "platform_account": checkout.platform_account_id,
                             "amount_minor": checkout.amount_minor,
                             "currency": checkout.currency,

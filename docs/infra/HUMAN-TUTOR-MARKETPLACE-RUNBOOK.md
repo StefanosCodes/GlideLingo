@@ -34,7 +34,8 @@ do not rely on this document as evidence that another branch has merged.
 Expected order is `001`, `002`, `003`, the separately owned `004` affiliate and `005` billing
 migrations, `006` marketplace core, the integration-owned `007`, then marketplace `008` through
 `014`. Migrations `008`–`014` are additive except for the intentional forward-compatible booking
-constraint replacement in `012`; each file is one transaction and preserves existing booking facts.
+constraint replacement in `012` and the intentional removal of single-credential/single-offering
+uniqueness in `014`; each file is one transaction and preserves existing booking facts.
 Do not renumber around an unmerged predecessor.
 
 Provision two distinct environment-specific LOGIN principals without recording their credentials:

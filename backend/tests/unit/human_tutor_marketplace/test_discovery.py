@@ -121,15 +121,14 @@ class PagedRepository(Repository):
         ]
 
     def list_public_tutors(self, **kwargs: object) -> list[StoredPublicTutor]:
-        after_headline = kwargs.get("after_headline")
         after_tutor_id = kwargs.get("after_tutor_id")
         limit = cast(int, kwargs["limit"])
         start = 0
-        if isinstance(after_headline, str) and isinstance(after_tutor_id, UUID):
+        if isinstance(after_tutor_id, UUID):
             start = next(
                 index + 1
                 for index, tutor in enumerate(self.tutors)
-                if tutor.headline.casefold() == after_headline and tutor.tutor_id == after_tutor_id
+                if tutor.tutor_id == after_tutor_id
             )
         return self.tutors[start : start + limit]
 

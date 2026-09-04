@@ -898,6 +898,144 @@ def test_discovery_availability_and_favorites_use_only_eligible_public_supply(
 
 
 @pytest.mark.integration
+def test_discovery_cursor_survives_unicode_headline_mutation(
+    marketplace_engine: Engine,
+) -> None:
+    repository = PostgresDiscoveryRepository(engine=marketplace_engine)
+    tutor_ids = [
+        UUID("32000000-0000-4000-8000-000000000001"),
+        UUID("32000000-0000-4000-8000-000000000002"),
+        UUID("32000000-0000-4000-8000-000000000003"),
+    ]
+    headlines = ["İzmir conversation tutor", "Straße speaking tutor", "Zulu travel tutor"]
+    now = datetime.now(UTC)
+    with marketplace_engine.begin() as connection:
+        for index, (tutor_id, headline) in enumerate(zip(tutor_ids, headlines, strict=True), 1):
+            application_id = UUID(f"31000000-0000-4000-8000-{index:012d}")
+            offering_id = UUID(f"33000000-0000-4000-8000-{index:012d}")
+            actor_ref = derive_marketplace_actor_ref(
+                key=b"marketplace-integration-pseudonym-key-32-bytes",
+                clerk_user_id=f"user_discovery_cursor_{index}",
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO marketplace_tutor_application
+                      (application_id, actor_ref, headline, biography, time_zone)
+                    VALUES (:application_id, :actor_ref, :headline,
+                            'A deliberately bounded profile used for stable discovery paging.',
+                            'UTC')
+                    """
+                ),
+                {
+                    "application_id": application_id,
+                    "actor_ref": actor_ref,
+                    "headline": headline,
+                },
+            )
+            connection.execute(
+                text(
+                    "UPDATE marketplace_tutor_application "
+                    "SET status = 'submitted', version = version + 1, submitted_at = :now "
+                    "WHERE application_id = :application_id"
+                ),
+                {"application_id": application_id, "now": now},
+            )
+            connection.execute(
+                text(
+                    "UPDATE marketplace_tutor_application "
+                    "SET status = 'under_review', version = version + 1, "
+                    "reviewer_actor_ref = :reviewer "
+                    "WHERE application_id = :application_id"
+                ),
+                {"application_id": application_id, "reviewer": OPERATOR_ACTOR},
+            )
+            connection.execute(
+                text(
+                    "UPDATE marketplace_tutor_application "
+                    "SET status = 'approved', version = version + 1, reviewed_at = :now, "
+                    "decision_reason = 'Approved for cursor regression coverage.' "
+                    "WHERE application_id = :application_id"
+                ),
+                {"application_id": application_id, "now": now},
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO marketplace_tutor_profile
+                      (tutor_id, application_id, actor_ref, headline, biography, time_zone,
+                       payout_ready, is_published)
+                    VALUES (:tutor_id, :application_id, :actor_ref, :headline,
+                            'A deliberately bounded profile used for stable discovery paging.',
+                            'UTC', true, true)
+                    """
+                ),
+                {
+                    "tutor_id": tutor_id,
+                    "application_id": application_id,
+                    "actor_ref": actor_ref,
+                    "headline": headline,
+                },
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO marketplace_tutor_offering
+                      (offering_id, application_id, tutor_id, title, duration_minutes,
+                       amount_minor, currency, state, commission_policy_id,
+                       cancellation_policy_id)
+                    VALUES (:offering_id, :application_id, :tutor_id,
+                            'Stable cursor conversation lesson', 25, 2500, 'USD', 'active',
+                            '10000000-0000-4000-8000-000000000001',
+                            '20000000-0000-4000-8000-000000000001')
+                    """
+                ),
+                {
+                    "offering_id": offering_id,
+                    "application_id": application_id,
+                    "tutor_id": tutor_id,
+                },
+            )
+
+    first_page = repository.list_public_tutors(
+        learner_actor_ref=LEARNER_ACTOR,
+        language=None,
+        dialect=None,
+        specialty=None,
+        duration_minutes=None,
+        maximum_amount_minor=None,
+        verified_credential=False,
+        limit=2,
+    )
+    assert [tutor.tutor_id for tutor in first_page] == tutor_ids[:2]
+    cursor = MarketplaceDiscoveryService._encode_cursor(first_page[-1])
+    after_tutor_id = MarketplaceDiscoveryService._decode_cursor(cursor)
+    with marketplace_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE marketplace_tutor_profile SET headline = CASE "
+                "WHEN tutor_id = :first THEN 'Ωmega conversation tutor' "
+                "ELSE 'Álpha speaking tutor' END "
+                "WHERE tutor_id IN (:first, :second)"
+            ),
+            {"first": tutor_ids[0], "second": tutor_ids[1]},
+        )
+    second_page = repository.list_public_tutors(
+        learner_actor_ref=LEARNER_ACTOR,
+        language=None,
+        dialect=None,
+        specialty=None,
+        duration_minutes=None,
+        maximum_amount_minor=None,
+        verified_credential=False,
+        after_tutor_id=after_tutor_id,
+        limit=2,
+    )
+    assert [tutor.tutor_id for tutor in second_page] == tutor_ids[2:]
+    assert len({tutor.tutor_id for tutor in first_page + second_page}) == 3
+
+
+@pytest.mark.integration
 def test_profile_timezone_change_invalidates_wall_clock_availability(
     marketplace_engine: Engine,
 ) -> None:
@@ -2269,14 +2407,56 @@ def test_booking_holds_overlap_webhooks_money_and_participant_scope(
         currency=held.currency,
         created_at=now,
     )
-    pending = booking.attach_checkout(
-        booking_id=held.booking_id,
-        learner_actor_ref=owner,
-        checkout=checkout,
+    checkout_attach_barrier = Barrier(2)
+
+    def attach_checkout_from_request_or_worker(_: int) -> Any:
+        checkout_attach_barrier.wait()
+        return booking.attach_checkout(
+            booking_id=held.booking_id,
+            learner_actor_ref=owner,
+            checkout=checkout,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        checkout_attachments = list(pool.map(attach_checkout_from_request_or_worker, range(2)))
+    assert all(
+        item is not None and item.state == "payment_pending" for item in checkout_attachments
     )
-    assert pending is not None and pending.state == "payment_pending"
+    assert (
+        booking.attach_checkout(
+            booking_id=held.booking_id,
+            learner_actor_ref=owner,
+            checkout=replace(checkout, checkout_id="cs_test_mismatched"),
+        )
+        is None
+    )
+    pending = checkout_attachments[0]
     assert pending.amount_minor == pending.commission_amount_minor + pending.tutor_amount_minor
     assert pending.commission_basis_points == 2000
+    with marketplace_engine.connect() as connection:
+        assert (
+            connection.execute(
+                text(
+                    "SELECT count(*) FROM marketplace_booking_transition_audit "
+                    "WHERE booking_id = :booking_id AND reason_code = 'checkout_created'"
+                ),
+                {"booking_id": held.booking_id},
+            ).scalar_one()
+            == 1
+        )
+        assert (
+            connection.execute(
+                text(
+                    "SELECT count(*) FROM marketplace_message "
+                    "JOIN marketplace_conversation USING (conversation_id) "
+                    "WHERE marketplace_conversation.booking_id = :booking_id "
+                    "AND body = 'Checkout started. The booking confirms only after "
+                    "verified payment.'"
+                ),
+                {"booking_id": held.booking_id},
+            ).scalar_one()
+            == 1
+        )
 
     invalid_paid = (
         replace(

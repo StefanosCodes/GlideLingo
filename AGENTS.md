@@ -32,6 +32,11 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
   - Reconstructs the live PR, branch, and worktree queue instead of relying on stale chat context.
   - Builds dependency-safe merge waves, coordinates bounded parallel reviews, and rehearses integration in an isolated worktree.
   - Separates code, integration, deployment, and feature-enablement readiness and keeps remote merges approval-gated.
+- **Repository Skill (`.agents/skills/operational-ui-e2e/SKILL.md`)**:
+  - Binds functional acceptance and skill qualification to the exact PR head, owning worktree, immutable SHA, and supported target OS.
+  - Drives meaningful outcomes through visible controls in Expo web and the real Electron BrowserWindow with correlated runtime evidence.
+  - Separates walkthrough, diagnosis, repair, harness establishment, and expected-red qualification; missing capability cannot become a false green.
+  - Preserves Electron production security, isolated state, deterministic teardown, and explicit handling for OS-owned UI.
 - **Portable Engineering Workflows (`~/.agents/skills/`)**:
   - `$dev-build-feature`: Implement or extend features using the inspect, decide, act, observe, verify loop.
   - `$dev-debug-issue`: Diagnose and fix runtime bugs with evidence, reproducible traces, and root-cause proof.

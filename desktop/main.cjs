@@ -12,6 +12,7 @@ const {
   PACKAGED_RENDERER_ORIGIN,
   PRODUCTION_API_ORIGIN,
   PRODUCTION_CLERK_ORIGIN,
+  applyContentSecurityPolicy,
   buildContentSecurityPolicy,
   findAuthCallbackUrl,
   isAllowedAuthWindowUrl,
@@ -105,7 +106,8 @@ async function registerProductionProtocol() {
       }
     }
 
-    return net.fetch(pathToFileURL(fileToServe).toString());
+    const response = await net.fetch(pathToFileURL(fileToServe).toString());
+    return applyContentSecurityPolicy(response, CONTENT_SECURITY_POLICY);
   });
 }
 

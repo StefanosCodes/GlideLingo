@@ -28,10 +28,13 @@ export function readLiveConfiguration(env = process.env) {
   const apiKey = env.GLIDELINGO_VOICE_TEST_OPENAI_API_KEY?.trim();
   const projectId = env.GLIDELINGO_VOICE_TEST_OPENAI_PROJECT_ID?.trim();
   if (!apiKey) throw new Error('Set the dedicated GLIDELINGO_VOICE_TEST_OPENAI_API_KEY.');
-  if (!projectId) throw new Error('Set GLIDELINGO_VOICE_TEST_OPENAI_PROJECT_ID.');
+  if (!projectId && !apiKey.startsWith('sk-proj-')) {
+    throw new Error('Set GLIDELINGO_VOICE_TEST_OPENAI_PROJECT_ID for a non-project-scoped key.');
+  }
   return {
     apiKey,
-    projectId,
+    projectId: projectId || null,
+    credentialScope: projectId ? 'explicit-project' : 'project-scoped-key',
     chromePath: env.GLIDELINGO_VOICE_TEST_CHROME_PATH?.trim() || defaultChromePath(),
   };
 }
@@ -175,11 +178,12 @@ async function refreshPublication(contentRoot, sourcePublication) {
   return publication;
 }
 
-export function safeReport(result, { projectId, contentHash }) {
+export function safeReport(result, { projectId, credentialScope, contentHash }) {
   return {
     schemaVersion: 1,
     provider: 'openai',
-    projectId,
+    declaredProjectId: projectId,
+    credentialScope,
     model: LIVE_MODEL,
     voice: LIVE_VOICE,
     contentHash,

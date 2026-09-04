@@ -124,15 +124,17 @@ published Course fixture through the private tutor, opens a real OpenAI Realtime
 provider transcription and returned audio, explicitly hangs up, and prints only bounded metadata.
 It never changes the checked-in draft publication and is not part of normal CI.
 
-The command deliberately does not auto-load `.env`. It fails closed unless all four values are
-explicitly supplied in the environment of that one invocation:
+The command deliberately does not auto-load `.env`. It fails closed unless the opt-in,
+confirmation, and key are explicitly supplied in the environment of that one invocation:
 
 ```text
 GLIDELINGO_VOICE_LIVE_TEST=true
 GLIDELINGO_VOICE_TEST_CONFIRM_SPEND=I_ACCEPT_BOUNDED_OPENAI_TEST_SPEND
-GLIDELINGO_VOICE_TEST_OPENAI_PROJECT_ID=<dedicated-test-project-id>
 GLIDELINGO_VOICE_TEST_OPENAI_API_KEY=<dedicated-test-project-key>
 ```
+
+Set `GLIDELINGO_VOICE_TEST_OPENAI_PROJECT_ID` as well when the key is not an `sk-proj-` project-scoped
+key. Legacy or service keys without an explicit project ID are rejected.
 
 The evaluation uses `gpt-realtime-2.1`, the `marin` voice, a hard limit of sixteen serial Realtime
 sessions, and a 45-second deadline per conversation. Four fixed tuning clips establish the

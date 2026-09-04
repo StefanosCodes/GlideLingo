@@ -63,6 +63,18 @@ test('grader keeps transcripts in the ephemeral request and returns bounded grad
   assert.equal(JSON.stringify(grades).includes('Good attempt'), false);
 });
 
+test('project-scoped keys omit a redundant project header', async () => {
+  await gradeConversationBatch({
+    apiKey: 'sk-proj-secret',
+    projectId: null,
+    cases: [{ id: 'alpha', expected: 'alpha', result: {} }],
+    fetchImpl: async (_url, options) => {
+      assert.equal('OpenAI-Project' in options.headers, false);
+      return responseWith({ results: [passingGrade('alpha')] });
+    },
+  });
+});
+
 test('candidate generation permits only the reviewable authored fields', async () => {
   const candidates = await proposeScenarioCandidates({
     apiKey: 'secret',

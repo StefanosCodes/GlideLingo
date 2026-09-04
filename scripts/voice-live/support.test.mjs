@@ -43,8 +43,28 @@ test('live configuration accepts only the dedicated credential boundary', () => 
   assert.deepEqual(config, {
     apiKey: 'test-secret',
     projectId: 'proj_test',
+    credentialScope: 'explicit-project',
     chromePath: '/test/chrome',
   });
+});
+
+test('project-scoped test keys do not require a duplicated project ID', () => {
+  const config = readLiveConfiguration({
+    GLIDELINGO_VOICE_LIVE_TEST: 'true',
+    GLIDELINGO_VOICE_TEST_CONFIRM_SPEND: LIVE_CONFIRMATION,
+    GLIDELINGO_VOICE_TEST_OPENAI_API_KEY: 'sk-proj-test-secret',
+    GLIDELINGO_VOICE_TEST_CHROME_PATH: '/test/chrome',
+  });
+  assert.equal(config.projectId, null);
+  assert.equal(config.credentialScope, 'project-scoped-key');
+  assert.throws(
+    () => readLiveConfiguration({
+      GLIDELINGO_VOICE_LIVE_TEST: 'true',
+      GLIDELINGO_VOICE_TEST_CONFIRM_SPEND: LIVE_CONFIRMATION,
+      GLIDELINGO_VOICE_TEST_OPENAI_API_KEY: 'sk-legacy-test-secret',
+    }),
+    /non-project-scoped key/,
+  );
 });
 
 test('child environment excludes the paid credential boundary', () => {

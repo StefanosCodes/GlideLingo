@@ -66,6 +66,16 @@ try {
   compileRoot = await mkdtemp(join(tmpdir(), 'glidelingo-voice-live-ts-'));
   await compileBrowserAdapter(compileRoot, childEnvironment);
   const tutorPort = 18131;
+  const tutorEnvironment = {
+    ...childEnvironment,
+    UV_CACHE_DIR: join(fixture.temporaryRoot, 'uv-cache'),
+    OPENAI_API_KEY: config.apiKey,
+    GLIDELINGO_TUTOR_VOICE_ENABLED: 'true',
+    GLIDELINGO_TUTOR_OPENAI_REALTIME_MODEL: LIVE_MODEL,
+    GLIDELINGO_TUTOR_OPENAI_REALTIME_VOICE_ID: LIVE_VOICE,
+    GLIDELINGO_TUTOR_CONTENT_ROOT: fixture.contentRoot,
+  };
+  if (config.projectId) tutorEnvironment.OPENAI_PROJECT_ID = config.projectId;
   const tutor = trackedSpawn(
     'uv',
     [
@@ -83,16 +93,7 @@ try {
     ],
     {
       cwd: ROOT,
-      env: {
-        ...childEnvironment,
-        UV_CACHE_DIR: join(fixture.temporaryRoot, 'uv-cache'),
-        OPENAI_API_KEY: config.apiKey,
-        OPENAI_PROJECT_ID: config.projectId,
-        GLIDELINGO_TUTOR_VOICE_ENABLED: 'true',
-        GLIDELINGO_TUTOR_OPENAI_REALTIME_MODEL: LIVE_MODEL,
-        GLIDELINGO_TUTOR_OPENAI_REALTIME_VOICE_ID: LIVE_VOICE,
-        GLIDELINGO_TUTOR_CONTENT_ROOT: fixture.contentRoot,
-      },
+      env: tutorEnvironment,
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
@@ -106,6 +107,7 @@ try {
     tutorBaseUrl,
     fixture,
     projectId: config.projectId,
+    credentialScope: config.credentialScope,
     childEnvironment,
     consumeSessionSlot,
   };
@@ -220,6 +222,7 @@ try {
   const report = privacySafeEvaluationReport({
     headSha: evidenceHeadSha,
     projectId: config.projectId,
+    credentialScope: config.credentialScope,
     contentHash: fixture.contentHash,
     baselineSummary,
     candidates: evaluatedCandidates,
@@ -249,6 +252,7 @@ async function runBatch(cases, phase, context, transportReports) {
     const result = await runConversation(testCase, context);
     const report = safeReport(result, {
       projectId: context.projectId,
+      credentialScope: context.credentialScope,
       contentHash: context.fixture.contentHash,
     });
     assertSuccessfulReport(report);

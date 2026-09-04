@@ -138,6 +138,7 @@ export function selectCandidate(baselineSummary, evaluatedCandidates) {
 export function privacySafeEvaluationReport({
   headSha,
   projectId,
+  credentialScope,
   contentHash,
   baselineSummary,
   candidates,
@@ -150,6 +151,7 @@ export function privacySafeEvaluationReport({
     headSha,
     provider: 'openai',
     declaredProjectId: projectId,
+    credentialScope,
     realtimeModel: 'gpt-realtime-2.1',
     graderModel: GRADER_MODEL,
     contentHash,
@@ -190,7 +192,7 @@ async function createStructuredResponse({
     headers: {
       authorization: 'Bearer ' + apiKey,
       'content-type': 'application/json',
-      'OpenAI-Project': projectId,
+      ...(projectId ? { 'OpenAI-Project': projectId } : {}),
     },
     body: JSON.stringify({
       model: GRADER_MODEL,

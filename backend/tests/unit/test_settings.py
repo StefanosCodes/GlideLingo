@@ -186,6 +186,37 @@ def test_tutor_messaging_requires_retention_and_exact_meeting_hosts() -> None:
     assert settings.human_tutor_messaging_enabled is True
 
 
+def test_tutor_commerce_requires_environment_matched_server_configuration() -> None:
+    common: dict[str, Any] = {
+        "_env_file": None,
+        "human_tutor_marketplace_enabled": True,
+        "human_tutor_marketplace_pseudonym_key": "m" * 32,
+        "human_tutor_marketplace_actor_allowlist": ("user_tutor_123",),
+        "clerk_issuer": "https://clerk.glidelingo.test",
+        "clerk_jwks_url": "https://clerk.glidelingo.test/.well-known/jwks.json",
+        "human_tutor_approved_meeting_hosts": ("meet.example.com",),
+        "human_tutor_commerce_enabled": True,
+    }
+    with pytest.raises(ValidationError, match="secret key"):
+        Settings(**common)
+    with pytest.raises(ValidationError, match="match the configured environment"):
+        Settings(**common, human_tutor_stripe_secret_key="sk_live_wrong_environment")
+
+    settings = Settings(
+        **common,
+        human_tutor_stripe_secret_key="sk_test_reviewed_sandbox_key",
+        human_tutor_stripe_webhook_secret="whsec_reviewed_test_secret",
+        human_tutor_stripe_platform_account_id="acct_reviewed123",
+        human_tutor_stripe_connect_refresh_url="https://app.glidelingo.test/tutor/payouts",
+        human_tutor_stripe_connect_return_url="https://app.glidelingo.test/tutor/payouts",
+        human_tutor_checkout_success_url=("https://app.glidelingo.test/bookings?checkout=success"),
+        human_tutor_checkout_cancel_url=("https://app.glidelingo.test/bookings?checkout=cancelled"),
+    )
+
+    assert settings.human_tutor_commerce_enabled is True
+    assert settings.human_tutor_stripe_environment == "SANDBOX"
+
+
 def test_enabled_revenuecat_requires_all_server_only_secrets() -> None:
     with pytest.raises(ValidationError, match="RevenueCat API key"):
         Settings(_env_file=None, revenuecat_enabled=True)

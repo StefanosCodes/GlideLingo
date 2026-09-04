@@ -102,6 +102,8 @@ test('human tutor marketplace remains disabled in both client and server default
   assert.equal(example.GLIDELINGO_HUMAN_TUTOR_GOOGLE_CALENDAR_ENABLED, 'false');
   assert.equal(example.EXPO_PUBLIC_HUMAN_TUTOR_MESSAGING_ENABLED, 'false');
   assert.equal(example.GLIDELINGO_HUMAN_TUTOR_MESSAGING_ENABLED, 'false');
+  assert.equal(example.EXPO_PUBLIC_HUMAN_TUTOR_COMMERCE_ENABLED, 'false');
+  assert.equal(example.GLIDELINGO_HUMAN_TUTOR_COMMERCE_ENABLED, 'false');
 });
 
 test('managed block preserves unrelated local values and remains parseable', () => {

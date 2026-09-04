@@ -4,15 +4,18 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
 from app.auth.clerk import CurrentClerkPrincipal
 from app.core.errors import ErrorResponse
+from app.modules.human_tutor_marketplace.booking import BookingService
 from app.modules.human_tutor_marketplace.calendar import CalendarService
 from app.modules.human_tutor_marketplace.discovery import MarketplaceDiscoveryService
 from app.modules.human_tutor_marketplace.messaging import MessagingService
 from app.modules.human_tutor_marketplace.schemas import (
     ApplicationVersionRequest,
+    BookingListResponse,
+    BookingResponse,
     CalendarConnectionResponse,
     CalendarOAuthCallbackRequest,
     CalendarOAuthStartRequest,
@@ -20,6 +23,7 @@ from app.modules.human_tutor_marketplace.schemas import (
     ChangeTutorStatusRequest,
     ConversationListResponse,
     ConversationResponse,
+    CreateBookingCheckoutRequest,
     CreateConversationRequest,
     CreateMessageReportRequest,
     CreateTutorApplicationRequest,
@@ -27,6 +31,7 @@ from app.modules.human_tutor_marketplace.schemas import (
     DecideTutorCredentialRequest,
     ManualAvailabilityResponse,
     MarketplaceActionResponse,
+    MarketplaceStripeWebhookResponse,
     MessageNotificationPreferenceRequest,
     MessageNotificationPreferenceResponse,
     MessagePageResponse,
@@ -37,12 +42,15 @@ from app.modules.human_tutor_marketplace.schemas import (
     ReplaceManualAvailabilityRequest,
     ResolveMessageReportRequest,
     SaveTutorCredentialRequest,
+    SaveTutorMeetingUrlRequest,
     SaveTutorOfferingRequest,
     SendMessageRequest,
     SetTutorFavoriteRequest,
     SetTutorPublicationRequest,
     TutorApplicationQueue,
     TutorApplicationResponse,
+    TutorConnectOnboardingResponse,
+    TutorConnectStatusResponse,
     TutorProfileResponse,
     TutorSearchResponse,
     TutorSlotsResponse,
@@ -95,6 +103,162 @@ MarketplaceMessagingServiceDependency = Annotated[
     MessagingService,
     Depends(get_marketplace_messaging_service),
 ]
+
+
+def get_marketplace_booking_service(request: Request) -> BookingService:
+    return cast(BookingService, request.app.state.marketplace_booking_service)
+
+
+MarketplaceBookingServiceDependency = Annotated[
+    BookingService,
+    Depends(get_marketplace_booking_service),
+]
+
+
+@router.get(
+    "/tutor-connect",
+    operation_id="get_tutor_connect_status",
+    response_model=TutorConnectStatusResponse,
+)
+async def get_tutor_connect_status(
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceBookingServiceDependency,
+    refresh: bool = False,
+) -> TutorConnectStatusResponse:
+    account = await service.connect_status(principal=principal, refresh=refresh)
+    status_value = (
+        "not_started"
+        if account.provider_account_id is None
+        else "ready"
+        if account.details_submitted and account.charges_enabled and account.payouts_enabled
+        else "restricted"
+        if account.details_submitted
+        else "incomplete"
+    )
+    return TutorConnectStatusResponse(
+        status=status_value, requirements_due=account.requirements_due
+    )
+
+
+@router.post(
+    "/tutor-connect/onboarding",
+    operation_id="create_tutor_connect_onboarding_link",
+    response_model=TutorConnectOnboardingResponse,
+)
+async def create_tutor_connect_onboarding_link(
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceBookingServiceDependency,
+) -> TutorConnectOnboardingResponse:
+    link = await service.onboarding_link(principal=principal)
+    return TutorConnectOnboardingResponse(url=link.url, expires_at=link.expires_at)
+
+
+@router.post(
+    "/tutor-meeting",
+    operation_id="save_tutor_meeting_url",
+    response_model=MarketplaceActionResponse,
+)
+async def save_tutor_meeting_url(
+    request: SaveTutorMeetingUrlRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceBookingServiceDependency,
+) -> MarketplaceActionResponse:
+    await service.save_meeting_url(principal=principal, url=request.url)
+    return MarketplaceActionResponse()
+
+
+@router.post(
+    "/bookings/checkout",
+    operation_id="create_booking_checkout",
+    response_model=BookingResponse,
+)
+async def create_booking_checkout(
+    request: CreateBookingCheckoutRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceBookingServiceDependency,
+) -> BookingResponse:
+    booking = await service.create_checkout(
+        principal=principal,
+        tutor_id=request.tutor_id,
+        starts_at=request.starts_at,
+        idempotency_key=request.idempotency_key,
+    )
+    return BookingResponse.model_validate(booking, from_attributes=True)
+
+
+@router.get("/bookings", operation_id="list_bookings", response_model=BookingListResponse)
+async def list_bookings(
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceBookingServiceDependency,
+) -> BookingListResponse:
+    bookings = await service.list_bookings(principal=principal)
+    return BookingListResponse(
+        items=[BookingResponse.model_validate(item, from_attributes=True) for item in bookings]
+    )
+
+
+@router.get("/bookings/{booking_id}", operation_id="get_booking", response_model=BookingResponse)
+async def get_booking(
+    booking_id: UUID,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceBookingServiceDependency,
+) -> BookingResponse:
+    booking = await service.get_booking(principal=principal, booking_id=booking_id)
+    return BookingResponse.model_validate(booking, from_attributes=True)
+
+
+@router.post(
+    "/bookings/{booking_id}/reconcile",
+    operation_id="reconcile_booking_payment",
+    response_model=BookingResponse,
+)
+async def reconcile_booking_payment(
+    booking_id: UUID,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceBookingServiceDependency,
+) -> BookingResponse:
+    booking = await service.reconcile(principal=principal, booking_id=booking_id)
+    return BookingResponse.model_validate(booking, from_attributes=True)
+
+
+@router.post(
+    "/marketplace-stripe/webhook",
+    operation_id="receive_marketplace_stripe_webhook",
+    response_model=MarketplaceStripeWebhookResponse,
+)
+async def receive_marketplace_stripe_webhook(
+    request: Request,
+    service: MarketplaceBookingServiceDependency,
+    stripe_signature: Annotated[str | None, Header(alias="Stripe-Signature")] = None,
+) -> MarketplaceStripeWebhookResponse:
+    maximum = request.app.state.marketplace_stripe_webhook_max_body_bytes
+    raw_body = await _read_marketplace_webhook_body(request, maximum=maximum)
+    secret = request.app.state.marketplace_stripe_webhook_secret
+    if stripe_signature is None or secret is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
+    outcome = await service.apply_webhook(
+        raw_body=raw_body,
+        signature=stripe_signature,
+        webhook_secret=secret,
+        tolerance_seconds=request.app.state.marketplace_stripe_signature_tolerance_seconds,
+    )
+    return MarketplaceStripeWebhookResponse(status=outcome)
+
+
+async def _read_marketplace_webhook_body(request: Request, *, maximum: int) -> bytes:
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > maximum:
+                raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST) from None
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > maximum:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+    return bytes(body)
 
 
 @router.get(

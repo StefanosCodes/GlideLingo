@@ -77,6 +77,20 @@ class Settings(BaseSettings):
     human_tutor_messaging_enabled: bool = False
     human_tutor_message_retention_days: int | None = Field(default=None, ge=7, le=3650)
     human_tutor_approved_meeting_hosts: tuple[str, ...] = ()
+    human_tutor_commerce_enabled: bool = False
+    human_tutor_stripe_environment: Literal["SANDBOX", "PRODUCTION"] = "SANDBOX"
+    human_tutor_stripe_secret_key: SecretStr | None = None
+    human_tutor_stripe_webhook_secret: SecretStr | None = None
+    human_tutor_stripe_platform_account_id: str | None = None
+    human_tutor_stripe_api_version: str = "2026-02-25.clover"
+    human_tutor_stripe_timeout_seconds: float = Field(default=5.0, gt=0, le=8)
+    human_tutor_stripe_webhook_max_body_bytes: int = Field(default=65536, ge=1024, le=262144)
+    human_tutor_stripe_signature_tolerance_seconds: int = Field(default=300, ge=30, le=600)
+    human_tutor_booking_hold_seconds: int = Field(default=600, ge=300, le=900)
+    human_tutor_stripe_connect_refresh_url: str | None = None
+    human_tutor_stripe_connect_return_url: str | None = None
+    human_tutor_checkout_success_url: str | None = None
+    human_tutor_checkout_cancel_url: str | None = None
     clerk_issuer: str | None = None
     clerk_jwks_url: str | None = None
     clerk_audience: str | None = None
@@ -309,6 +323,58 @@ class Settings(BaseSettings):
             for host in self.human_tutor_approved_meeting_hosts
         ):
             raise ValueError("Approved meeting hosts must be exact lowercase DNS names")
+        return self
+
+    @model_validator(mode="after")
+    def validate_human_tutor_commerce_configuration(self) -> Self:
+        if not self.human_tutor_commerce_enabled:
+            return self
+        if not self.human_tutor_marketplace_enabled:
+            raise ValueError("Tutor commerce requires the human tutor marketplace")
+        if not self.human_tutor_approved_meeting_hosts:
+            raise ValueError("Tutor commerce requires an approved meeting-host allowlist")
+        expected_prefix = (
+            "sk_live_" if self.human_tutor_stripe_environment == "PRODUCTION" else "sk_test_"
+        )
+        if (
+            self.human_tutor_stripe_secret_key is None
+            or not self.human_tutor_stripe_secret_key.get_secret_value().startswith(expected_prefix)
+        ):
+            raise ValueError("Tutor Stripe secret key must match the configured environment")
+        if (
+            self.human_tutor_stripe_webhook_secret is None
+            or not self.human_tutor_stripe_webhook_secret.get_secret_value().startswith("whsec_")
+            or len(self.human_tutor_stripe_webhook_secret.get_secret_value()) < 24
+        ):
+            raise ValueError("Tutor Stripe webhook secret is required when commerce is enabled")
+        if (
+            self.human_tutor_stripe_platform_account_id is None
+            or re.fullmatch(r"acct_[A-Za-z0-9]{8,}", self.human_tutor_stripe_platform_account_id)
+            is None
+        ):
+            raise ValueError(
+                "Tutor Stripe platform account ID is required when commerce is enabled"
+            )
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}\.[a-z]+", self.human_tutor_stripe_api_version) is None:
+            raise ValueError("Tutor Stripe API version must be explicitly date-pinned")
+        for name, value in (
+            ("Connect refresh URL", self.human_tutor_stripe_connect_refresh_url),
+            ("Connect return URL", self.human_tutor_stripe_connect_return_url),
+            ("checkout success URL", self.human_tutor_checkout_success_url),
+            ("checkout cancel URL", self.human_tutor_checkout_cancel_url),
+        ):
+            if value is None:
+                raise ValueError(f"Tutor Stripe {name} is required when commerce is enabled")
+            parsed = urlsplit(value)
+            loopback = parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"}
+            if (
+                not (parsed.scheme == "https" or loopback)
+                or not parsed.netloc
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.fragment
+            ):
+                raise ValueError(f"Tutor Stripe {name} must be an exact HTTPS or loopback URL")
         return self
 
     @property

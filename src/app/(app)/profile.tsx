@@ -8,7 +8,7 @@ import { GlideSurface } from '@/components/ui/glide-surface';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
 import { AccountSummary } from '@/features/auth/account-summary';
-import { isHumanTutorMarketplaceEnabled, isHumanTutorMessagingEnabled } from '@/features/tutor-marketplace/config';
+import { isHumanTutorCommerceEnabled, isHumanTutorMarketplaceEnabled, isHumanTutorMessagingEnabled } from '@/features/tutor-marketplace/config';
 import {
   capabilityStateForMode,
   strongestCapabilityEvidence,
@@ -183,8 +183,10 @@ export default function ProfileScreen() {
           <View style={styles.legacyActions}>
             <GlideButton label="Find a tutor" onPress={() => router.push('/tutors')} variant="secondary" />
             {isHumanTutorMessagingEnabled() ? <GlideButton label="Tutor messages" onPress={() => router.push('/messages')} variant="secondary" /> : null}
+            {isHumanTutorCommerceEnabled() ? <GlideButton label="Tutor bookings" onPress={() => router.push('/bookings')} variant="secondary" /> : null}
             <GlideButton label="Apply to become a tutor" onPress={() => router.push('/tutor/apply')} variant="secondary" />
             <GlideButton label="Manage tutor availability" onPress={() => router.push('/tutor/availability')} variant="tertiary" />
+            {isHumanTutorCommerceEnabled() ? <GlideButton label="Tutor payouts and meeting" onPress={() => router.push('/tutor/payouts')} variant="tertiary" /> : null}
           </View>
         </GlideSurface>
       ) : null}

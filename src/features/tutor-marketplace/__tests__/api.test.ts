@@ -10,6 +10,7 @@ import {
   parseMarketplaceMessage,
   parseMarketplaceMessagePage,
   parseMarketplaceMessageReport,
+  parseMarketplaceBooking,
   parseTutorApplication,
   parseTutorProfile,
   parseTutorSlots,
@@ -96,6 +97,24 @@ describe('messaging response boundaries', () => {
       reason: 'unsafe', details: null, status: 'open', created_at: '2026-09-04T12:10:00Z',
       messages: [message],
     })).toMatchObject({ reason: 'unsafe', messages: [{ body: message.body }] });
+  });
+});
+
+describe('booking response boundary', () => {
+  const booking = {
+    booking_id: 'f8d97d12-3e8a-49c6-bb22-55c49956c8b9',
+    tutor_id: '7da10dbc-0546-4f74-a751-3cad7b5058b3', role: 'learner',
+    state: 'payment_pending', starts_at: '2026-09-05T12:00:00Z',
+    ends_at: '2026-09-05T12:25:00Z', hold_expires_at: '2026-09-04T12:10:00Z',
+    amount_minor: 2500, currency: 'USD', commission_amount_minor: 500,
+    tutor_amount_minor: 0, checkout_url: 'https://checkout.stripe.com/c/pay/reviewed123',
+    meeting_url: null, ics: null,
+  };
+
+  test('accepts the participant projection without provider identifiers', () => {
+    expect(parseMarketplaceBooking(booking)).toMatchObject({ state: 'payment_pending', amountMinor: 2500 });
+    expect(parseMarketplaceBooking({ ...booking, checkout_url: 'https://attacker.test/pay' })).toBeNull();
+    expect(parseMarketplaceBooking({ ...booking, state: 'confirmed' })).toBeNull();
   });
 });
 

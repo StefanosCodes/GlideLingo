@@ -12,7 +12,7 @@ import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { FirstNameCompletionGate } from '@/features/auth/first-name-completion-gate';
-import { isHumanTutorMarketplaceEnabled, isHumanTutorMessagingEnabled } from '@/features/tutor-marketplace/config';
+import { isHumanTutorCommerceEnabled, isHumanTutorMarketplaceEnabled, isHumanTutorMessagingEnabled } from '@/features/tutor-marketplace/config';
 import { useTheme, useThemeController } from '@/hooks/use-theme';
 import { AppThemeProvider } from '@/providers/app-theme-provider';
 import { BillingProvider } from '@/providers/billing-provider';
@@ -144,6 +144,11 @@ function AppNavigation({ signedIn }: { signedIn: boolean }) {
           <Stack.Screen name="messages/index" />
           <Stack.Screen name="messages/[conversationId]" />
           <Stack.Screen name="marketplace-operations/message-reports" />
+        </Stack.Protected>
+        <Stack.Protected guard={signedIn && isHumanTutorMarketplaceEnabled() && isHumanTutorCommerceEnabled()}>
+          <Stack.Screen name="bookings/index" />
+          <Stack.Screen name="bookings/[bookingId]" />
+          <Stack.Screen name="tutor/payouts" />
         </Stack.Protected>
         <Stack.Screen name="sso-callback" />
       </Stack>

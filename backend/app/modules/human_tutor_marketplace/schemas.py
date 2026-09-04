@@ -517,6 +517,73 @@ class ResolveMessageReportRequest(BaseModel):
     reason: str = Field(min_length=8, max_length=1000)
 
 
+class TutorConnectStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["not_started", "incomplete", "ready", "restricted"]
+    requirements_due: int = Field(ge=0, le=100)
+
+
+class TutorConnectOnboardingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(min_length=12, max_length=2000)
+    expires_at: datetime
+
+
+class SaveTutorMeetingUrlRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(min_length=12, max_length=1000)
+
+
+class CreateBookingCheckoutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tutor_id: UUID
+    starts_at: datetime
+    idempotency_key: UUID
+
+
+class BookingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    booking_id: UUID
+    role: Literal["learner", "tutor"]
+    tutor_id: UUID
+    state: Literal[
+        "held",
+        "payment_pending",
+        "payment_ambiguous",
+        "payment_failed",
+        "confirmed",
+        "cancelled",
+        "expired",
+    ]
+    starts_at: datetime
+    ends_at: datetime
+    hold_expires_at: datetime
+    amount_minor: int
+    currency: Literal["USD"]
+    commission_amount_minor: int
+    tutor_amount_minor: int
+    checkout_url: str | None
+    meeting_url: str | None
+    ics: str | None
+
+
+class BookingListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[BookingResponse]
+
+
+class MarketplaceStripeWebhookResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["applied", "duplicate", "out_of_order", "ignored"]
+
+
 class PublicTutorResponse(BaseModel):
     """Safe discovery projection with no application, actor, payout, or private-review facts."""
 

@@ -169,6 +169,28 @@ export type MarketplaceMessageReport = {
   messages: MarketplaceMessage[];
 };
 
+export type TutorConnectStatus = {
+  status: 'not_started' | 'incomplete' | 'ready' | 'restricted';
+  requirementsDue: number;
+};
+
+export type MarketplaceBooking = {
+  bookingId: string;
+  role: 'learner' | 'tutor';
+  tutorId: string;
+  state: 'held' | 'payment_pending' | 'payment_ambiguous' | 'payment_failed' | 'confirmed' | 'cancelled' | 'expired';
+  startsAt: string;
+  endsAt: string;
+  holdExpiresAt: string;
+  amountMinor: number;
+  currency: 'USD';
+  commissionAmountMinor: number;
+  tutorAmountMinor: number;
+  checkoutUrl: string | null;
+  meetingUrl: string | null;
+  ics: string | null;
+};
+
 export class TutorMarketplaceClientError extends Error {
   readonly kind: 'not-found' | 'forbidden' | 'conflict' | 'limited' | 'validation' | 'unavailable';
 
@@ -542,6 +564,101 @@ export async function createMarketplaceConversation(
   });
 }
 
+export async function getTutorConnectStatus(
+  refresh = false,
+  signal?: AbortSignal,
+): Promise<TutorConnectStatus> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({
+      parse: parseTutorConnectStatus,
+      path: '/v1/tutor-connect',
+      query: { refresh },
+      signal,
+    });
+    return result.data;
+  });
+}
+
+export async function createTutorConnectOnboarding(): Promise<{ url: string; expiresAt: string }> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: {},
+      parse: (value) => {
+        if (!isRecord(value) || !isSafeStripeConnectUrl(value.url) || !isIsoTimestamp(value.expires_at)) return null;
+        return { url: value.url, expiresAt: value.expires_at };
+      },
+      path: '/v1/tutor-connect/onboarding',
+    });
+    return result.data;
+  });
+}
+
+export async function saveTutorMeetingUrl(url: string): Promise<void> {
+  await runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { url },
+      parse: (value) => isRecord(value) && value.success === true ? true : null,
+      path: '/v1/tutor-meeting',
+    });
+    return result.data;
+  });
+}
+
+export async function createBookingCheckout(
+  tutorId: string,
+  startsAt: string,
+  idempotencyKey: string,
+): Promise<MarketplaceBooking> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { tutor_id: tutorId, starts_at: startsAt, idempotency_key: idempotencyKey },
+      parse: parseMarketplaceBooking,
+      path: '/v1/bookings/checkout',
+    });
+    return result.data;
+  });
+}
+
+export async function listMarketplaceBookings(signal?: AbortSignal): Promise<MarketplaceBooking[]> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({
+      parse: (value) => {
+        if (!isRecord(value) || !Array.isArray(value.items) || value.items.length > 100) return null;
+        const items = value.items.map(parseMarketplaceBooking);
+        return items.some((item) => item === null) ? null : items as MarketplaceBooking[];
+      },
+      path: '/v1/bookings',
+      signal,
+    });
+    return result.data;
+  });
+}
+
+export async function getMarketplaceBooking(
+  bookingId: string,
+  signal?: AbortSignal,
+): Promise<MarketplaceBooking> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({
+      parse: parseMarketplaceBooking,
+      path: `/v1/bookings/${bookingId}`,
+      signal,
+    });
+    return result.data;
+  });
+}
+
+export async function reconcileMarketplaceBooking(bookingId: string): Promise<MarketplaceBooking> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: {},
+      parse: parseMarketplaceBooking,
+      path: `/v1/bookings/${bookingId}/reconcile`,
+    });
+    return result.data;
+  });
+}
+
 export async function listMarketplaceConversations(
   signal?: AbortSignal,
 ): Promise<MarketplaceConversation[]> {
@@ -857,6 +974,43 @@ export function parseTutorSlots(value: unknown): TutorSlots | null {
   return {
     tutorId: value.tutor_id, timeZone: value.time_zone,
     source: value.source, freshness: value.freshness as TutorSlots['freshness'], slots: slots as TutorSlot[],
+  };
+}
+
+export function parseTutorConnectStatus(value: unknown): TutorConnectStatus | null {
+  if (!isRecord(value) ||
+      !['not_started', 'incomplete', 'ready', 'restricted'].includes(value.status as string) ||
+      !Number.isSafeInteger(value.requirements_due) ||
+      (value.requirements_due as number) < 0 || (value.requirements_due as number) > 100) return null;
+  return {
+    status: value.status as TutorConnectStatus['status'],
+    requirementsDue: value.requirements_due as number,
+  };
+}
+
+export function parseMarketplaceBooking(value: unknown): MarketplaceBooking | null {
+  if (!isRecord(value) || !isUuid(value.booking_id) || !isUuid(value.tutor_id) ||
+      (value.role !== 'learner' && value.role !== 'tutor') ||
+      !['held', 'payment_pending', 'payment_ambiguous', 'payment_failed', 'confirmed', 'cancelled', 'expired']
+        .includes(value.state as string) ||
+      !isIsoTimestamp(value.starts_at) || !isIsoTimestamp(value.ends_at) ||
+      !isIsoTimestamp(value.hold_expires_at) || Date.parse(value.starts_at) >= Date.parse(value.ends_at) ||
+      !isMinorAmount(value.amount_minor) || value.currency !== 'USD' ||
+      !isMinorAmountOrZero(value.commission_amount_minor) || !isMinorAmountOrZero(value.tutor_amount_minor) ||
+      !(value.checkout_url === null || isSafeStripeCheckoutUrl(value.checkout_url)) ||
+      !(value.meeting_url === null || isSafeHttpsUrl(value.meeting_url, 1000)) ||
+      !(value.ics === null || (typeof value.ics === 'string' && value.ics.length <= 4000 && value.ics.startsWith('BEGIN:VCALENDAR')))) {
+    return null;
+  }
+  if ((value.state === 'confirmed') !== (value.meeting_url !== null && value.ics !== null)) return null;
+  return {
+    bookingId: value.booking_id, role: value.role, tutorId: value.tutor_id,
+    state: value.state as MarketplaceBooking['state'], startsAt: value.starts_at,
+    endsAt: value.ends_at, holdExpiresAt: value.hold_expires_at,
+    amountMinor: value.amount_minor as number, currency: value.currency,
+    commissionAmountMinor: value.commission_amount_minor as number,
+    tutorAmountMinor: value.tutor_amount_minor as number,
+    checkoutUrl: value.checkout_url, meetingUrl: value.meeting_url, ics: value.ics,
   };
 }
 
@@ -1227,4 +1381,30 @@ function isIsoTimestamp(value: unknown): value is string {
 
 function isUuid(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isMinorAmount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 500 && (value as number) <= 50_000;
+}
+
+function isMinorAmountOrZero(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 50_000;
+}
+
+function isSafeHttpsUrl(value: unknown, maximum: number): value is string {
+  if (typeof value !== 'string' || value.length > maximum) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' && !parsed.username && !parsed.password;
+  } catch {
+    return false;
+  }
+}
+
+function isSafeStripeCheckoutUrl(value: unknown): value is string {
+  return isSafeHttpsUrl(value, 2000) && new URL(value).hostname === 'checkout.stripe.com';
+}
+
+function isSafeStripeConnectUrl(value: unknown): value is string {
+  return isSafeHttpsUrl(value, 2000) && new URL(value).hostname === 'connect.stripe.com';
 }

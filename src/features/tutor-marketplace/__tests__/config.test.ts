@@ -1,15 +1,27 @@
 import { afterEach, describe, expect, test } from '@jest/globals';
 
-import { isHumanTutorGoogleCalendarEnabled, isHumanTutorMarketplaceEnabled } from '@/features/tutor-marketplace/config';
+import { isHumanTutorCommerceEnabled, isHumanTutorGoogleCalendarEnabled, isHumanTutorMarketplaceEnabled } from '@/features/tutor-marketplace/config';
 
 const previousValue = process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ENABLED;
 const previousCalendar = process.env.EXPO_PUBLIC_HUMAN_TUTOR_GOOGLE_CALENDAR_ENABLED;
+const previousCommerce = process.env.EXPO_PUBLIC_HUMAN_TUTOR_COMMERCE_ENABLED;
 
 afterEach(() => {
   if (previousValue === undefined) delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ENABLED;
   else process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ENABLED = previousValue;
   if (previousCalendar === undefined) delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_GOOGLE_CALENDAR_ENABLED;
   else process.env.EXPO_PUBLIC_HUMAN_TUTOR_GOOGLE_CALENDAR_ENABLED = previousCalendar;
+  if (previousCommerce === undefined) delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_COMMERCE_ENABLED;
+  else process.env.EXPO_PUBLIC_HUMAN_TUTOR_COMMERCE_ENABLED = previousCommerce;
+});
+
+describe('isHumanTutorCommerceEnabled', () => {
+  test('is separately disabled by default and requires exact opt-in', () => {
+    delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_COMMERCE_ENABLED;
+    expect(isHumanTutorCommerceEnabled()).toBe(false);
+    process.env.EXPO_PUBLIC_HUMAN_TUTOR_COMMERCE_ENABLED = 'true';
+    expect(isHumanTutorCommerceEnabled()).toBe(true);
+  });
 });
 
 describe('isHumanTutorGoogleCalendarEnabled', () => {

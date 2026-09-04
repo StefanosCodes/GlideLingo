@@ -49,6 +49,11 @@ from app.integrations.revenuecat.client import RevenueCatHttpClient
 from app.modules.billing.repository import PostgresEntitlementRepository
 from app.modules.billing.router import router as billing_router
 from app.modules.billing.service import BillingService
+from app.modules.human_tutor_marketplace.booking import (
+    BookingService,
+    PostgresBookingRepository,
+    StripeHttpMarketplaceProvider,
+)
 from app.modules.human_tutor_marketplace.calendar import (
     CalendarService,
     CalendarTokenCipher,
@@ -87,6 +92,7 @@ def create_app(
     marketplace_discovery_service: MarketplaceDiscoveryService | None = None,
     marketplace_calendar_service: CalendarService | None = None,
     marketplace_messaging_service: MessagingService | None = None,
+    marketplace_booking_service: BookingService | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings.log_level)
@@ -181,10 +187,14 @@ def create_app(
     )
     discovery_service = marketplace_discovery_service
     if discovery_service is None and settings.human_tutor_marketplace_enabled:
+        discovery_repository = PostgresDiscoveryRepository(engine=database_engine)
         discovery_service = MarketplaceDiscoveryService(
-            repository=PostgresDiscoveryRepository(engine=database_engine),
+            repository=discovery_repository,
             calendar_busy_reader=(
                 calendar_repository if settings.human_tutor_google_calendar_enabled else None
+            ),
+            booking_busy_reader=(
+                discovery_repository if settings.human_tutor_commerce_enabled else None
             ),
             pseudonym_key=(
                 settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
@@ -193,6 +203,43 @@ def create_app(
             ),
             actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
         )
+    stripe_marketplace_provider = (
+        StripeHttpMarketplaceProvider(
+            secret_key=settings.human_tutor_stripe_secret_key.get_secret_value(),
+            api_version=settings.human_tutor_stripe_api_version,
+            timeout_seconds=settings.human_tutor_stripe_timeout_seconds,
+        )
+        if marketplace_booking_service is None
+        and settings.human_tutor_commerce_enabled
+        and settings.human_tutor_stripe_secret_key is not None
+        else None
+    )
+    assert discovery_service is not None or not settings.human_tutor_marketplace_enabled
+    booking_runtime = marketplace_booking_service or BookingService(
+        enabled=settings.human_tutor_commerce_enabled,
+        repository=PostgresBookingRepository(engine=database_engine),
+        provider=stripe_marketplace_provider,
+        discovery=discovery_service
+        or MarketplaceDiscoveryService(
+            repository=PostgresDiscoveryRepository(engine=database_engine),
+            pseudonym_key=None,
+            actor_allowlist=(),
+        ),
+        pseudonym_key=(
+            settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
+            if settings.human_tutor_marketplace_pseudonym_key is not None
+            else None
+        ),
+        actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+        environment=settings.human_tutor_stripe_environment,
+        platform_account_id=settings.human_tutor_stripe_platform_account_id,
+        connect_refresh_url=settings.human_tutor_stripe_connect_refresh_url,
+        connect_return_url=settings.human_tutor_stripe_connect_return_url,
+        checkout_success_url=settings.human_tutor_checkout_success_url,
+        checkout_cancel_url=settings.human_tutor_checkout_cancel_url,
+        meeting_hosts=settings.human_tutor_approved_meeting_hosts,
+        hold_seconds=settings.human_tutor_booking_hold_seconds,
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -211,7 +258,11 @@ def create_app(
                         if calendar_provider is not None:
                             await calendar_provider.close()
                     finally:
-                        database_engine.dispose()
+                        try:
+                            if stripe_marketplace_provider is not None:
+                                await stripe_marketplace_provider.close()
+                        finally:
+                            database_engine.dispose()
 
     application = FastAPI(
         title="GlideLingo API",
@@ -281,7 +332,19 @@ def create_app(
         application.state.marketplace_discovery_service = discovery_service
     if marketplace_service is not None:
         application.state.marketplace_calendar_service = calendar_runtime
-        application.state.marketplace_messaging_service = messaging_runtime
+    application.state.marketplace_messaging_service = messaging_runtime
+    application.state.marketplace_booking_service = booking_runtime
+    application.state.marketplace_stripe_webhook_max_body_bytes = (
+        settings.human_tutor_stripe_webhook_max_body_bytes
+    )
+    application.state.marketplace_stripe_webhook_secret = (
+        settings.human_tutor_stripe_webhook_secret.get_secret_value().encode()
+        if settings.human_tutor_stripe_webhook_secret is not None
+        else None
+    )
+    application.state.marketplace_stripe_signature_tolerance_seconds = (
+        settings.human_tutor_stripe_signature_tolerance_seconds
+    )
     application.add_exception_handler(
         DependencyUnavailableError,
         dependency_unavailable_handler,

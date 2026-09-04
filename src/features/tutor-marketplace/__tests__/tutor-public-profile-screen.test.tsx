@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, jest, test } from '@jest/globals';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { Linking } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import type { PublicTutor, TutorSlots } from '@/features/tutor-marketplace/api';
@@ -9,9 +10,11 @@ const mockGetTutor = jest.fn<() => Promise<PublicTutor>>();
 const mockGetSlots = jest.fn<() => Promise<TutorSlots>>();
 const mockFavorite = jest.fn<() => Promise<PublicTutor>>();
 const mockConversation = jest.fn<() => Promise<{ conversationId: string }>>();
+const mockCheckout = jest.fn<(tutorId: string, startsAt: string, key: string) => Promise<{ bookingId: string; checkoutUrl: string | null }>>();
 const mockPush = jest.fn();
 
 jest.mock('@/features/tutor-marketplace/api', () => ({
+  createBookingCheckout: (tutorId: string, startsAt: string, key: string) => mockCheckout(tutorId, startsAt, key),
   createMarketplaceConversation: () => mockConversation(),
   getPublicTutor: () => mockGetTutor(),
   listPublicTutorSlots: () => mockGetSlots(),
@@ -41,9 +44,9 @@ const tutor: PublicTutor = {
 };
 
 beforeEach(() => {
-  mockGetTutor.mockReset(); mockGetSlots.mockReset(); mockFavorite.mockReset(); mockConversation.mockReset(); mockPush.mockReset();
+  mockGetTutor.mockReset(); mockGetSlots.mockReset(); mockFavorite.mockReset(); mockConversation.mockReset(); mockCheckout.mockReset(); mockPush.mockReset();
 });
-afterEach(() => { cleanup(); delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_MESSAGING_ENABLED; });
+afterEach(() => { cleanup(); delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_MESSAGING_ENABLED; delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_COMMERCE_ENABLED; jest.restoreAllMocks(); });
 
 test('public profile renders only safe fields, empty slots, and a race-safe favorite action', async () => {
   mockGetTutor.mockResolvedValue(tutor);
@@ -100,4 +103,23 @@ test('opens a participant-scoped conversation when messaging is enabled', async 
   await waitFor(() => expect(screen.getByText('Message tutor')).toBeTruthy());
   await fireEvent.press(screen.getByText('Message tutor'));
   await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/messages/f8d97d12-3e8a-49c6-bb22-55c49956c8b9'));
+});
+
+test('creates one server-authoritative hold and opens only the parsed Stripe checkout', async () => {
+  process.env.EXPO_PUBLIC_HUMAN_TUTOR_COMMERCE_ENABLED = 'true';
+  const slot = { startsAt: '2026-09-05T15:00:00Z', endsAt: '2026-09-05T15:25:00Z' };
+  mockGetTutor.mockResolvedValue(tutor);
+  mockGetSlots.mockResolvedValue({ tutorId: tutor.tutorId, timeZone: tutor.timeZone, source: 'manual', freshness: 'current', slots: [slot] });
+  mockCheckout.mockResolvedValue({ bookingId: 'f8d97d12-3e8a-49c6-bb22-55c49956c8b9', checkoutUrl: 'https://checkout.stripe.com/c/pay/reviewed123' });
+  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+  const screen = await render(<SafeAreaProvider initialMetrics={metrics}><TutorPublicProfileScreen /></SafeAreaProvider>);
+
+  await waitFor(() => expect(screen.getByText('Book')).toBeTruthy());
+  await fireEvent.press(screen.getByText('Book'));
+  await waitFor(() => expect(mockCheckout).toHaveBeenCalledTimes(1));
+  expect(mockCheckout.mock.calls[0]?.[0]).toBe(tutor.tutorId);
+  expect(mockCheckout.mock.calls[0]?.[1]).toBe(slot.startsAt);
+  expect(mockCheckout.mock.calls[0]?.[2]).toMatch(/^[0-9a-f-]{36}$/i);
+  expect(mockPush).toHaveBeenCalledWith('/bookings/f8d97d12-3e8a-49c6-bb22-55c49956c8b9');
+  expect(open).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/reviewed123');
 });

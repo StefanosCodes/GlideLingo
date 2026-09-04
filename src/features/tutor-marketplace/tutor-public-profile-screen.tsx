@@ -1,14 +1,14 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Linking, StyleSheet, View } from 'react-native';
 
 import { ScreenFrame } from '@/components/screen-frame';
 import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { Spacing } from '@/constants/theme';
-import { createMarketplaceConversation, getPublicTutor, listPublicTutorSlots, setPublicTutorFavorite, type PublicTutor, type TutorSlot } from '@/features/tutor-marketplace/api';
-import { isHumanTutorMessagingEnabled } from '@/features/tutor-marketplace/config';
+import { createBookingCheckout, createMarketplaceConversation, getPublicTutor, listPublicTutorSlots, setPublicTutorFavorite, type PublicTutor, type TutorSlot } from '@/features/tutor-marketplace/api';
+import { isHumanTutorCommerceEnabled, isHumanTutorMessagingEnabled } from '@/features/tutor-marketplace/config';
 import { useTheme } from '@/hooks/use-theme';
 
 type State = { kind: 'loading' } | { kind: 'error' } | {
@@ -26,6 +26,8 @@ export function TutorPublicProfileScreen() {
   const [retry, setRetry] = useState(0);
   const [savingFavorite, setSavingFavorite] = useState(false);
   const [startingConversation, setStartingConversation] = useState(false);
+  const [bookingSlot, setBookingSlot] = useState<string | null>(null);
+  const idempotencyKeys = useRef(new Map<string, string>());
   const [actionError, setActionError] = useState<string | null>(null);
   const [state, setState] = useState<State>({ kind: 'loading' });
   useEffect(() => {
@@ -73,6 +75,22 @@ export function TutorPublicProfileScreen() {
       setActionError('A conversation could not be opened. Try again.');
     } finally { setStartingConversation(false); }
   };
+  const book = async (slot: TutorSlot) => {
+    if (bookingSlot) return;
+    setBookingSlot(slot.startsAt); setActionError(null);
+    let idempotencyKey = idempotencyKeys.current.get(slot.startsAt);
+    if (!idempotencyKey) {
+      idempotencyKey = createClientOperationId();
+      idempotencyKeys.current.set(slot.startsAt, idempotencyKey);
+    }
+    try {
+      const booking = await createBookingCheckout(state.tutor.tutorId, slot.startsAt, idempotencyKey);
+      router.push(`/bookings/${booking.bookingId}`);
+      if (booking.checkoutUrl) await Linking.openURL(booking.checkoutUrl);
+    } catch {
+      setActionError('Checkout could not be started. Your card was not assumed charged; retry safely.');
+    } finally { setBookingSlot(null); }
+  };
   return <ScreenFrame testID="tutor-public-profile-screen">
     <View style={styles.header}><ThemedText type="eyebrow" themeColor="textSecondary">PUBLIC TUTOR PROFILE</ThemedText>
       <ThemedText type="display">{state.tutor.headline}</ThemedText>
@@ -94,9 +112,23 @@ export function TutorPublicProfileScreen() {
       {state.slotFreshness === 'stale' ? <ThemedText type="body" themeColor="textSecondary">Calendar availability is temporarily stale. No time is shown as bookable until it refreshes.</ThemedText> :
         state.slotFreshness === 'reconnect_required' ? <ThemedText type="body" themeColor="textSecondary">This tutor needs to reconnect their calendar before calendar-backed times can appear.</ThemedText> :
         state.slots.length === 0 ? <ThemedText type="body" themeColor="textSecondary">No manual slots are available in the next two weeks.</ThemedText> :
-        state.slots.slice(0, 8).map((slot) => <ThemedText key={slot.startsAt} type="body">{new Date(slot.startsAt).toLocaleString()}</ThemedText>)}
+        state.slots.slice(0, 8).map((slot) => <View key={slot.startsAt} style={styles.slotRow}>
+          <ThemedText type="body">{new Date(slot.startsAt).toLocaleString()}</ThemedText>
+          {isHumanTutorCommerceEnabled() ? <GlideButton disabled={bookingSlot !== null}
+            label={bookingSlot === slot.startsAt ? 'Holding time…' : 'Book'}
+            onPress={() => void book(slot)} size="regular" variant="secondary" /> : null}
+        </View>)}
     </GlideSurface>
   </ScreenFrame>;
 }
 
-const styles = StyleSheet.create({ card: { gap: Spacing.two, width: '100%' }, header: { gap: Spacing.two, width: '100%' } });
+function createClientOperationId(): string {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `00000000-0000-4000-8000-${Date.now().toString().padStart(12, '0').slice(-12)}`;
+}
+
+const styles = StyleSheet.create({
+  card: { gap: Spacing.two, width: '100%' },
+  header: { gap: Spacing.two, width: '100%' },
+  slotRow: { alignItems: 'center', flexDirection: 'row', gap: Spacing.two, justifyContent: 'space-between' },
+});

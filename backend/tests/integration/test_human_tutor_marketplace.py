@@ -12,7 +12,13 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import DBAPIError
 
 from app.core.config import Settings
+from app.core.errors import TutorApplicationConflictError
 from app.modules.human_tutor_marketplace.availability import TimeInterval
+from app.modules.human_tutor_marketplace.booking import (
+    PostgresBookingRepository,
+    StripeCheckout,
+    StripeConnectAccount,
+)
 from app.modules.human_tutor_marketplace.calendar import PostgresCalendarRepository
 from app.modules.human_tutor_marketplace.discovery import PostgresDiscoveryRepository
 from app.modules.human_tutor_marketplace.identity import derive_marketplace_actor_ref
@@ -43,6 +49,9 @@ MIGRATIONS = (
     Path(__file__).resolve().parents[2]
     / "migrations"
     / "010_human_tutor_marketplace_messaging.sql",
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "011_human_tutor_marketplace_booking_checkout.sql",
 )
 SAFE_SEARCH_PATH = "pg_catalog, public, pg_temp"
 TUTOR_ACTOR = derive_marketplace_actor_ref(
@@ -182,6 +191,53 @@ def create_approved_tutor(
     return application_id, profile
 
 
+def create_bookable_tutor(
+    marketplace_engine: Engine,
+) -> tuple[PostgresTutorApplicationRepository, PostgresBookingRepository, StoredTutorProfile]:
+    core = PostgresTutorApplicationRepository(engine=marketplace_engine)
+    booking = PostgresBookingRepository(engine=marketplace_engine)
+    _, profile = create_approved_tutor(core)
+    connected = booking.store_connect_account(
+        tutor_actor_ref=TUTOR_ACTOR,
+        account=StripeConnectAccount(
+            account_id="acct_reviewed123",
+            livemode=False,
+            details_submitted=True,
+            charges_enabled=True,
+            payouts_enabled=True,
+            requirements_due=0,
+            observed_at=datetime.now(UTC),
+        ),
+        environment="SANDBOX",
+    )
+    assert connected is not None and connected.payouts_enabled
+    assert booking.save_meeting_url(
+        tutor_actor_ref=TUTOR_ACTOR,
+        url="https://meet.example.com/reviewed-room",
+    )
+    refreshed = core.get_profile_by_actor(actor_ref=TUTOR_ACTOR)
+    assert refreshed is not None
+    offered = core.save_offering(
+        actor_ref=TUTOR_ACTOR,
+        request=SaveTutorOfferingRequest(
+            expected_version=0,
+            title="Safe conversation lesson",
+            duration_minutes=25,
+            amount_minor=2500,
+            currency="USD",
+        ),
+    )
+    assert offered is not None and offered.offering is not None
+    published = core.set_publication(
+        actor_ref=TUTOR_ACTOR,
+        expected_profile_version=offered.version,
+        expected_offering_version=offered.offering.version,
+        publish=True,
+    )
+    assert published is not None
+    return core, booking, published
+
+
 @pytest.mark.integration
 def test_marketplace_functions_pin_a_trusted_search_path(
     marketplace_engine: Engine,
@@ -204,7 +260,11 @@ def test_marketplace_functions_pin_a_trusted_search_path(
             )
         ).all()
 
-    assert len(functions) == 8
+    assert {name for name, _ in functions} >= {
+        "marketplace_enforce_booking_overlap",
+        "marketplace_enforce_booking_transition",
+        "marketplace_set_tutor_publication",
+    }
     assert all(config == [expected_setting] for _, config in functions)
 
 
@@ -1431,3 +1491,183 @@ def test_published_workspace_requires_explicit_unpublish_before_editing(
         ),
     )
     assert edited is not None
+
+
+@pytest.mark.integration
+def test_booking_holds_overlap_webhooks_money_and_participant_scope(
+    marketplace_engine: Engine,
+) -> None:
+    _, booking, profile = create_bookable_tutor(marketplace_engine)
+    now = datetime.now(UTC)
+    starts_at = now + timedelta(days=2)
+    platform_account = "acct_reviewed123"
+    barrier = Barrier(2)
+
+    def attempt_hold(learner_actor_ref: str) -> object:
+        barrier.wait(timeout=2)
+        try:
+            return booking.create_hold(
+                learner_actor_ref=learner_actor_ref,
+                tutor_id=profile.tutor_id,
+                starts_at=starts_at,
+                idempotency_key=uuid4(),
+                now=now,
+                hold_seconds=600,
+                environment="SANDBOX",
+                platform_account_id=platform_account,
+            )
+        except TutorApplicationConflictError:
+            return "overlap_rejected"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(attempt_hold, (LEARNER_ACTOR, OUTSIDER_ACTOR)))
+    assert sum(result == "overlap_rejected" for result in results) == 1
+    held = cast(Any, next(result for result in results if result != "overlap_rejected"))
+    assert held is not None
+    owner = held.learner_actor_ref
+    other = OUTSIDER_ACTOR if owner == LEARNER_ACTOR else LEARNER_ACTOR
+    assert booking.get_booking(booking_id=held.booking_id, actor_ref=other) is None
+
+    idempotency_key = uuid4()
+    idempotent_start = starts_at + timedelta(days=1)
+    first = booking.create_hold(
+        learner_actor_ref=owner,
+        tutor_id=profile.tutor_id,
+        starts_at=idempotent_start,
+        idempotency_key=idempotency_key,
+        now=now,
+        hold_seconds=600,
+        environment="SANDBOX",
+        platform_account_id=platform_account,
+    )
+    repeated = booking.create_hold(
+        learner_actor_ref=owner,
+        tutor_id=profile.tutor_id,
+        starts_at=idempotent_start,
+        idempotency_key=idempotency_key,
+        now=now,
+        hold_seconds=600,
+        environment="SANDBOX",
+        platform_account_id=platform_account,
+    )
+    assert first is not None and repeated is not None
+    assert repeated.booking_id == first.booking_id
+    with pytest.raises(TutorApplicationConflictError):
+        booking.create_hold(
+            learner_actor_ref=owner,
+            tutor_id=profile.tutor_id,
+            starts_at=idempotent_start + timedelta(hours=1),
+            idempotency_key=idempotency_key,
+            now=now,
+            hold_seconds=600,
+            environment="SANDBOX",
+            platform_account_id=platform_account,
+        )
+
+    checkout = StripeCheckout(
+        checkout_id="cs_test_reviewed123",
+        url="https://checkout.stripe.com/c/pay/reviewed123",
+        payment_intent_id="pi_reviewed123",
+        status="open",
+        payment_status="unpaid",
+        livemode=False,
+        booking_id=held.booking_id,
+        platform_account_id=platform_account,
+        created_at=now,
+    )
+    pending = booking.attach_checkout(
+        booking_id=held.booking_id,
+        learner_actor_ref=owner,
+        checkout=checkout,
+    )
+    assert pending is not None and pending.state == "payment_pending"
+    assert pending.amount_minor == pending.commission_amount_minor + pending.tutor_amount_minor
+    assert pending.commission_basis_points == 2000
+
+    confirmed_checkout = StripeCheckout(
+        checkout_id=checkout.checkout_id,
+        url=None,
+        payment_intent_id=checkout.payment_intent_id,
+        status="complete",
+        payment_status="paid",
+        livemode=False,
+        booking_id=held.booking_id,
+        platform_account_id=platform_account,
+        created_at=now + timedelta(minutes=1),
+    )
+    outcome, confirmed = booking.apply_checkout_observation(
+        checkout=confirmed_checkout,
+        payload_sha256="a" * 64,
+        event_id="evt_reviewed123",
+        event_type="checkout.session.completed",
+        source="provider_webhook",
+        environment="SANDBOX",
+        platform_account_id=platform_account,
+    )
+    assert outcome == "applied"
+    assert confirmed is not None and confirmed.state == "confirmed"
+    duplicate, _ = booking.apply_checkout_observation(
+        checkout=confirmed_checkout,
+        payload_sha256="a" * 64,
+        event_id="evt_reviewed123",
+        event_type="checkout.session.completed",
+        source="provider_webhook",
+        environment="SANDBOX",
+        platform_account_id=platform_account,
+    )
+    assert duplicate == "duplicate"
+
+    older = StripeCheckout(
+        checkout_id=checkout.checkout_id,
+        url=None,
+        payment_intent_id=checkout.payment_intent_id,
+        status="expired",
+        payment_status="unpaid",
+        livemode=False,
+        booking_id=held.booking_id,
+        platform_account_id=platform_account,
+        created_at=now,
+    )
+    stale, _ = booking.apply_checkout_observation(
+        checkout=older,
+        payload_sha256="b" * 64,
+        event_id="evt_reviewed456",
+        event_type="checkout.session.expired",
+        source="provider_webhook",
+        environment="SANDBOX",
+        platform_account_id=platform_account,
+    )
+    assert stale == "out_of_order"
+
+    wrong_account = StripeCheckout(
+        checkout_id=checkout.checkout_id,
+        url=None,
+        payment_intent_id=checkout.payment_intent_id,
+        status="complete",
+        payment_status="paid",
+        livemode=False,
+        booking_id=held.booking_id,
+        platform_account_id="acct_wrong12345",
+        created_at=now + timedelta(minutes=2),
+    )
+    ignored, _ = booking.apply_checkout_observation(
+        checkout=wrong_account,
+        payload_sha256="c" * 64,
+        event_id="evt_reviewed789",
+        event_type="checkout.session.completed",
+        source="provider_webhook",
+        environment="SANDBOX",
+        platform_account_id=platform_account,
+    )
+    assert ignored == "ignored"
+
+    with marketplace_engine.connect() as connection:
+        system_messages = connection.execute(
+            text(
+                "SELECT count(*) FROM marketplace_message AS message "
+                "JOIN marketplace_conversation AS conversation USING (conversation_id) "
+                "WHERE conversation.booking_id = :booking_id AND message.kind = 'system'"
+            ),
+            {"booking_id": held.booking_id},
+        ).scalar_one()
+    assert system_messages == 1

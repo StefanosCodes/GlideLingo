@@ -9,3 +9,7 @@ export function isHumanTutorGoogleCalendarEnabled(): boolean {
 export function isHumanTutorMessagingEnabled(): boolean {
   return process.env.EXPO_PUBLIC_HUMAN_TUTOR_MESSAGING_ENABLED === 'true';
 }
+
+export function isHumanTutorCommerceEnabled(): boolean {
+  return process.env.EXPO_PUBLIC_HUMAN_TUTOR_COMMERCE_ENABLED === 'true';
+}

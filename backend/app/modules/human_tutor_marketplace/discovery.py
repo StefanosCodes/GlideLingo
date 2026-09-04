@@ -129,6 +129,12 @@ class DiscoveryRepository(Protocol):
     def set_favorite(self, *, learner_actor_ref: str, tutor_id: UUID, favorite: bool) -> bool: ...
 
 
+class BookingBusyReader(Protocol):
+    def list_internal_busy(
+        self, *, tutor_id: UUID, starts_at: datetime, ends_at: datetime
+    ) -> tuple[TimeInterval, ...]: ...
+
+
 class PostgresDiscoveryRepository:
     def __init__(self, *, engine: Engine) -> None:
         self._engine = engine
@@ -518,6 +524,33 @@ class PostgresDiscoveryRepository:
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
+    def list_internal_busy(
+        self, *, tutor_id: UUID, starts_at: datetime, ends_at: datetime
+    ) -> tuple[TimeInterval, ...]:
+        try:
+            with self._engine.connect() as connection:
+                return tuple(
+                    TimeInterval(starts_at=row.starts_at, ends_at=row.ends_at)
+                    for row in connection.execute(
+                        text(
+                            """
+                            SELECT starts_at, ends_at
+                            FROM marketplace_booking
+                            WHERE tutor_id = :tutor_id
+                              AND state IN (
+                                'held', 'payment_pending', 'payment_ambiguous', 'confirmed'
+                              )
+                              AND tstzrange(starts_at, ends_at, '[)')
+                                  && tstzrange(:starts_at, :ends_at, '[)')
+                            ORDER BY starts_at, ends_at, booking_id
+                            """
+                        ),
+                        {"tutor_id": tutor_id, "starts_at": starts_at, "ends_at": ends_at},
+                    )
+                )
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
     @classmethod
     def _hydrate_schedule(cls, connection: Connection, row: RowMapping) -> StoredManualAvailability:
         tutor_id = row["tutor_id"]
@@ -639,11 +672,13 @@ class MarketplaceDiscoveryService:
         *,
         repository: DiscoveryRepository,
         calendar_busy_reader: CalendarRepository | None = None,
+        booking_busy_reader: BookingBusyReader | None = None,
         pseudonym_key: bytes | None,
         actor_allowlist: tuple[str, ...],
     ) -> None:
         self._repository = repository
         self._calendar_busy_reader = calendar_busy_reader
+        self._booking_busy_reader = booking_busy_reader
         self._pseudonym_key = pseudonym_key
         self._actor_allowlist = frozenset(actor_allowlist)
 
@@ -730,7 +765,10 @@ class MarketplaceDiscoveryService:
                         starts_at=now,
                         ends_at=available_before,
                         limit=1,
-                        busy_intervals=calendar.intervals,
+                        busy_intervals=calendar.intervals
+                        + await self._internal_busy(
+                            tutor_id=tutor.tutor_id, starts_at=now, ends_at=available_before
+                        ),
                     )
                     if slots:
                         available.append(tutor)
@@ -806,7 +844,8 @@ class MarketplaceDiscoveryService:
             starts_at=starts_at,
             ends_at=ends_at,
             limit=limit,
-            busy_intervals=calendar.intervals,
+            busy_intervals=calendar.intervals
+            + await self._internal_busy(tutor_id=tutor_id, starts_at=starts_at, ends_at=ends_at),
         )
         return TutorSlotsResponse(
             tutor_id=tutor_id,
@@ -853,7 +892,10 @@ class MarketplaceDiscoveryService:
             starts_at=starts_at,
             ends_at=ends_at,
             limit=limit,
-            busy_intervals=calendar.intervals,
+            busy_intervals=calendar.intervals
+            + await self._internal_busy(
+                tutor_id=schedule.tutor_id, starts_at=starts_at, ends_at=ends_at
+            ),
         )
         return TutorSlotsResponse(
             tutor_id=schedule.tutor_id,
@@ -915,6 +957,18 @@ class MarketplaceDiscoveryService:
             self._calendar_busy_reader.get_busy_snapshot,
             tutor_id=tutor_id,
             now=now,
+        )
+
+    async def _internal_busy(
+        self, *, tutor_id: UUID, starts_at: datetime, ends_at: datetime
+    ) -> tuple[TimeInterval, ...]:
+        if self._booking_busy_reader is None:
+            return ()
+        return await asyncio.to_thread(
+            self._booking_busy_reader.list_internal_busy,
+            tutor_id=tutor_id,
+            starts_at=starts_at,
+            ends_at=ends_at,
         )
 
     def _actor_ref(self, principal: ClerkPrincipal) -> str:

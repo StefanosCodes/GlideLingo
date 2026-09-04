@@ -79,6 +79,17 @@ test('evidence rejects failed responses and ignores empty transcripts', async ()
   assert.equal(tracker.diagnostics().responseDoneCompleted, false);
 });
 
+test('evidence classifies a bounded response that reaches its output limit', async () => {
+  const tracker = createEvidenceTracker({ model: 'gpt-realtime-2.1', voice: 'marin' });
+  tracker.observeEvent({
+    type: 'response.done',
+    response: { status: 'incomplete', status_details: { reason: 'max_output_tokens' } },
+  });
+  await assert.rejects(tracker.complete, /did not complete successfully/);
+  assert.equal(tracker.diagnostics().responseDoneIncomplete, true);
+  assert.equal(tracker.diagnostics().responseLimitReached, true);
+});
+
 test('provider configuration accepts an echoed transcription config whose model is omitted', () => {
   const tracker = createEvidenceTracker({ model: 'gpt-realtime-2.1', voice: 'marin' });
   tracker.observeEvent({

@@ -56,7 +56,7 @@ class OpenAIRealtimeVoiceAdapter:
             "type": "realtime",
             "model": self._model,
             "instructions": instructions,
-            "max_output_tokens": 300,
+            "max_output_tokens": 1000,
             "output_modalities": ["audio"],
             "parallel_tool_calls": False,
             "tool_choice": "none",

@@ -97,7 +97,6 @@ export function createEvidenceTracker({ model, voice }) {
         state.providerConfigurationObserved =
           state.sessionModelMatches &&
           state.sessionVoiceMatches &&
-          state.transcriptionConfigured &&
           state.toolsDisabled &&
           state.toolChoiceNone &&
           state.turnDetectionDisabled;

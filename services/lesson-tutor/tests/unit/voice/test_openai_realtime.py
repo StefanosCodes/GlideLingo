@@ -81,6 +81,7 @@ def test_creates_audio_only_call_and_retains_cleanup_reference() -> None:
         assert isinstance(session, dict)
         assert session["model"] == "configured-realtime-model"
         assert session["output_modalities"] == ["audio"]
+        assert session["max_output_tokens"] == 1000
         assert session["parallel_tool_calls"] is False
         assert session["tool_choice"] == "none"
         assert session["tools"] == []

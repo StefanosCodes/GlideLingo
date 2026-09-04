@@ -13,6 +13,25 @@ def test_private_tutor_is_disabled_by_default() -> None:
     assert settings.model_deadline_seconds == 4
     assert settings.service_deadline_seconds == 5
     assert settings.openai_api_key is None
+    assert settings.voice_enabled is False
+    assert settings.openai_realtime_model is None
+    assert settings.openai_realtime_voice_id is None
+
+
+def test_voice_requires_explicit_provider_selection_and_key() -> None:
+    with pytest.raises(ValidationError, match="OPENAI_API_KEY"):
+        Settings(_env_file=None, voice_enabled=True)
+    with pytest.raises(ValidationError, match="Realtime model and voice"):
+        Settings(_env_file=None, voice_enabled=True, openai_api_key="test-only-key")
+
+    settings = Settings(
+        _env_file=None,
+        voice_enabled=True,
+        openai_api_key="test-only-key",
+        openai_realtime_model="configured-realtime-model",
+        openai_realtime_voice_id="configured-voice",
+    )
+    assert settings.voice_enabled is True
 
 
 def test_enabled_private_tutor_requires_openai_key() -> None:

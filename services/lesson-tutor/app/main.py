@@ -11,20 +11,29 @@ from app.core.errors import (
     LessonContextNotFoundError,
     LessonTutorTimeoutError,
     LessonTutorUnavailableError,
+    VoiceRealtimeTimeoutError,
+    VoiceRealtimeUnavailableError,
     context_not_found,
     tutor_timeout,
     tutor_unavailable,
+    voice_timeout,
+    voice_unavailable,
 )
 from app.core.request_id import RequestIdMiddleware
 from app.integrations.openai.lesson_tutor_agent import OpenAILessonTutorAgent
+from app.integrations.openai.realtime_voice import OpenAIRealtimeVoiceAdapter
 from app.modules.lesson_tutor.router import router as lesson_tutor_router
 from app.modules.lesson_tutor.service import LessonTutorService
+from app.modules.voice.router import router as voice_router
+from app.modules.voice.service import VoiceRealtimeService, VoiceScenarioResolver
 
 
 def create_app(
     settings: Settings | None = None,
     *,
     lesson_tutor_service: LessonTutorService | None = None,
+    voice_realtime_service: VoiceRealtimeService | None = None,
+    voice_scenario_resolver: VoiceScenarioResolver | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     lesson_tutor_agent = (
@@ -36,14 +45,31 @@ def create_app(
         if lesson_tutor_service is None and settings.enabled and settings.openai_api_key is not None
         else None
     )
+    voice_adapter = (
+        OpenAIRealtimeVoiceAdapter(
+            api_key=settings.openai_api_key.get_secret_value(),
+            model=settings.openai_realtime_model,
+            provider_timeout_seconds=settings.voice_provider_deadline_seconds,
+        )
+        if voice_realtime_service is None
+        and settings.voice_enabled
+        and settings.openai_api_key is not None
+        and settings.openai_realtime_model is not None
+        and voice_scenario_resolver is not None
+        else None
+    )
 
     @asynccontextmanager
     async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
         try:
             yield
         finally:
-            if lesson_tutor_agent is not None:
-                await lesson_tutor_agent.close()
+            try:
+                if lesson_tutor_agent is not None:
+                    await lesson_tutor_agent.close()
+            finally:
+                if voice_adapter is not None:
+                    await voice_adapter.close()
 
     application = FastAPI(
         title="GlideLingo Private Lesson Tutor",
@@ -56,12 +82,22 @@ def create_app(
         content_root=settings.content_root,
         deadline_seconds=settings.service_deadline_seconds,
     )
+    application.state.voice_realtime_service = voice_realtime_service or VoiceRealtimeService(
+        enabled=settings.voice_enabled,
+        adapter=voice_adapter,
+        scenario_resolver=voice_scenario_resolver,
+        voice_id=settings.openai_realtime_voice_id,
+        deadline_seconds=settings.voice_service_deadline_seconds,
+    )
     application.add_exception_handler(LessonContextNotFoundError, context_not_found)
     application.add_exception_handler(LessonTutorUnavailableError, tutor_unavailable)
     application.add_exception_handler(LessonTutorTimeoutError, tutor_timeout)
+    application.add_exception_handler(VoiceRealtimeUnavailableError, voice_unavailable)
+    application.add_exception_handler(VoiceRealtimeTimeoutError, voice_timeout)
     application.add_middleware(RequestIdMiddleware)
     application.include_router(health_router)
     application.include_router(lesson_tutor_router)
+    application.include_router(voice_router)
     return application
 
 

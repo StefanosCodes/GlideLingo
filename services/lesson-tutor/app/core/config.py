@@ -23,6 +23,11 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("OPENAI_API_KEY", "GLIDELINGO_TUTOR_OPENAI_API_KEY"),
     )
+    voice_enabled: bool = False
+    openai_realtime_model: str | None = None
+    openai_realtime_voice_id: str | None = None
+    voice_provider_deadline_seconds: float = Field(default=8.0, gt=0, le=10)
+    voice_service_deadline_seconds: float = Field(default=10.0, gt=0, le=12)
     model_deadline_seconds: float = Field(default=4.0, gt=0, le=4)
     service_deadline_seconds: float = Field(default=5.0, gt=0, le=5)
     content_root: Path = DEFAULT_CONTENT_ROOT
@@ -30,10 +35,18 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_enabled(self) -> Self:
-        if self.enabled and (
+        if (self.enabled or self.voice_enabled) and (
             self.openai_api_key is None or not self.openai_api_key.get_secret_value().strip()
         ):
-            raise ValueError("OPENAI_API_KEY is required when the private tutor is enabled")
+            raise ValueError("OPENAI_API_KEY is required when an OpenAI runtime is enabled")
         if self.model_deadline_seconds >= self.service_deadline_seconds:
             raise ValueError("The provider deadline must be shorter than the service deadline")
+        if self.voice_enabled and (
+            not self.openai_realtime_model or not self.openai_realtime_voice_id
+        ):
+            raise ValueError("Realtime model and voice must be selected when voice is enabled")
+        if self.voice_provider_deadline_seconds >= self.voice_service_deadline_seconds:
+            raise ValueError(
+                "The Realtime provider deadline must be shorter than the service deadline"
+            )
         return self

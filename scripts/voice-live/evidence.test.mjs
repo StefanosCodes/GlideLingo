@@ -106,3 +106,17 @@ test('provider configuration accepts an echoed transcription config whose model 
   assert.equal(tracker.diagnostics().transcriptionConfigured, true);
   assert.equal(tracker.diagnostics().transcriptionModelMatches, false);
 });
+
+test('provider configuration does not depend on optional echoed input settings', () => {
+  const tracker = createEvidenceTracker({ model: 'gpt-realtime-2.1', voice: 'marin' });
+  tracker.observeEvent({
+    ...sessionCreated,
+    session: {
+      ...sessionCreated.session,
+      audio: { output: sessionCreated.session.audio.output },
+    },
+  });
+  assert.equal(tracker.diagnostics().providerConfigurationObserved, true);
+  assert.equal(tracker.diagnostics().transcriptionConfigured, false);
+  assert.equal(tracker.diagnostics().turnDetectionDisabled, false);
+});

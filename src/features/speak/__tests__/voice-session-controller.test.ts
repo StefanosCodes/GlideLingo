@@ -12,6 +12,7 @@ const ADMISSION: VoiceSessionAdmission = {
   spec: {
     course_id: 'el-from-zero',
     course_version: 'greek-foundations-v1',
+    course_content_hash: `sha256:${'a'.repeat(64)}`,
     scenario_id: 'el-greeting-introduction-v1',
     scenario_version: '1.0.0',
     conversation_mode: 'guided',
@@ -75,6 +76,36 @@ test('failed admission cancels prepared media and enters a safe terminal state',
   );
   expect(media.closeChannel).toHaveBeenCalledTimes(1);
   expect(media.closePeer).toHaveBeenCalledTimes(1);
+  expect(media.stop).toHaveBeenCalledTimes(1);
+  expect(controller.snapshot).toMatchObject({ lifecycle: 'failed', failureCode: 'start_failed' });
+});
+
+test('a total connection deadline bounds microphone acquisition and disposes a late stream', async () => {
+  const media = mediaFakes();
+  let releaseMicrophone: ((stream: MediaStream) => void) | undefined;
+  const microphone = new Promise<MediaStream>((resolve) => {
+    releaseMicrophone = resolve;
+  });
+  const controller = new VoiceSessionController(
+    jest.fn(),
+    true,
+    {
+      requestMicrophone: jest.fn(() => microphone),
+      prepare: jest.fn(),
+      create: jest.fn(),
+      connect: jest.fn(),
+      reconnect: jest.fn(),
+      end: jest.fn(),
+    } as never,
+    5,
+  );
+
+  await expect(
+    controller.start({ ...REQUEST, client_capabilities: [...REQUEST.client_capabilities] }),
+  ).rejects.toThrow('deadline elapsed');
+  releaseMicrophone?.(media.stream);
+  await Promise.resolve();
+
   expect(media.stop).toHaveBeenCalledTimes(1);
   expect(controller.snapshot).toMatchObject({ lifecycle: 'failed', failureCode: 'start_failed' });
 });

@@ -34,6 +34,8 @@ const DEFAULT_DEPENDENCIES: VoiceSessionControllerDependencies = {
   requestMicrophone,
 };
 
+const DEFAULT_CONNECTION_DEADLINE_MS = 20_000;
+
 export class VoiceSessionController {
   private admission: VoiceSessionAdmission | null = null;
   private dependencies: VoiceSessionControllerDependencies;
@@ -49,6 +51,7 @@ export class VoiceSessionController {
     private readonly onState: (state: VoiceSessionState) => void,
     captionsEnabled = true,
     dependencies: VoiceSessionControllerDependencies = DEFAULT_DEPENDENCIES,
+    private readonly connectionDeadlineMs = DEFAULT_CONNECTION_DEADLINE_MS,
   ) {
     this.state = initialVoiceSessionState(captionsEnabled);
     this.dependencies = dependencies;
@@ -60,28 +63,41 @@ export class VoiceSessionController {
 
   async start(request: Omit<StartVoiceSession, 'offer_sdp'>): Promise<VoiceSessionAdmission> {
     const generation = ++this.generation;
+    const deadlineAt = Date.now() + this.connectionDeadlineMs;
     const abort = new AbortController();
     this.pendingAbort = abort;
     let admission: VoiceSessionAdmission | null = null;
     let prepared: PreparedRealtimeConnection | null = null;
     try {
-      const stream = await this.dependencies.requestMicrophone();
+      const stream = await withinDeadline(
+        this.dependencies.requestMicrophone(),
+        deadlineAt,
+        stopStream,
+      );
       this.pendingStream = stream;
       if (generation !== this.generation) throw new Error('Voice start was cancelled.');
-      prepared = await this.dependencies.prepare(stream);
+      prepared = await withinDeadline(this.dependencies.prepare(stream), deadlineAt, discardPrepared);
       this.pendingStream = null;
       this.pendingPrepared = prepared;
       if (generation !== this.generation) throw new Error('Voice start was cancelled.');
       const startRequest = { ...request, offer_sdp: prepared.offerSdp };
       const idempotencyKey = makeIdempotencyKey('voice-start');
-      admission = await retryAmbiguousRequest(
-        () => this.dependencies.create(startRequest, idempotencyKey, abort.signal),
-        abort.signal,
+      admission = await withinDeadline(
+        retryAmbiguousRequest(
+          () => this.dependencies.create(startRequest, idempotencyKey, abort.signal),
+          abort.signal,
+        ),
+        deadlineAt,
+        (lateAdmission) => void this.stopAdmission(lateAdmission, 'failed'),
       );
       if (generation !== this.generation) throw new Error('Voice start was superseded.');
       this.admission = admission;
       this.dispatch({ type: 'admitted' });
-      const transport = await this.attach(admission, prepared, generation);
+      const transport = await withinDeadline(
+        this.attach(admission, prepared, generation),
+        deadlineAt,
+        (lateTransport) => lateTransport.close(),
+      );
       if (generation !== this.generation) {
         transport.close();
         if (this.transport === transport) this.transport = null;
@@ -91,6 +107,7 @@ export class VoiceSessionController {
       this.pendingAbort = null;
       return admission;
     } catch (error) {
+      abort.abort();
       this.discardPending(prepared);
       if (admission !== null) await this.stopAdmission(admission, 'failed');
       if (generation === this.generation) {
@@ -105,6 +122,7 @@ export class VoiceSessionController {
     const admission = this.admission;
     if (!admission || this.state.lifecycle !== 'reconnecting') return;
     const generation = ++this.generation;
+    const deadlineAt = Date.now() + this.connectionDeadlineMs;
     const abort = new AbortController();
     this.pendingAbort = abort;
     this.transport?.close();
@@ -112,28 +130,40 @@ export class VoiceSessionController {
     let replacementAdmission: VoiceSessionAdmission | null = null;
     let prepared: PreparedRealtimeConnection | null = null;
     try {
-      const stream = await this.dependencies.requestMicrophone();
+      const stream = await withinDeadline(
+        this.dependencies.requestMicrophone(),
+        deadlineAt,
+        stopStream,
+      );
       this.pendingStream = stream;
       if (generation !== this.generation) throw new Error('Voice reconnect was cancelled.');
-      prepared = await this.dependencies.prepare(stream);
+      prepared = await withinDeadline(this.dependencies.prepare(stream), deadlineAt, discardPrepared);
       this.pendingStream = null;
       this.pendingPrepared = prepared;
       const replacementPrepared = prepared;
       const idempotencyKey = makeIdempotencyKey('voice-reconnect');
-      replacementAdmission = await retryAmbiguousRequest(
-        () =>
-          this.dependencies.reconnect(
-            admission.session_id,
-            replacementPrepared.offerSdp,
-            idempotencyKey,
-            abort.signal,
-          ),
-        abort.signal,
+      replacementAdmission = await withinDeadline(
+        retryAmbiguousRequest(
+          () =>
+            this.dependencies.reconnect(
+              admission.session_id,
+              replacementPrepared.offerSdp,
+              idempotencyKey,
+              abort.signal,
+            ),
+          abort.signal,
+        ),
+        deadlineAt,
+        (lateAdmission) => void this.stopAdmission(lateAdmission, 'failed'),
       );
       const replacement = replacementAdmission;
       if (generation !== this.generation) throw new Error('Voice reconnect was superseded.');
       this.admission = replacement;
-      const transport = await this.attach(replacement, replacementPrepared, generation);
+      const transport = await withinDeadline(
+        this.attach(replacement, replacementPrepared, generation),
+        deadlineAt,
+        (lateTransport) => lateTransport.close(),
+      );
       if (generation !== this.generation) {
         transport.close();
         if (this.transport === transport) this.transport = null;
@@ -142,6 +172,7 @@ export class VoiceSessionController {
       this.pendingPrepared = null;
       this.pendingAbort = null;
     } catch (error) {
+      abort.abort();
       this.discardPending(prepared);
       if (replacementAdmission !== null) {
         await this.stopAdmission(replacementAdmission, 'failed');
@@ -283,6 +314,10 @@ function discardPrepared(prepared: PreparedRealtimeConnection): void {
   prepared.microphoneStream.getTracks().forEach((track) => track.stop());
 }
 
+function stopStream(stream: MediaStream): void {
+  stream.getTracks().forEach((track) => track.stop());
+}
+
 function makeIdempotencyKey(prefix: string): string {
   const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
   return `${prefix}:${random}`;
@@ -309,4 +344,40 @@ async function retryAmbiguousRequest<T>(
     }
     return operation();
   }
+}
+
+async function withinDeadline<T>(
+  operation: Promise<T>,
+  deadlineAt: number,
+  disposeLateValue: (value: T) => void,
+): Promise<T> {
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) {
+    void operation.then(disposeLateValue, () => undefined);
+    throw new Error('The voice connection deadline elapsed.');
+  }
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const timer = globalThis.setTimeout(() => {
+      settled = true;
+      reject(new Error('The voice connection deadline elapsed.'));
+    }, remaining);
+    void operation.then(
+      (value) => {
+        if (settled) {
+          disposeLateValue(value);
+          return;
+        }
+        settled = true;
+        globalThis.clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        globalThis.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }

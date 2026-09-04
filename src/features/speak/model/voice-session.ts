@@ -17,6 +17,7 @@ export type VoiceTurnState =
 export type VoiceSessionSpec = {
   course_id: string;
   course_version: string;
+  course_content_hash: string;
   scenario_id: string;
   scenario_version: string;
   conversation_mode: 'guided';

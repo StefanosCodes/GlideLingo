@@ -38,6 +38,7 @@ const ADMISSION: VoiceSessionAdmission = {
   spec: {
     course_id: 'el-from-zero',
     course_version: 'greek-foundations-v1',
+    course_content_hash: `sha256:${'a'.repeat(64)}`,
     scenario_id: 'el-letters-1-voice-v1',
     scenario_version: '1.0.0',
     conversation_mode: 'guided',
@@ -74,6 +75,7 @@ function activeState(captionsEnabled: boolean, events: VoiceSessionEvent[] = [])
 function successfulFactory(events: VoiceSessionEvent[] = []) {
   const requests: unknown[] = [];
   const muted: boolean[] = [];
+  const interrupt = jest.fn(() => true);
   const factory: VoiceControllerFactory = (onState, captionsEnabled) => {
     let state = initialVoiceSessionState(captionsEnabled);
     return {
@@ -87,6 +89,7 @@ function successfulFactory(events: VoiceSessionEvent[] = []) {
         return ADMISSION;
       },
       async reconnect() {},
+      interrupt,
       setMuted(value) {
         muted.push(value);
         state = { ...state, muted: value };
@@ -99,7 +102,7 @@ function successfulFactory(events: VoiceSessionEvent[] = []) {
       },
     };
   };
-  return { factory, muted, requests };
+  return { factory, interrupt, muted, requests };
 }
 
 test('keeps captions configurable before consent and exposes active and ended states', async () => {
@@ -125,6 +128,12 @@ test('keeps captions configurable before consent and exposes active and ended st
   fireEvent.press(screen.getByText('Start talking'));
   expect(voice.muted).toEqual([false]);
   await waitFor(() => expect(screen.getByText('Captions off · Listening')).toBeTruthy());
+
+  await act(async () => {
+    fireEvent.press(screen.getByText('Stop coach response'));
+    await Promise.resolve();
+  });
+  expect(voice.interrupt).toHaveBeenCalledTimes(1);
 
   fireEvent.press(screen.getByText('End voice practice'));
   await waitFor(() =>
@@ -172,6 +181,9 @@ test('renders a retry after failure and creates a fresh controller for the retry
         return ADMISSION;
       },
       async reconnect() {},
+      interrupt() {
+        return false;
+      },
       setMuted() {},
       end: cleanup,
     };
@@ -211,6 +223,9 @@ test('offers a bounded reconnect action after connection loss', async () => {
         void reconnect();
         state = activeState(captionsEnabled);
         onState(state);
+      },
+      interrupt() {
+        return false;
       },
       setMuted() {},
       async end() {
@@ -269,6 +284,9 @@ test('unmount ends an active voice session without waiting on UI state', async (
         return ADMISSION;
       },
       async reconnect() {},
+      interrupt() {
+        return false;
+      },
       setMuted() {},
       end,
     };

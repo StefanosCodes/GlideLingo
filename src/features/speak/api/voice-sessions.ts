@@ -146,6 +146,7 @@ function parseSpec(value: Record<string, unknown>): VoiceSessionSpec | null {
   const strings = [
     'course_id',
     'course_version',
+    'course_content_hash',
     'scenario_id',
     'scenario_version',
     'source_locale',
@@ -158,6 +159,7 @@ function parseSpec(value: Record<string, unknown>): VoiceSessionSpec | null {
   ];
   if (strings.some((key) => typeof value[key] !== 'string')) return null;
   if (value.conversation_mode !== 'guided') return null;
+  if (!/^sha256:[a-f0-9]{64}$/.test(value.course_content_hash as string)) return null;
   if (
     !Array.isArray(value.capability_ids) ||
     value.capability_ids.length < 1 ||

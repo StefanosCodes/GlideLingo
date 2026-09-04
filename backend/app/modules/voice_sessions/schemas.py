@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 Identifier = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+ContentHash = Annotated[str, StringConstraints(pattern=r"^sha256:[a-f0-9]{64}$")]
 SessionDescription = Annotated[str, StringConstraints(min_length=20, max_length=65536)]
 IdempotencyKey = Annotated[
     str,
@@ -30,6 +31,7 @@ class VoiceSessionSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
     course_id: Identifier
     course_version: Identifier
+    course_content_hash: ContentHash
     scenario_id: Identifier
     scenario_version: Identifier
     conversation_mode: Literal["guided"]

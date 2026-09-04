@@ -12,7 +12,7 @@ When documents conflict, use this order:
 1. This file owns product scope, navigation, feature behavior, and release requirements.
 2. [`docs/learning/LEARNING-STANDARD.md`](docs/learning/LEARNING-STANDARD.md) owns evidence, pedagogy, and mastery claims.
 3. [`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) owns visual tokens and component styling.
-4. [`docs/voice/VOICE-AVATAR-PLATFORM.md`](docs/voice/VOICE-AVATAR-PLATFORM.md) owns the voice/avatar technical rollout.
+4. [`docs/voice/VOICE-REALTIME.md`](docs/voice/VOICE-REALTIME.md) owns the direct Realtime voice rollout.
 5. [`docs/infra/README.md`](docs/infra/README.md) and linked records own infrastructure decisions.
 
 If implementation changes one of these contracts, update the relevant document in the same pull request.
@@ -97,8 +97,8 @@ This table prevents target requirements from being mistaken for shipped behavior
 | Learning state | Local persisted lesson/review state and evidence stages exist | Preserve evidence semantics, then add server-backed sync. |
 | Audio | Pre-generated Google TTS assets exist | Keep for authored content; do not confuse it with live conversation audio. |
 | AI tutor | Contextual text tutor exists behind feature flags and Pro gating | Reuse its curriculum grounding and safety boundaries in the live coach. |
-| Voice | No live microphone, streaming STT, or streaming TTS path | Build the staged live voice path defined below. |
-| Avatar | No learner-facing live avatar | Add a lightweight presentation layer after voice quality passes its gate. |
+| Voice | A disabled browser-only direct OpenAI Realtime slice is under review | Keep it off until publication, provider, security, cost, and operational gates pass. |
+| Avatar/video | No learner-facing avatar or generated video | Outside the direct Realtime Voice scope. |
 | Motivation | Weekly rhythm exists; XP, stars, and achievements do not | Add explicit mechanics without weakening the learning standard. |
 | Progress | `/progress` redirects to Profile | Build a real Progress destination. |
 | Identity/billing | Clerk and RevenueCat foundations exist | Use them for account and entitlement enforcement; no client-only paywalls. |
@@ -392,7 +392,7 @@ Examples include greeting someone, ordering coffee, asking where something is, i
 | `ready` | Scenario, goal, mic check, Start. |
 | `listening` | Learner may speak; waveform and stop control visible. |
 | `thinking` | Transcript is finalizing or coach response is being prepared. |
-| `speaking` | Coach audio/avatar response is playing; interrupt control follows mode policy. |
+| `speaking` | Coach audio response is playing; interrupt control follows mode policy. |
 | `needs_clarification` | Audio/transcript was insufficient; retry or text fallback. |
 | `paused` | Microphone/audio paused without ending evidence state. |
 | `reconnecting` | Transport recovery with visible timeout and safe retry. |
@@ -669,60 +669,53 @@ Every tutor/coach request MUST include only the needed context:
 
 ---
 
-## 16. Voice and avatar platform
+## 16. Direct OpenAI Realtime voice
 
 ### 16.1 Product decision
 
-Keep Google-generated static audio for authored lesson content. Add a separate low-latency live path for Speak. The avatar is a presentation layer; conversation quality comes from turn-taking, curriculum grounding, correction policy, and latency.
+Keep Google-generated static audio for authored lesson content. The live practice path uses direct
+OpenAI Realtime audio plus captions in a supported web browser. Avatar, generated video, LiveKit,
+separate streaming STT/TTS providers, and provider-routing infrastructure are not part of this slice.
 
 ### 16.2 Target live path
 
-`Learner microphone -> LiveKit/WebRTC -> Google streaming STT -> GlideLingo orchestration + OpenAI coach -> streaming TTS -> avatar/audio playback`
+`Browser microphone -> WebRTC offer -> authenticated GlideLingo control plane -> IAM-private tutor -> OpenAI Realtime call -> browser audio + captions`
 
-The complete technical rollout and gates are in [`docs/voice/VOICE-AVATAR-PLATFORM.md`](docs/voice/VOICE-AVATAR-PLATFORM.md).
+The complete technical boundary and activation gates are in
+[`docs/voice/VOICE-REALTIME.md`](docs/voice/VOICE-REALTIME.md).
 
 ### 16.3 Provider roles
 
 | Layer | V1 role |
 |---|---|
-| Existing Google TTS assets | Deterministic lesson examples and prompts. |
-| LiveKit/WebRTC | Low-latency room/media transport, reconnect, device changes, and session events. |
-| Google streaming STT | Partial/final transcript generation for live turns. |
-| GlideLingo orchestration | Scenario state, curriculum grounding, hints, evidence rules, safety, and provider abstraction. |
-| OpenAI coach model | Level-bounded response and recap generation. |
-| Streaming TTS | Low-latency coach speech; Google remains preferred if latency/quality gates pass. |
-| LiveAvatar LITE or owned renderer | Lip-synced presentation only; must not own tutoring state. |
+| Existing Google TTS assets | Deterministic authored lesson examples; not part of the live transport. |
+| Browser WebRTC | Microphone, provider audio, captions, interruption, and connection lifecycle. |
+| Public FastAPI API | Clerk authentication, Pro admission, owner scope, idempotency, and bounded session lifetime. |
+| IAM-private lesson tutor | Published Course resolution, provider configuration, OpenAI credential, and provider cleanup. |
+| OpenAI Realtime | Untrusted audio/caption output for optional practice; no application tools or learning authority. |
 
 ### 16.4 Voice requirements
 
 | ID | Requirement | Release |
 |---|---|---|
-| VOICE-001 | V1 MUST ship a reliable audio-only or lightweight-avatar push-to-talk experience before full duplex. | V1 |
+| VOICE-001 | V1 MUST ship a reliable browser audio-and-captions push-to-talk experience before any other transport. | V1 |
 | VOICE-002 | Provider APIs MUST be behind server-side adapters; secrets MUST never ship in clients. | V1 |
-| VOICE-003 | The system MUST use ephemeral room/session credentials and enforce entitlement/rate limits server-side. | V1 |
+| VOICE-003 | Long-lived provider credentials MUST remain server-side; the browser receives only its bounded SDP answer and resolved session contract. | V1 |
 | VOICE-004 | Partial transcript, final transcript, coach response, audio playback, and evidence writes MUST have separate event types. | V1 |
 | VOICE-005 | The learner MUST be able to interrupt/stop coach audio even if full conversational barge-in is not enabled. | V1 |
-| VOICE-006 | V1 latency targets are: visible listening feedback <=150 ms; final transcript after end-of-turn p95 <=1.2 s; first coach audio after final transcript p95 <=2.0 s; total perceived turn gap p95 <=3.0 s. | V1 |
-| VOICE-007 | If a provider misses gates, the adapter MAY change without changing lesson/scenario contracts. | V1 |
-| VOICE-008 | Raw audio retention MUST default off; any diagnostic retention requires consent, encryption, purpose, and deletion window. | V1 |
+| VOICE-006 | Session creation, provider calls, connection establishment, reconnect, and cleanup MUST have explicit deadlines. | V1 |
+| VOICE-007 | iOS, Android, and Electron MUST fail closed until their own transport is implemented and verified. | V1 |
+| VOICE-008 | Raw audio and transcript retention MUST default off; `retain_transcript=false` MUST neither persist nor return transcript text. | V1 |
+| VOICE-009 | Published authored Course content and its immutable hash MUST bind every admitted lesson-linked session. | V1 |
+| VOICE-010 | Model/provider output is untrusted and MUST NOT grade, mutate progress, or invoke consequential application tools. | V1 |
 
-### 16.5 Avatar requirements
-
-| ID | Requirement | Release |
-|---|---|---|
-| AVATAR-001 | V1 SHOULD use one owned, stylized coach avatar with idle, listening, thinking, speaking, success, and retry states. | V1 |
-| AVATAR-002 | Avatar rendering MUST degrade to audio + static portrait without ending the conversation. | V1 |
-| AVATAR-003 | Lip sync MAY be viseme/audio driven, but MUST not delay audio playback. | V1 |
-| AVATAR-004 | Avatar persona and voice MUST remain consistent across Home, lessons, and Speak. | V1 |
-| AVATAR-005 | A photoreal external avatar MAY be tested after audio-only turn quality, latency, and unit economics pass. | LATER |
-
-### 16.6 Scale and cost controls
+### 16.5 Scale and cost controls
 
 - Pre-generated course audio stays cacheable and does not consume live-session compute.
 - Live voice sessions MUST be metered by connected minute and active inference/audio second.
-- Rooms MUST terminate after explicit completion, idle timeout, entitlement expiry, or unrecoverable failure.
+- Sessions MUST terminate after explicit completion, bounded expiry, cancellation, or unrecoverable failure.
 - The service MUST enforce per-user concurrency, daily/plan usage, and abuse limits.
-- Cost telemetry MUST attribute STT, model, TTS, transport, and avatar costs per session.
+- Cost telemetry MUST attribute Realtime model/audio usage per session before enablement.
 - A plan must remain margin-positive at its included usage; overage behavior must be explicit before broad launch.
 
 ---
@@ -824,7 +817,7 @@ Notification copy MUST state the real action available. Frequency caps, timezone
 - Touch targets MUST meet platform minimums.
 - Captions/transcripts MUST be available for coach audio where technically possible.
 - Meaning MUST not depend only on color, sound, or animation.
-- Reduced-motion settings MUST disable nonessential celebration/avatar motion.
+- Reduced-motion settings MUST disable nonessential celebration motion.
 - Language text MUST expose correct locale/pronunciation metadata to assistive technology.
 
 ### 20.2 Privacy
@@ -956,25 +949,21 @@ Build vertical slices that are independently testable and useful.
 - implement XP ledger, weekly rhythm, achievements, and celebrations;
 - validate duplicate/offline/timezone behavior.
 
-### Slice 4 — Voice without avatar dependency
+### Slice 4 — Direct Realtime Voice
 
-- implement room/session service and push-to-talk;
-- Google streaming STT, grounded coach, streaming TTS;
-- recap, privacy controls, latency/cost telemetry, usage entitlements.
+- implement browser WebRTC session service and push-to-talk;
+- ground the direct OpenAI Realtime coach in published authored Course content;
+- add captions, interruption, reconnect, teardown, privacy, cost, and entitlement controls;
+- keep native and Electron closed until separately implemented and verified.
 
-### Slice 5 — Avatar presentation
-
-- add owned stylized coach states and lip-sync adapter;
-- guarantee audio/static fallback;
-- test avatar value separately from conversation quality.
-
-### Slice 6 — Scale and polish
+### Slice 5 — Scale and polish
 
 - load/concurrency testing;
 - provider failover and operational dashboards;
 - accessibility, localization, notification, and subscription-state polish.
 
-Do not begin photoreal avatars, public leaderboards, social features, or additional languages before the complete Greek course + learning loop + reliable voice path meet their gates.
+Do not add avatar, generated video, public leaderboards, social features, or additional languages to
+the direct Voice slice.
 
 ---
 
@@ -1006,7 +995,7 @@ Do not begin photoreal avatars, public leaderboards, social features, or additio
 5. A reconnect does not duplicate turns or XP.
 6. Completion is based on authored goals.
 7. Recap separates successful communication, corrections, support, evidence, and XP.
-8. Avatar failure falls back to audio/static presentation without losing the session.
+8. Unsupported native and Electron targets never attempt microphone or provider admission.
 
 ### 24.4 Cross-device/offline
 
@@ -1037,7 +1026,7 @@ V1 is done when:
 - Practice recommendations are finite, relevant, and evidence-driven;
 - Progress clearly distinguishes course completion, capability evidence, activity, and XP;
 - at least the required guided voice experience passes reliability, latency, safety, privacy, and cost gates;
-- avatar presentation never blocks or delays the learning conversation;
+- unsupported targets remain fail closed until their transport is separately verified;
 - subscription and usage limits are server-enforced and recover correctly;
 - legacy routes preserve valid user journeys;
 - automated tests cover deterministic curriculum/unlocks, idempotency, offline sync, entitlement, and live-session state transitions;

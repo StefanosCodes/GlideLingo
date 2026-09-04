@@ -3,7 +3,7 @@ from uuid import UUID
 
 import pytest
 
-from app.core.errors import VoiceRealtimeUnavailableError
+from app.core.errors import VoiceRealtimeTimeoutError, VoiceRealtimeUnavailableError
 from app.modules.voice.schemas import (
     CreatePrivateVoiceSessionRequest,
     EndPrivateVoiceSessionRequest,
@@ -60,6 +60,7 @@ class Resolver:
             spec=VoiceSessionSpec(
                 course_id=payload.course_id,
                 course_version="greek-foundations-v1",
+                course_content_hash="sha256:" + "a" * 64,
                 scenario_id=payload.scenario_id,
                 scenario_version="1.0.0",
                 conversation_mode=payload.conversation_mode,
@@ -145,6 +146,34 @@ def test_provider_cancellation_is_not_reclassified_or_retried() -> None:
     async def run() -> None:
         subject = service(adapter=CancelledAdapter())
         with pytest.raises(asyncio.CancelledError):
+            await subject.create(request())
+
+    asyncio.run(run())
+
+
+def test_private_service_deadline_bounds_a_stalled_provider() -> None:
+    class StalledAdapter(Adapter):
+        async def create_call(
+            self,
+            *,
+            actor_ref: str,
+            captions_enabled: bool,
+            offer_sdp: str,
+            spec: VoiceSessionSpec,
+            instructions: str,
+        ) -> tuple[str, str, VoiceSessionSpec]:
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    async def run() -> None:
+        subject = VoiceRealtimeService(
+            enabled=True,
+            adapter=StalledAdapter(),
+            scenario_resolver=Resolver(),
+            voice_id="configured-voice",
+            deadline_seconds=0.01,
+        )
+        with pytest.raises(VoiceRealtimeTimeoutError):
             await subject.create(request())
 
     asyncio.run(run())

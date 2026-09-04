@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "el-letters-1-voice-v1",
+  "version": "1.0.0",
+  "courseId": "el-from-zero",
+  "lessonId": "el-letters-1",
+  "targetCapabilityIds": ["el-script-vowels-a-e-i"],
+  "setting": "A private, optional sound-map practice after the authored first Greek lesson",
+  "learnerGoal": "Practice saying α, ε, and ι and one short word or syllable from the authored lesson.",
+  "role": {
+    "name": "Greek sound coach",
+    "persona": "Calm, brief, encouraging, and limited to the authored sound map"
+  },
+  "languageLevel": "A0-A1",
+  "allowedResources": ["α", "ε", "ι", "καλημέρα", "νερό", "να", "με"],
+  "authoredOpening": "Invite the learner to say α, ε, and ι one at a time.",
+  "correctionPolicy": "gentle-pronunciation-recast-v1",
+  "maximumDurationSeconds": 300,
+  "safeExits": [
+    "End warmly whenever the learner asks to stop.",
+    "If audio is unclear, acknowledge that and offer one retry without scoring."
+  ],
+  "conversationProfileId": "greek-sound-guide-v1"
+}

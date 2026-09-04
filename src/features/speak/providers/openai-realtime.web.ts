@@ -27,7 +27,6 @@ export async function connectOpenAIRealtime({
     void remoteAudio.play().catch(() => undefined);
   };
 
-  dataChannel.addEventListener('open', onConnected, { once: true });
   dataChannel.addEventListener('message', (event) => {
     try {
       onEvent(JSON.parse(String(event.data)) as unknown);
@@ -42,10 +41,13 @@ export async function connectOpenAIRealtime({
   });
 
   try {
-    await peer.setRemoteDescription({
-      type: 'answer',
-      sdp: admission.connection.answer_sdp,
+    await waitForDataChannel(dataChannel, async () => {
+      await peer.setRemoteDescription({
+        type: 'answer',
+        sdp: admission.connection.answer_sdp,
+      });
     });
+    onConnected();
   } catch (error) {
     dataChannel.close();
     peer.close();
@@ -77,6 +79,46 @@ export async function connectOpenAIRealtime({
       });
     },
   };
+}
+
+async function waitForDataChannel(
+  dataChannel: RTCDataChannel,
+  applyRemoteDescription: () => Promise<void>,
+): Promise<void> {
+  if (dataChannel.readyState === 'open') {
+    await applyRemoteDescription();
+    return;
+  }
+  let cleanup = () => undefined;
+  const opened = new Promise<void>((resolve, reject) => {
+    cleanup = () => {
+      dataChannel.removeEventListener('open', handleOpen);
+      dataChannel.removeEventListener('error', handleError);
+      dataChannel.removeEventListener('close', handleClose);
+    };
+    const handleOpen = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error('The Realtime data channel failed before opening.'));
+    };
+    const handleClose = () => {
+      cleanup();
+      reject(new Error('The Realtime data channel closed before opening.'));
+    };
+    dataChannel.addEventListener('open', handleOpen, { once: true });
+    dataChannel.addEventListener('error', handleError, { once: true });
+    dataChannel.addEventListener('close', handleClose, { once: true });
+  });
+  try {
+    await applyRemoteDescription();
+    await opened;
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
 }
 
 export async function prepareOpenAIRealtime(

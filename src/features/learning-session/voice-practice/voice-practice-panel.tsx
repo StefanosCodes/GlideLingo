@@ -28,6 +28,7 @@ type VoiceController = {
     client_capabilities: ('audio' | 'captions' | 'interrupt' | 'reconnect')[];
   }) => Promise<VoiceSessionAdmission>;
   reconnect: () => Promise<void>;
+  interrupt: () => boolean;
   setMuted: (muted: boolean) => void;
   end: (reason?: VoiceSessionRecap['end_reason']) => Promise<VoiceSessionRecap | null>;
 };
@@ -267,6 +268,14 @@ export function VoicePracticePanel({
                   fullWidth
                   label={sessionState.muted ? 'Start talking' : 'Stop talking'}
                   onPress={toggleMicrophone}
+                />
+                <GlideButton
+                  fullWidth
+                  label="Stop coach response"
+                  onPress={() => {
+                    controllerRef.current?.interrupt();
+                  }}
+                  variant="secondary"
                 />
                 <GlideButton
                   fullWidth

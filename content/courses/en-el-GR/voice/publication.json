@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "el-foundations-voice-publication",
+  "courseId": "el-from-zero",
+  "courseVersion": "greek-foundations-v1",
+  "status": "draft",
+  "contentHash": "sha256:01fa8fc90e41587cb618dc03606e983fe802b30067c0f548ac3192e2012431c4",
+  "validatorStatus": "pending",
+  "publishedAt": null,
+  "reviews": {
+    "curriculum": "pending",
+    "instructionalDesign": "pending",
+    "languagePragmatics": "pending",
+    "accessibility": "pending"
+  },
+  "knownLimitations": [
+    "Voice remains disabled until the authored scenario is independently reviewed and published.",
+    "Voice practice never applies course progress, mastery, or authoritative grading."
+  ]
+}

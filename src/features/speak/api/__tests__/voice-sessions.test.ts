@@ -9,6 +9,7 @@ import {
 const SPEC = {
   course_id: 'el-from-zero',
   course_version: 'greek-foundations-v1',
+  course_content_hash: `sha256:${'a'.repeat(64)}`,
   scenario_id: 'el-greeting-introduction-v1',
   scenario_version: '1.0.0',
   conversation_mode: 'guided',

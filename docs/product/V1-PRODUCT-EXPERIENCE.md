@@ -1,5 +1,10 @@
 # GlideLingo V1 Product Experience
 
+> Voice scope note: avatar references in this exploratory experience document are not authority for
+> the Core V1 Voice implementation. `PRODUCT.md` and `docs/voice/VOICE-REALTIME.md` define the
+> approved browser-only direct OpenAI Realtime slice; avatar, video, HeyGen, and LiveAvatar are out
+> of scope.
+
 ## Status
 
 This document is the product experience source of truth for the V1 consumer application.

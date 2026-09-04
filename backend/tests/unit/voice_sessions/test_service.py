@@ -48,6 +48,7 @@ def spec() -> VoiceSessionSpec:
     return VoiceSessionSpec(
         course_id="el-from-zero",
         course_version="greek-foundations-v1",
+        course_content_hash="sha256:" + "a" * 64,
         scenario_id="el-greeting-introduction-v1",
         scenario_version="1.0.0",
         conversation_mode="guided",
@@ -209,7 +210,9 @@ def test_end_validates_scope_and_finalizes_once_without_false_evidence() -> None
         assert replay == recap
         assert recap.scenario_completed is False
         assert recap.evidence.applied is False
-        assert recap.transcript == [event]
+        assert recap.transcript == []
+        assert await subject.recap(admission.session_id, principal=PRINCIPAL) == recap
+        assert "Γεια σου" not in recap.model_dump_json()
         assert [item.provider_call_id for item in gateway.ends] == ["call_1"]
         with pytest.raises(VoiceSessionConflictError):
             await subject.end(

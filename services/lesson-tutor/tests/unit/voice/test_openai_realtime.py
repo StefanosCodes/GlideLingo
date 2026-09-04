@@ -10,6 +10,7 @@ from app.modules.voice.schemas import VoiceSessionSpec
 SPEC = VoiceSessionSpec(
     course_id="el-from-zero",
     course_version="greek-foundations-v1",
+    course_content_hash="sha256:" + "a" * 64,
     scenario_id="el-greeting-introduction-v1",
     scenario_version="1.0.0",
     persona_id="greek-guide-v1",
@@ -80,6 +81,9 @@ def test_creates_audio_only_call_and_retains_cleanup_reference() -> None:
         assert isinstance(session, dict)
         assert session["model"] == "configured-realtime-model"
         assert session["output_modalities"] == ["audio"]
+        assert session["parallel_tool_calls"] is False
+        assert session["tool_choice"] == "none"
+        assert session["tools"] == []
         assert session["tracing"] is None
         assert client.calls.create_kwargs["extra_headers"] == {
             "OpenAI-Safety-Identifier": ACTOR_REF

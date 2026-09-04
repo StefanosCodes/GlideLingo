@@ -48,6 +48,12 @@ const TRANSITIONS: Record<VoiceSessionLifecycle, ReadonlySet<VoiceSessionLifecyc
   failed: new Set(),
 };
 
+const MAX_IN_MEMORY_EVENTS = 256;
+
+function appendBoundedEvent(events: VoiceSessionEvent[], event: VoiceSessionEvent): VoiceSessionEvent[] {
+  return [...events, event].slice(-MAX_IN_MEMORY_EVENTS);
+}
+
 function transition(state: VoiceSessionState, lifecycle: VoiceSessionLifecycle): VoiceSessionState {
   if (!TRANSITIONS[state.lifecycle].has(lifecycle)) return state;
   return { ...state, lifecycle, turn: lifecycle === 'active' ? state.turn : 'ready' };
@@ -114,14 +120,14 @@ export function voiceSessionReducer(
           lifecycle: 'failed',
           turn: 'ready',
           muted: true,
-          events: [...state.events, event],
+          events: appendBoundedEvent(state.events, event),
           lastSequence: event.sequence,
           failureCode: 'provider_failed',
         };
       }
       return {
         ...state,
-        events: [...state.events, event],
+        events: appendBoundedEvent(state.events, event),
         lastSequence: event.sequence,
         turn,
       };

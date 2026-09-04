@@ -71,3 +71,18 @@ test('a terminal provider event ends active state without flattening its event',
   expect(state).toMatchObject({ lifecycle: 'failed', muted: true, failureCode: 'provider_failed' });
   expect(state.events).toHaveLength(1);
 });
+
+test('bounds untrusted provider events kept in client memory', () => {
+  let state = voiceSessionReducer(initialVoiceSessionState(), { type: 'admitted' });
+  state = voiceSessionReducer(state, { type: 'connected' });
+  for (let sequence = 1; sequence <= 300; sequence += 1) {
+    state = voiceSessionReducer(state, {
+      type: 'provider-event',
+      event: event(sequence, 'response.started'),
+    });
+  }
+
+  expect(state.events).toHaveLength(256);
+  expect(state.events[0]?.sequence).toBe(45);
+  expect(state.lastSequence).toBe(300);
+});

@@ -252,11 +252,12 @@ class VoiceSessionService:
                 request_id=request_id,
             )
             if record.recap is None:
-                transcript = [event for event in request.events if event.type == "transcript.final"]
                 record.recap = VoiceSessionRecap(
                     session_id=session_id,
                     end_reason=request.reason,
-                    transcript=transcript,
+                    # Admission only accepts retain_transcript=false. Client events are validated
+                    # for lifecycle integrity, but text is never retained or returned.
+                    transcript=[],
                 )
             record.cleanup_pending = False
             record.retained_until = self._now() + self._retention

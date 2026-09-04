@@ -71,6 +71,7 @@ class Gateway:
             spec=VoiceSessionSpec(
                 course_id="el-from-zero",
                 course_version="greek-foundations-v1",
+                course_content_hash="sha256:" + "a" * 64,
                 scenario_id="el-greeting-introduction-v1",
                 scenario_version="1.0.0",
                 conversation_mode="guided",
@@ -118,7 +119,20 @@ def test_entitlement_is_admission_only_and_cannot_block_cleanup_or_recap() -> No
         billing.allowed = False
         ended = client.post(
             f"/v1/voice-sessions/{session_id}/end",
-            json={"reason": "cancelled", "events": []},
+            json={
+                "reason": "cancelled",
+                "events": [
+                    {
+                        "event_id": "event:voice:router:0001",
+                        "session_id": session_id,
+                        "sequence": 1,
+                        "occurred_at": "2026-09-04T12:00:00Z",
+                        "type": "transcript.final",
+                        "speaker": "learner",
+                        "text": "private learner text",
+                    }
+                ],
+            },
             headers={**HEADERS, "Idempotency-Key": "voice-end-idempotency-0001"},
         )
         recap = client.get(
@@ -127,6 +141,9 @@ def test_entitlement_is_admission_only_and_cannot_block_cleanup_or_recap() -> No
         )
     assert ended.status_code == 200
     assert recap.json() == ended.json()
+    assert ended.json()["transcript"] == []
+    assert "private learner text" not in ended.text
+    assert "private learner text" not in recap.text
     assert gateway.creates == 1
     assert gateway.ends == 1
     assert gateway.last_create is not None

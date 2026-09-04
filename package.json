@@ -8,6 +8,7 @@
     "@clerk/expo": "4.6.1",
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo/ui": "~57.0.16",
+    "electron-store": "8.2.0",
     "expo": "~57.0.20",
     "expo-apple-authentication": "~57.0.1",
     "expo-asset": "~57.0.15",

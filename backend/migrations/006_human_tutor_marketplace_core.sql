@@ -1,6 +1,7 @@
--- Migration numbers 004 and 005 are reserved by the in-flight affiliate/billing stack.
--- This migration is operator-run and must never execute during API startup.
 BEGIN;
+
+-- Migrations 004 and 005 are the affiliate/billing predecessors.
+-- This migration is operator-run and must never execute during API startup.
 
 CREATE TABLE marketplace_tutor_application (
     application_id uuid PRIMARY KEY,

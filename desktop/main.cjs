@@ -12,6 +12,7 @@ const {
   PACKAGED_RENDERER_ORIGIN,
   PRODUCTION_API_ORIGIN,
   PRODUCTION_CLERK_ORIGIN,
+  applyContentSecurityPolicy,
   buildContentSecurityPolicy,
   findAuthCallbackUrl,
   isAllowedAuthWindowUrl,
@@ -27,6 +28,7 @@ const {
   validateProductionClerkOrigin,
 } = require('./runtime.cjs');
 const {
+  createDisabledDesktopUpdateCoordinator,
   registerDesktopUpdateIpc,
   shouldQuitForRequiredUpdate,
   startMacUpdater,
@@ -105,7 +107,8 @@ async function registerProductionProtocol() {
       }
     }
 
-    return net.fetch(pathToFileURL(fileToServe).toString());
+    const response = await net.fetch(pathToFileURL(fileToServe).toString());
+    return applyContentSecurityPolicy(response, CONTENT_SECURITY_POLICY);
   });
 }
 
@@ -492,7 +495,8 @@ app.whenReady().then(async () => {
     developmentUrl: DEVELOPMENT_URL,
     fetchImpl: (...args) => net.fetch(...args),
   });
-  if (desktopUpdateCoordinator) {
+  if (!DEVELOPMENT_URL) {
+    desktopUpdateCoordinator ??= createDisabledDesktopUpdateCoordinator(app.getVersion());
     disposeDesktopUpdateIpc = registerDesktopUpdateIpc({
       coordinator: desktopUpdateCoordinator,
       getWindow: () => mainWindow,

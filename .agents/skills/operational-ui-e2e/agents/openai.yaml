@@ -1,0 +1,4 @@
+interface:
+  display_name: "Operational UI E2E"
+  short_description: "Autonomously prove Expo web and Electron journeys"
+  default_prompt: "Use $operational-ui-e2e to autonomously map, execute, observe, and, when authorized, repair this user journey in the exact Expo web and Electron PR/worktree with reproducible evidence."

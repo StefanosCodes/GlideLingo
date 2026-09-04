@@ -29,6 +29,38 @@ jobs:
       - run: npm run doctor
       - run: npm run desktop:export
 
+  functional:
+    name: Expo web and Electron functional
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.GLIDELINGO_CLERK_TEST_PUBLISHABLE_KEY }}
+      E2E_ELECTRON_CLERK_PUBLISHABLE_KEY: ${{ vars.GLIDELINGO_CLERK_PUBLISHABLE_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: Require functional test configuration
+        run: |
+          test -n "${EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY}"
+          test -n "${E2E_ELECTRON_CLERK_PUBLISHABLE_KEY}"
+      - run: npm ci
+      - name: Install pinned Chromium
+        run: npx playwright install chromium
+      - name: Exercise Expo web and Electron
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: operational-ui-e2e-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            playwright-report/operational-ui-e2e/
+            test-results/operational-ui-e2e/
+          retention-days: 14
+
   backend:
     name: FastAPI and PostgreSQL
     runs-on: ubuntu-latest

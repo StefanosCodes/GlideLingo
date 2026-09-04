@@ -37,7 +37,7 @@ from app.modules.affiliates.domain import (
     StaffCapability,
     StaffScopeKind,
 )
-from app.modules.affiliates.identity import derive_affiliate_principal_ref
+from app.modules.affiliates.identity import derive_affiliate_principal_ref, digest_handoff_token
 from app.modules.affiliates.repository import PostgresAffiliateRepository
 from app.modules.affiliates.service import AffiliateService
 
@@ -624,6 +624,95 @@ def test_concurrent_handoffs_for_one_principal_serialize_attribution_replacement
 
 
 @pytest.mark.integration
+def test_attribution_replacement_and_purchase_accrual_share_one_principal_boundary(
+    affiliate_database: AffiliateDatabase,
+) -> None:
+    ids = seed_referral(affiliate_database)
+    principal = ClerkPrincipal(user_id="user_bind_purchase_race", issuer="https://clerk.test")
+    affiliate_service = service(
+        affiliate_database,
+        clock=[NOW],
+        tokens=["I" * 43, "J" * 43],
+    )
+    affiliate_service.resolve_referral(link_slug="creator-link", campaign_slug=None)
+    affiliate_service.bind_attribution(principal=principal, handoff_token="I" * 43)
+
+    replacement_creator_id = uuid4()
+    with affiliate_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO affiliate_creator (id, slug, display_name, status)
+                VALUES (:id, 'creator-two', 'Creator Two', 'active')
+                """
+            ),
+            {"id": replacement_creator_id},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO affiliate_link
+                  (id, creator_id, campaign_id, slug, destination_key, status)
+                VALUES (:id, :creator_id, :campaign_id, 'creator-link-two', 'offer', 'active')
+                """
+            ),
+            {
+                "id": uuid4(),
+                "creator_id": replacement_creator_id,
+                "campaign_id": ids["campaign"],
+            },
+        )
+    affiliate_service.resolve_referral(link_slug="creator-link-two", campaign_slug=None)
+    seed_commission_policy(affiliate_database, program_version_id=ids["version"])
+
+    principal_ref = derive_affiliate_principal_ref(key=KEY, principal=principal)
+    affiliate_repository = PostgresAffiliateRepository(engine=affiliate_database.engine)
+    commission_repository = PostgresAffiliateCommissionRepository(engine=affiliate_database.engine)
+    race_at = NOW + timedelta(seconds=1)
+    purchase = financial_fact(
+        event_id="evt_bind_purchase_race",
+        transaction_ref="ch_bind_purchase_race",
+        occurred_at=race_at,
+        principal_ref=principal_ref,
+    )
+    start = Barrier(2)
+
+    def replace_attribution() -> BindStatus:
+        start.wait()
+        return affiliate_repository.bind_attribution(
+            token_digest=digest_handoff_token("J" * 43),
+            principal_ref=principal_ref,
+            now=race_at,
+        ).status
+
+    def accrue_purchase() -> CommissionApplyStatus:
+        start.wait()
+        return commission_repository.accept_financial_fact(
+            fact=purchase,
+            processed_at=race_at,
+        ).status
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        bind_future = pool.submit(replace_attribution)
+        accrual_future = pool.submit(accrue_purchase)
+        bind_status = bind_future.result()
+        accrual_status = accrual_future.result()
+
+    assert accrual_status is CommissionApplyStatus.ACCRUED
+    assert bind_status in {BindStatus.BOUND, BindStatus.LOCKED}
+    with affiliate_database.engine.connect() as connection:
+        accrued_creator_id = connection.execute(
+            text(
+                "SELECT creator_id FROM affiliate_commission_entry "
+                "WHERE provider_transaction_ref = 'ch_bind_purchase_race'"
+            )
+        ).scalar_one()
+    assert accrued_creator_id == (
+        replacement_creator_id if bind_status is BindStatus.BOUND else ids["creator"]
+    )
+
+
+@pytest.mark.integration
 def test_commission_ledger_is_concurrent_idempotent_and_conserves_refunds(
     affiliate_database: AffiliateDatabase,
 ) -> None:
@@ -730,6 +819,12 @@ def test_commission_ledger_is_concurrent_idempotent_and_conserves_refunds(
         connection.execute(
             text("UPDATE affiliate_commission_entry SET commission_amount_minor = 999")
         )
+    for statement in (
+        "UPDATE affiliate_financial_fact SET gross_amount_minor = 1",
+        "DELETE FROM affiliate_financial_fact",
+    ):
+        with pytest.raises(DBAPIError), affiliate_database.engine.begin() as connection:
+            connection.execute(text(statement))
 
 
 @pytest.mark.integration
@@ -896,17 +991,25 @@ def test_commission_processing_fails_closed_before_attribution_or_without_policy
     principal_ref = derive_affiliate_principal_ref(key=KEY, principal=principal)
     repository = PostgresAffiliateCommissionRepository(engine=affiliate_database.engine)
 
+    before_attribution = financial_fact(
+        event_id="evt_before_attribution",
+        transaction_ref="ch_before_attribution",
+        occurred_at=NOW - timedelta(minutes=1),
+        principal_ref=principal_ref,
+    )
     assert (
         repository.accept_financial_fact(
-            fact=financial_fact(
-                event_id="evt_before_attribution",
-                transaction_ref="ch_before_attribution",
-                occurred_at=NOW - timedelta(minutes=1),
-                principal_ref=principal_ref,
-            ),
+            fact=before_attribution,
             processed_at=NOW,
         ).status
         is CommissionApplyStatus.INELIGIBLE
+    )
+    assert (
+        repository.accept_financial_fact(
+            fact=before_attribution,
+            processed_at=NOW,
+        ).status
+        is CommissionApplyStatus.DUPLICATE
     )
     with pytest.raises(CommissionPolicyUnavailableError):
         repository.accept_financial_fact(
@@ -959,6 +1062,103 @@ def test_commission_policy_rule_cannot_reparent_away_from_active_policy(
         connection.execute(
             text("UPDATE affiliate_commission_rule SET policy_id = :active WHERE id = :rule"),
             {"active": active_policy_id, "rule": draft_rule_id},
+        )
+
+
+@pytest.mark.integration
+def test_active_commission_policy_and_rules_are_immutable(
+    affiliate_database: AffiliateDatabase,
+) -> None:
+    ids = seed_referral(affiliate_database)
+    policy_id, rule_id = seed_commission_policy(
+        affiliate_database,
+        program_version_id=ids["version"],
+    )
+
+    attempts = (
+        ("UPDATE affiliate_commission_policy SET effective_until = :now WHERE id = :id", policy_id),
+        ("DELETE FROM affiliate_commission_policy WHERE id = :id", policy_id),
+        (
+            "UPDATE affiliate_commission_rule SET commission_rate_basis_points = 1 WHERE id = :id",
+            rule_id,
+        ),
+        ("DELETE FROM affiliate_commission_rule WHERE id = :id", rule_id),
+    )
+    for statement, identifier in attempts:
+        with pytest.raises(DBAPIError), affiliate_database.engine.begin() as connection:
+            connection.execute(text(statement), {"id": identifier, "now": NOW})
+
+    with pytest.raises(DBAPIError), affiliate_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO affiliate_commission_rule
+                  (id, policy_id, product_ref, commission_rate_basis_points, rounding_mode)
+                VALUES (:id, :policy_id, 'annual', 1250, 'half_up')
+                """
+            ),
+            {"id": uuid4(), "policy_id": policy_id},
+        )
+
+
+@pytest.mark.integration
+def test_concurrent_overlapping_commission_policy_activation_has_one_winner(
+    affiliate_database: AffiliateDatabase,
+) -> None:
+    ids = seed_referral(affiliate_database)
+    policy_ids = [uuid4(), uuid4()]
+    with affiliate_database.engine.begin() as connection:
+        for version, policy_id in enumerate(policy_ids, start=1):
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO affiliate_commission_policy
+                      (id, program_version_id, policy_version, status)
+                    VALUES (:id, :program_version_id, :version, 'draft')
+                    """
+                ),
+                {
+                    "id": policy_id,
+                    "program_version_id": ids["version"],
+                    "version": version,
+                },
+            )
+
+    start = Barrier(2)
+
+    def activate(policy_id: UUID) -> str:
+        start.wait()
+        try:
+            with affiliate_database.engine.begin() as connection:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE affiliate_commission_policy
+                        SET status = 'active', effective_from = :effective_from,
+                            activated_at = :activated_at
+                        WHERE id = :id
+                        """
+                    ),
+                    {
+                        "id": policy_id,
+                        "effective_from": NOW - timedelta(days=1),
+                        "activated_at": NOW,
+                    },
+                )
+            return "active"
+        except DBAPIError:
+            return "conflict"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(activate, policy_ids))
+
+    assert sorted(outcomes) == ["active", "conflict"]
+    with affiliate_database.engine.connect() as connection:
+        assert (
+            connection.execute(
+                text("SELECT count(*) FROM affiliate_commission_policy WHERE status = 'active'")
+            ).scalar_one()
+            == 1
         )
 
 
@@ -1190,10 +1390,10 @@ def test_runtime_role_has_only_the_required_affiliate_dml(
         "affiliate_handoff": {"SELECT", "INSERT", "UPDATE"},
         "affiliate_attribution": {"SELECT", "INSERT", "UPDATE"},
         "affiliate_audit_event": {"INSERT"},
-        "affiliate_financial_fact": {"SELECT", "INSERT"},
-        "affiliate_commission_policy": {"SELECT"},
-        "affiliate_commission_rule": {"SELECT"},
-        "affiliate_commission_entry": {"SELECT", "INSERT"},
+        "affiliate_financial_fact": set(),
+        "affiliate_commission_policy": set(),
+        "affiliate_commission_rule": set(),
+        "affiliate_commission_entry": {"SELECT"},
     }
     with affiliate_database.engine.connect() as connection:
         for table, privileges in expected.items():

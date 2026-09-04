@@ -192,10 +192,11 @@ actor identifier needed for the fresh worker read is encrypted with a context-de
 environment-specific RevenueCat pseudonym secret and authenticated to provider/environment/app/actor
 scope. Rotation and deletion policy must be approved before enablement.
 
-This is only the durable foundation required by the
-[post-core affiliate and creator contract](product/AFFILIATE-CREATOR-PROGRAM.md). RevenueCat remains
-authoritative only for `pro`; no Stripe adapter, financial reconciliation, commission, ledger effect,
-transfer, payout, provider account, or affiliate feature is implemented or enabled here.
+This is only the durable foundation for the disabled affiliate-finance boundary described in the
+[migration runbook](../backend/migrations/README.md). RevenueCat remains authoritative only for
+`pro`; its delivery cannot create a financial fact or commission entry. The dormant ledger requires a
+future authenticated and reconciled Stripe marketplace fact source and a separate least-privileged
+writer identity. No Stripe adapter, transfer, payout, or provider mutation is implemented or enabled.
 
 Apply `backend/migrations/002_revenuecat_entitlements.sql` with the migration operator and schedule
 `maintenance_revenuecat_webhooks.sql` with a separate delete-capable maintenance identity before

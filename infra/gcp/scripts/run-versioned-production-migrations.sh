@@ -15,6 +15,8 @@ migration_files=(
   "backend/migrations/003_revenuecat_webhook_maintenance.sql"
   "backend/migrations/004_affiliate_identity_attribution.sql"
   "backend/migrations/005_billing_event_intake.sql"
+  # 006 is reserved for the Tutor lane. Add 006 and 007 together after 006 lands;
+  # never record 007 at array position 6 because the durable version is positional.
 )
 
 checksum_file() {

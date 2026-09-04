@@ -94,6 +94,25 @@ test('development contract uses the canonical desktop release public-key contain
   );
 });
 
+test('example environment keeps every affiliate surface disabled', () => {
+  const example = parseEnv(readFileSync(path.join(projectRoot, '.env.example'), 'utf8'));
+  const affiliateFlags = [
+    'EXPO_PUBLIC_AFFILIATE_REFERRALS_ENABLED',
+    'PUBLIC_AFFILIATE_REFERRALS_ENABLED',
+    'AFFILIATE_REFERRAL_ENABLED',
+    'GLIDELINGO_BILLING_EVENT_INTAKE_ENABLED',
+    'GLIDELINGO_AFFILIATE_COMMISSIONS_ENABLED',
+    'GLIDELINGO_AFFILIATES_ENABLED',
+    'GLIDELINGO_AFFILIATE_REFERRAL_RESOLUTION_ENABLED',
+    'GLIDELINGO_AFFILIATE_ATTRIBUTION_BINDING_ENABLED',
+    'GLIDELINGO_AFFILIATE_MEMBERSHIP_ADMIN_ENABLED',
+  ];
+
+  for (const flag of affiliateFlags) {
+    assert.equal(example[flag], 'false', `${flag} must be explicitly disabled`);
+  }
+});
+
 test('managed block preserves unrelated local values and remains parseable', () => {
   const next = replaceManagedBlock(
     'OPENAI_API_KEY=local-only\nEXPO_PUBLIC_API_BASE_URL=https://stale.example\n',

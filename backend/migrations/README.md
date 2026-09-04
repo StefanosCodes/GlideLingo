@@ -149,12 +149,9 @@ intake, commission, ledger entries, provider credentials, transfers, or payouts.
 
 ## Durable billing event intake
 
-`005_billing_event_intake.sql` is provisionally sequenced after the affiliate foundation's reserved
-`004` migration. It is additive and operator-run; the API and worker never execute DDL. Apply it only
-after the eventual `004` parent is present and through the versioned migration operator. Do not apply
-this feature branch's migration to a shared or deployed database. This branch intentionally does not
-add `005` to the production runner while `004` is absent; the stacked integration must add both files
-in numeric order without changing either reviewed migration body.
+`005_billing_event_intake.sql` is sequenced after affiliate foundation migration `004`. It is additive
+and operator-run; the API and worker never execute DDL. Apply it only through the versioned migration
+operator after `004`. The canonical production runner records both files in numeric order.
 
 The migration creates `billing_event_provider_actor`, `billing_event_inbox`, and
 `billing_event_delivery`. Provider actor identifiers required for a fresh entitlement read are stored
@@ -176,8 +173,10 @@ events but leaves deliveries pending.
 `007_affiliate_commission_ledger.sql` intentionally leaves migration number `006` available for the
 Tutor lane. It must be inserted into the canonical production runner only after migration `006` is
 merged, so production still applies the complete numeric sequence. The migration is additive, creates
-no policy defaults, and grants the runtime only append access to minimized financial facts and
-commission entries plus the reads needed to verify those immutable inputs.
+no policy defaults, and grants the public runtime only `SELECT` on the minimized commission projection.
+Accepted financial facts and commission entries are immutable. A future authenticated and reconciled
+finance worker must receive a separate, narrowly scoped writer role in a later migration before this
+ledger can consume Stripe marketplace facts; the public API identity cannot manufacture money.
 
 Before `GLIDELINGO_AFFILIATE_COMMISSIONS_ENABLED=true`, an operator must create a draft policy and its
 explicit product rules, review each rate in basis points, the half-up rounding rule, and effective

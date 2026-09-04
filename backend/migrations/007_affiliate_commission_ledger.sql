@@ -32,6 +32,20 @@ CREATE TABLE affiliate_financial_fact (
     )
 );
 
+CREATE FUNCTION affiliate_guard_financial_fact()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+BEGIN
+  RAISE EXCEPTION 'accepted affiliate financial facts are immutable';
+END;
+$$;
+
+CREATE TRIGGER affiliate_financial_fact_guard
+BEFORE UPDATE OR DELETE ON affiliate_financial_fact
+FOR EACH ROW EXECUTE FUNCTION affiliate_guard_financial_fact();
+
 CREATE TABLE affiliate_commission_policy (
     id uuid PRIMARY KEY,
     program_version_id uuid NOT NULL REFERENCES affiliate_program_version(id),
@@ -310,17 +324,20 @@ ALTER TABLE affiliate_financial_fact OWNER TO cloudsqlsuperuser;
 ALTER TABLE affiliate_commission_policy OWNER TO cloudsqlsuperuser;
 ALTER TABLE affiliate_commission_rule OWNER TO cloudsqlsuperuser;
 ALTER TABLE affiliate_commission_entry OWNER TO cloudsqlsuperuser;
+ALTER FUNCTION affiliate_guard_financial_fact() OWNER TO cloudsqlsuperuser;
 ALTER FUNCTION affiliate_guard_commission_policy() OWNER TO cloudsqlsuperuser;
 ALTER FUNCTION affiliate_guard_commission_rule() OWNER TO cloudsqlsuperuser;
 ALTER FUNCTION affiliate_guard_commission_entry() OWNER TO cloudsqlsuperuser;
 
 REVOKE ALL ON affiliate_financial_fact, affiliate_commission_policy,
     affiliate_commission_rule, affiliate_commission_entry FROM glidelingo_app;
+REVOKE ALL ON FUNCTION affiliate_guard_financial_fact() FROM PUBLIC, glidelingo_app;
 REVOKE ALL ON FUNCTION affiliate_guard_commission_policy() FROM PUBLIC, glidelingo_app;
 REVOKE ALL ON FUNCTION affiliate_guard_commission_rule() FROM PUBLIC, glidelingo_app;
 REVOKE ALL ON FUNCTION affiliate_guard_commission_entry() FROM PUBLIC, glidelingo_app;
-GRANT SELECT, INSERT ON affiliate_financial_fact TO glidelingo_app;
-GRANT SELECT ON affiliate_commission_policy, affiliate_commission_rule TO glidelingo_app;
-GRANT SELECT, INSERT ON affiliate_commission_entry TO glidelingo_app;
+-- The public API can expose only the role-scoped, minimized ledger projection.
+-- A future authenticated and reconciled finance worker must receive its own
+-- narrowly scoped writer role in a later migration before facts can be consumed.
+GRANT SELECT ON affiliate_commission_entry TO glidelingo_app;
 
 COMMIT;

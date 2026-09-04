@@ -55,16 +55,7 @@ class PostgresAffiliateCommissionRepository:
                     fact=fact,
                     processed_at=processed_at,
                 )
-                if (
-                    exact_replay
-                    and connection.execute(
-                        text(
-                            "SELECT EXISTS (SELECT 1 FROM affiliate_commission_entry "
-                            "WHERE source_fact_ref = :fact_ref)"
-                        ),
-                        {"fact_ref": stored["id"]},
-                    ).scalar_one()
-                ):
+                if exact_replay:
                     return CommissionApplyResult(status=CommissionApplyStatus.DUPLICATE)
                 if stored["fact_kind"] == FinancialFactKind.PURCHASE:
                     return self._accrue(
@@ -228,6 +219,13 @@ class PostgresAffiliateCommissionRepository:
         product_ref = fact["product_ref"]
         if not isinstance(principal_ref, str) or not isinstance(product_ref, str):
             raise CommissionFactConflictError
+        # Referral binding uses this same principal-scoped lock. Whichever transaction
+        # wins becomes the deterministic boundary: a purchase locks the current
+        # attribution, or a completed replacement becomes current before the purchase.
+        connection.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:principal_ref, 0))"),
+            {"principal_ref": principal_ref},
+        )
         attribution = (
             connection.execute(
                 text(

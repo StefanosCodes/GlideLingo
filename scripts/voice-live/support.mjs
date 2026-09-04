@@ -388,6 +388,10 @@ export function safeFailureEvidence(value) {
     learnerTranscriptFinalCount: boundedCount(evidence.learnerTranscriptFinalCount),
     coachTranscriptFinalCount: boundedCount(evidence.coachTranscriptFinalCount),
     responseCompletedCount: boundedCount(evidence.responseCompletedCount),
+    receivedEventCount: boundedCount(evidence.receivedEventCount),
+    sessionCreatedObserved: evidence.sessionCreatedObserved === true,
+    outboundAudioBytes: boundedCount(evidence.outboundAudioBytes, 100_000_000),
+    outboundAudioEnergyObserved: evidence.outboundAudioEnergyObserved === true,
   };
 }
 

@@ -11,6 +11,8 @@ export function createEvidenceTracker({ model, voice }) {
     learnerTranscripts: [],
     coachTranscripts: [],
     responseCompletedCount: 0,
+    receivedEventCount: 0,
+    sessionCreatedObserved: false,
   };
   let resolveComplete;
   let rejectComplete;
@@ -68,7 +70,9 @@ export function createEvidenceTracker({ model, voice }) {
     },
     observeEvent(event) {
       if (!event || typeof event.type !== 'string') return;
+      state.receivedEventCount += 1;
       if (event.type === 'session.created') {
+        state.sessionCreatedObserved = true;
         const session = event.session;
         state.providerConfigurationObserved =
           session?.model === model &&
@@ -125,6 +129,8 @@ export function createEvidenceTracker({ model, voice }) {
         learnerTranscriptFinalCount: state.learnerTranscripts.length,
         coachTranscriptFinalCount: state.coachTranscripts.length,
         responseCompletedCount: state.responseCompletedCount,
+        receivedEventCount: state.receivedEventCount,
+        sessionCreatedObserved: state.sessionCreatedObserved,
       };
     },
   };

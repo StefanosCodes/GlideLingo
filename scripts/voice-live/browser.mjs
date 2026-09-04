@@ -12,6 +12,7 @@ const evidence = createEvidenceTracker({ model: 'gpt-realtime-2.1', voice: 'mari
 let transport = null;
 let sessionId = null;
 let audioContext = null;
+let peer = null;
 
 try {
   audioContext = new AudioContext();
@@ -23,6 +24,7 @@ try {
   source.buffer = buffer;
   source.connect(microphone);
   const prepared = await prepareOpenAIRealtime(microphone.stream);
+  peer = prepared.peer;
   let remoteAudioObserved = false;
   prepared.peer.addEventListener('track', (event) => {
     if (event.track.kind !== 'audio') return;
@@ -91,6 +93,7 @@ try {
     }),
   });
 } catch (error) {
+  const mediaEvidence = await outboundMediaEvidence(peer);
   transport?.close();
   if (sessionId) {
     await fetch('/end', {
@@ -104,9 +107,31 @@ try {
     headers: harnessHeaders,
     body: JSON.stringify({
       message: error instanceof Error ? error.message : String(error),
-      evidence: evidence.diagnostics(),
+      evidence: { ...evidence.diagnostics(), ...mediaEvidence },
     }),
   }).catch(() => undefined);
 } finally {
   await audioContext?.close().catch(() => undefined);
+}
+
+async function outboundMediaEvidence(activePeer) {
+  if (!activePeer || activePeer.connectionState === 'closed') {
+    return { outboundAudioBytes: 0, outboundAudioEnergyObserved: false };
+  }
+  try {
+    const stats = await activePeer.getStats();
+    let outboundAudioBytes = 0;
+    let outboundAudioEnergyObserved = false;
+    for (const report of stats.values()) {
+      if (report.type === 'outbound-rtp' && report.kind === 'audio') {
+        outboundAudioBytes += Number(report.bytesSent) || 0;
+      }
+      if (report.type === 'media-source' && report.kind === 'audio') {
+        outboundAudioEnergyObserved = (Number(report.totalAudioEnergy) || 0) > 0;
+      }
+    }
+    return { outboundAudioBytes, outboundAudioEnergyObserved };
+  } catch {
+    return { outboundAudioBytes: 0, outboundAudioEnergyObserved: false };
+  }
 }

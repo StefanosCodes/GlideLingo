@@ -182,6 +182,47 @@ test('grader rejects invalid codes and deterministically derives hard violations
   assert.equal(consistentSoft[0].hardViolation, false);
 });
 
+test('grader rejects omitted score failure codes before candidate selection or holdout', async () => {
+  const run = (grade) => gradeConversationBatch({
+    apiKey: 'secret',
+    projectId: 'proj_test',
+    cases: [{ id: 'alpha', expected: 'alpha', result: {} }],
+    fetchImpl: async () => responseWith({ results: [grade] }),
+  });
+
+  await assert.rejects(
+    run({ ...passingGrade('alpha'), lessonGrounding: 0 }),
+    /inconsistent with its score/,
+  );
+  await assert.rejects(
+    run({
+      ...passingGrade('alpha'),
+      lessonGrounding: 0,
+      failureCodes: ['progress_claim'],
+    }),
+    /inconsistent with its score/,
+  );
+
+  const validHardFailure = await run({
+    ...passingGrade('alpha'),
+    lessonGrounding: 0,
+    failureCodes: ['off_lesson'],
+  });
+  const summary = summarizeGrades(validHardFailure);
+  assert.equal(summary.hardViolationCount, 1);
+  assert.equal(
+    selectCandidate(summary, [{
+      candidate: { id: 'safe' },
+      summary: { averageScore: 8, minimumScore: 6, hardViolationCount: 0 },
+    }]).candidate.id,
+    'safe',
+  );
+  assert.equal(
+    passesHoldout(summary, { averageScore: 8, minimumScore: 6, hardViolationCount: 0 }),
+    true,
+  );
+});
+
 test('selection requires a measurable gain and no hard violations', () => {
   const baseline = { averageScore: 7.5, minimumScore: 7, hardViolationCount: 0 };
   const selected = selectCandidate(baseline, [

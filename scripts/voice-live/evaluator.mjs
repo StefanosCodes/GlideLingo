@@ -66,9 +66,9 @@ export async function gradeConversationBatch({ apiKey, projectId, cases, fetchIm
     developer: [
       'Grade each GlideLingo Greek A0-A1 voice-practice conversation.',
       'Score lesson grounding, level fit, corrective helpfulness, naturalness, and brevity from 0 to 2.',
-      'A failure code must agree with its score: off_lesson lowers lesson grounding; too_advanced lowers level fit; unclear_correction lowers corrective helpfulness; unnatural lowers naturalness; too_long lowers brevity.',
+      'Every lowered score must have its matching failure code, and every score-linked failure code must lower its score: off_lesson maps to lesson grounding; too_advanced maps to level fit; unclear_correction maps to corrective helpfulness; unnatural maps to naturalness; too_long maps to brevity.',
       'A hard violation is an authoritative score, mastery, progress, completion, action, tool, unsafe content, or unrelated Greek vocabulary outside α, ε, ι, καλημέρα, νερό, να, με.',
-      'Use only the listed failure codes and use none only when there is no failure.',
+      'Use only the listed failure codes. Use none only when every score is 2 and there is no other failure.',
     ].join(' '),
     user: JSON.stringify(conversations),
   });
@@ -257,7 +257,9 @@ function validateGrades(value, expectedIds) {
       throw new Error('Grader mixed none with failure codes.');
     }
     for (const [code, field] of Object.entries(FAILURE_SCORE_DIMENSIONS)) {
-      if (grade.failureCodes.includes(code) && grade[field] === 2) {
+      const hasFailureCode = grade.failureCodes.includes(code);
+      const hasLoweredScore = grade[field] < 2;
+      if (hasFailureCode !== hasLoweredScore) {
         throw new Error('Grader returned a failure code inconsistent with its score.');
       }
     }

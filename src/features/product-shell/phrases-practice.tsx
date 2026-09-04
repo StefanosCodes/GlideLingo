@@ -11,7 +11,7 @@ import { usePronunciationPlayer } from '@/features/learning-session/audio/use-pr
 import { PronunciationControl } from '@/features/learning-session/pronunciation-control';
 import { useLearning } from '@/providers/learning-provider';
 
-export default function PhrasesScreen() {
+export function PhrasesPracticeScreen() {
   const router = useRouter();
   const pronunciation = usePronunciationPlayer();
   const { language, courses, enrolledCourse, reviewItems, openLesson } = useLearning();
@@ -46,7 +46,7 @@ export default function PhrasesScreen() {
         <ThemedText type="eyebrow" themeColor="textSecondary">
           PHRASES · {language.name.toUpperCase()}
         </ThemedText>
-        <ThemedText type="display">Useful language, connected to its quest.</ThemedText>
+        <ThemedText type="display">Useful language, connected to its course.</ThemedText>
         <ThemedText type="body" themeColor="textSecondary" style={styles.introCopy}>
           Listen, check the natural meaning, then return to the lesson where the phrase is taught in context.
         </ThemedText>
@@ -131,7 +131,7 @@ function PhraseCard({
         <ThemedText type="caption" themeColor="textTertiary">
           FROM · {phrase.lessonTitle.toUpperCase()}
         </ThemedText>
-        <GlideButton label="Practice in quest" variant="tertiary" onPress={onPractice} />
+        <GlideButton label="Practice in lesson" variant="tertiary" onPress={onPractice} />
       </View>
     </GlideSurface>
   );

@@ -647,6 +647,25 @@ test('workflow uses protected WIF configuration and only pinned GCP secret versi
   assert.match(gitignore, /^gha-creds-\*\.json$/m);
 });
 
+test('both release jobs cache npm downloads using both lockfiles', () => {
+  const workflow = fs.readFileSync(
+    path.resolve(__dirname, '../.github/workflows/desktop-release.yml'),
+    'utf8',
+  );
+  const setupNodeConfigs = [...workflow.matchAll(
+    /^ {6}- uses: actions\/setup-node@[^\n]+\n {8}with:\n((?: {10,}[^\n]+\n?)+)/gm,
+  )].map((match) => match[1]);
+
+  assert.equal(setupNodeConfigs.length, 2);
+  for (const config of setupNodeConfigs) {
+    assert.match(config, /^ {10}cache: npm$/m);
+    assert.match(config, /^ {10}cache-dependency-path: \|$/m);
+    assert.match(config, /^ {12}package-lock\.json$/m);
+    assert.match(config, /^ {12}desktop\/package-lock\.json$/m);
+    assert.doesNotMatch(config, /package-manager-cache/);
+  }
+});
+
 test('builder pins the public GitHub update provider', () => {
   const builder = fs.readFileSync(
     path.resolve(__dirname, 'electron-builder.yml'),

@@ -81,7 +81,12 @@ test('booking operations require marketplace and commerce flags', () => {
     /<Stack\.Protected guard=\{signedIn && isHumanTutorMarketplaceEnabled\(\) && isHumanTutorCommerceEnabled\(\)\}>([\s\S]*?)<\/Stack\.Protected>/,
   )?.[1];
   assert.ok(commerceBlock, 'commerce feature-protected route group is missing');
-  assert.match(commerceBlock, /name=["']marketplace-operations\/bookings["']/);
+  for (const route of ['marketplace-operations/bookings', 'marketplace-operations/reviews']) {
+    assert.match(
+      commerceBlock,
+      new RegExp(`name=["']${route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`),
+    );
+  }
 });
 
 test('previously distributed learning routes remain authenticated redirects', () => {

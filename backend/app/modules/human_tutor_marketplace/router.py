@@ -22,6 +22,7 @@ from app.modules.human_tutor_marketplace.schemas import (
     ApplicationVersionRequest,
     BookingListResponse,
     BookingResponse,
+    BookingReviewListResponse,
     BookingReviewResponse,
     BookingTransitionRequest,
     CalendarConnectionResponse,
@@ -48,6 +49,7 @@ from app.modules.human_tutor_marketplace.schemas import (
     MessageReportListResponse,
     MessageReportResponse,
     MessageResponse,
+    ModerateBookingReviewRequest,
     PublicTutorResponse,
     RecoverMoneyOperationRequest,
     ReplaceManualAvailabilityRequest,
@@ -327,6 +329,44 @@ async def recover_marketplace_money_operation(
         reason=request.reason,
     )
     return BookingResponse.model_validate(booking, from_attributes=True)
+
+
+@router.get(
+    "/marketplace-operations/reviews",
+    operation_id="list_marketplace_reviews_for_moderation",
+    response_model=BookingReviewListResponse,
+)
+async def list_marketplace_reviews_for_moderation(
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceLifecycleServiceDependency,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> BookingReviewListResponse:
+    reviews = await service.list_reviews(principal=principal, limit=limit)
+    return BookingReviewListResponse(
+        items=[
+            BookingReviewResponse.model_validate(review, from_attributes=True) for review in reviews
+        ]
+    )
+
+
+@router.post(
+    "/marketplace-operations/reviews/{review_id}/moderation",
+    operation_id="moderate_marketplace_booking_review",
+    response_model=BookingReviewResponse,
+)
+async def moderate_marketplace_booking_review(
+    review_id: UUID,
+    request: ModerateBookingReviewRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceLifecycleServiceDependency,
+) -> BookingReviewResponse:
+    review = await service.moderate_review(
+        principal=principal,
+        review_id=review_id,
+        moderation_state=request.moderation_state,
+        reason=request.reason,
+    )
+    return BookingReviewResponse.model_validate(review, from_attributes=True)
 
 
 @router.get(
@@ -764,6 +804,7 @@ async def list_public_tutors(
     specialty: Annotated[str | None, Query(min_length=2, max_length=64)] = None,
     duration_minutes: Annotated[int | None, Query()] = None,
     maximum_amount_minor: Annotated[int | None, Query(ge=500, le=50_000)] = None,
+    minimum_rating: Annotated[float | None, Query(ge=1, le=5)] = None,
     verified_credential: bool = False,
     favorite: bool = False,
     available_before: datetime | None = None,
@@ -783,6 +824,7 @@ async def list_public_tutors(
         specialty=specialty,
         duration_minutes=duration_minutes,
         maximum_amount_minor=maximum_amount_minor,
+        minimum_rating=minimum_rating,
         verified_credential=verified_credential,
         favorite=favorite,
         available_before=available_before,

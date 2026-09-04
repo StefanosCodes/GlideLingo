@@ -117,6 +117,8 @@ class StripeMarketplaceProvider(Protocol):
 
     async def retrieve_checkout(self, *, checkout_id: str) -> StripeCheckout: ...
 
+    async def expire_checkout(self, *, checkout_id: str) -> StripeCheckout: ...
+
     async def create_refund(
         self, *, payment_intent_id: str, amount_minor: int, idempotency_key: str
     ) -> StripeMoneyResult: ...
@@ -231,6 +233,11 @@ class StripeHttpMarketplaceProvider:
     async def retrieve_checkout(self, *, checkout_id: str) -> StripeCheckout:
         return _parse_checkout(await self._request("GET", f"/v1/checkout/sessions/{checkout_id}"))
 
+    async def expire_checkout(self, *, checkout_id: str) -> StripeCheckout:
+        return _parse_checkout(
+            await self._request("POST", f"/v1/checkout/sessions/{checkout_id}/expire")
+        )
+
     async def create_refund(
         self, *, payment_intent_id: str, amount_minor: int, idempotency_key: str
     ) -> StripeMoneyResult:
@@ -336,6 +343,8 @@ class StoredBooking:
     state: BookingState
     starts_at: datetime
     ends_at: datetime
+    buffer_before_minutes: int
+    buffer_after_minutes: int
     hold_expires_at: datetime
     amount_minor: int
     currency: str
@@ -373,6 +382,13 @@ class BookingView:
     schedule_version: int
     money_state: str | None
     dispute_deadline_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class StoredReconciliationJob:
+    job_id: UUID
+    attempt: int
+    booking: StoredBooking
 
 
 class BookingRepository(Protocol):
@@ -422,6 +438,21 @@ class BookingRepository(Protocol):
     ) -> tuple[WebhookOutcome, StoredBooking | None]: ...
 
     def expire_holds(self, *, now: datetime, limit: int) -> int: ...
+
+    def claim_reconciliation(
+        self, *, worker: str, now: datetime, lease_seconds: int
+    ) -> StoredReconciliationJob | None: ...
+
+    def finish_reconciliation(
+        self,
+        *,
+        job_id: UUID,
+        worker: str,
+        now: datetime,
+        outcome: Literal["completed", "retryable", "dead"],
+        failure_code: str | None = None,
+        available_at: datetime | None = None,
+    ) -> bool: ...
 
 
 class PostgresBookingRepository:
@@ -592,7 +623,8 @@ class PostgresBookingRepository:
                             """
                         INSERT INTO marketplace_booking (
                           booking_id, learner_actor_ref, tutor_id, tutor_actor_ref, offering_id,
-                          client_idempotency_key, state, starts_at, ends_at, hold_expires_at,
+                          client_idempotency_key, state, starts_at, ends_at,
+                          buffer_before_minutes, buffer_after_minutes, hold_expires_at,
                           amount_minor, currency, commission_basis_points,
                           commission_amount_minor, tutor_amount_minor,
                           commission_policy_id, cancellation_policy_id,
@@ -602,6 +634,7 @@ class PostgresBookingRepository:
                         SELECT :booking_id, :learner, profile.tutor_id, profile.actor_ref,
                                offering.offering_id, :key, 'held', :starts_at,
                                :starts_at + make_interval(mins => offering.duration_minutes),
+                               profile.buffer_before_minutes, profile.buffer_after_minutes,
                                :hold_expires_at, offering.amount_minor, offering.currency,
                                commission.commission_basis_points,
                                (offering.amount_minor *
@@ -707,7 +740,7 @@ class PostgresBookingRepository:
                             provider_payment_intent_id = :payment_intent_id,
                             checkout_url = :checkout_url, updated_at = now()
                         WHERE booking_id = :booking_id AND learner_actor_ref = :learner
-                          AND state IN ('held', 'payment_ambiguous') AND hold_expires_at > now()
+                          AND state IN ('held', 'payment_ambiguous')
                           AND provider_environment = :environment
                           AND provider_platform_account_id = :platform_account
                         RETURNING *
@@ -737,6 +770,21 @@ class PostgresBookingRepository:
                     "learner",
                     "checkout_created",
                     learner_actor_ref,
+                )
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO marketplace_payment_reconciliation_job
+                          (job_id, booking_id, available_at)
+                        VALUES (:job_id, :booking_id, :available_at)
+                        ON CONFLICT (booking_id) DO NOTHING
+                        """
+                    ),
+                    {
+                        "job_id": uuid4(),
+                        "booking_id": booking_id,
+                        "available_at": row["hold_expires_at"],
+                    },
                 )
                 return self._booking(row)
         except IntegrityError as error:
@@ -914,7 +962,23 @@ class PostgresBookingRepository:
                             target = "payment_failed"
                         current: BookingState = row["state"]
                         allowed = current in {"payment_pending", "payment_ambiguous"}
-                        if target is not None and allowed:
+                        late_confirmation = target == "confirmed" and (
+                            current == "expired"
+                            or (
+                                allowed
+                                and (
+                                    (
+                                        source == "provider_webhook"
+                                        and checkout.created_at > row["hold_expires_at"]
+                                    )
+                                    or (
+                                        source == "reconciliation"
+                                        and datetime.now(UTC) > row["hold_expires_at"]
+                                    )
+                                )
+                            )
+                        )
+                        if target is not None and allowed and not late_confirmation:
                             confirmed_at = checkout.created_at if target == "confirmed" else None
                             updated = (
                                 connection.execute(
@@ -1005,6 +1069,86 @@ class PostgresBookingRepository:
                                 )
                             row = updated
                             outcome = "applied"
+                        elif late_confirmation:
+                            # A delayed provider success must never resurrect inventory that
+                            # may have been resold. Record the charge and queue an idempotent
+                            # compensating refund while keeping the booking non-fulfillable.
+                            connection.execute(
+                                text(
+                                    """
+                                    INSERT INTO marketplace_money_ledger
+                                      (entry_id, booking_id, operation_id, kind,
+                                       amount_minor, currency)
+                                    VALUES (:entry_id, :booking_id, NULL, 'charge',
+                                            :amount_minor, :currency)
+                                    ON CONFLICT (booking_id) WHERE kind = 'charge' DO NOTHING
+                                    """
+                                ),
+                                {
+                                    "entry_id": uuid4(),
+                                    "booking_id": checkout.booking_id,
+                                    "amount_minor": row["amount_minor"],
+                                    "currency": row["currency"],
+                                },
+                            )
+                            connection.execute(
+                                text(
+                                    """
+                                    INSERT INTO marketplace_money_operation
+                                      (operation_id, booking_id, kind, amount_minor, currency,
+                                       idempotency_key, available_at)
+                                    VALUES (:operation_id, :booking_id, 'refund', :amount,
+                                            :currency, :idempotency_key, now())
+                                    ON CONFLICT (booking_id, kind) DO NOTHING
+                                    """
+                                ),
+                                {
+                                    "operation_id": uuid4(),
+                                    "booking_id": checkout.booking_id,
+                                    "amount": row["amount_minor"],
+                                    "currency": row["currency"],
+                                    "idempotency_key": (
+                                        f"booking:{checkout.booking_id}:late-payment-refund"
+                                    ),
+                                },
+                            )
+                            row = (
+                                connection.execute(
+                                    text(
+                                        """
+                                        UPDATE marketplace_booking
+                                        SET state = 'expired',
+                                            provider_checkout_id = coalesce(
+                                              provider_checkout_id, :checkout_id),
+                                            provider_payment_intent_id = coalesce(
+                                              provider_payment_intent_id, :payment_intent_id),
+                                            provider_event_at = :event_at,
+                                            money_state = 'refund_pending', checkout_url = NULL,
+                                            updated_at = now()
+                                        WHERE booking_id = :booking_id RETURNING *
+                                        """
+                                    ),
+                                    {
+                                        "checkout_id": checkout.checkout_id,
+                                        "payment_intent_id": checkout.payment_intent_id,
+                                        "event_at": checkout.created_at,
+                                        "booking_id": checkout.booking_id,
+                                    },
+                                )
+                                .mappings()
+                                .one()
+                            )
+                            if current != "expired":
+                                self._audit(
+                                    connection,
+                                    checkout.booking_id,
+                                    current,
+                                    "expired",
+                                    source,
+                                    "late_payment_refund",
+                                    None,
+                                )
+                            outcome = "applied"
                         elif target is not None:
                             outcome = "out_of_order"
                 if event_id is not None:
@@ -1042,7 +1186,7 @@ class PostgresBookingRepository:
                         """
                         WITH expired AS (
                           SELECT booking_id, state FROM marketplace_booking
-                          WHERE state IN ('held', 'payment_pending', 'payment_ambiguous')
+                        WHERE state = 'held' AND provider_checkout_id IS NULL
                             AND hold_expires_at <= :now
                           ORDER BY hold_expires_at, booking_id FOR UPDATE SKIP LOCKED LIMIT :limit
                         )
@@ -1059,6 +1203,91 @@ class PostgresBookingRepository:
                         connection, booking_id, old_state, "expired", "system", "hold_expired", None
                     )
                 return len(rows)
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def claim_reconciliation(
+        self, *, worker: str, now: datetime, lease_seconds: int
+    ) -> StoredReconciliationJob | None:
+        try:
+            with self._engine.begin() as connection:
+                row = (
+                    connection.execute(
+                        text(
+                            """
+                            WITH claimable AS (
+                              SELECT job_id FROM marketplace_payment_reconciliation_job
+                              WHERE ((status IN ('queued', 'retryable') AND available_at <= :now)
+                                  OR (status = 'leased' AND lease_expires_at <= :now))
+                                AND attempt < 8
+                              ORDER BY available_at, created_at, job_id
+                              FOR UPDATE SKIP LOCKED LIMIT 1
+                            ), claimed AS (
+                              UPDATE marketplace_payment_reconciliation_job AS job
+                              SET status = 'leased', attempt = attempt + 1,
+                                  lease_owner = :worker, lease_expires_at = :lease_expires,
+                                  updated_at = :now
+                              FROM claimable WHERE job.job_id = claimable.job_id
+                              RETURNING job.job_id, job.booking_id, job.attempt
+                            )
+                            SELECT claimed.job_id, claimed.attempt, booking.*
+                            FROM claimed JOIN marketplace_booking AS booking
+                              ON booking.booking_id = claimed.booking_id
+                            """
+                        ),
+                        {
+                            "worker": worker,
+                            "now": now,
+                            "lease_expires": now + timedelta(seconds=lease_seconds),
+                        },
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if row is None:
+                    return None
+                return StoredReconciliationJob(
+                    job_id=row["job_id"],
+                    attempt=row["attempt"],
+                    booking=self._booking(row),
+                )
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def finish_reconciliation(
+        self,
+        *,
+        job_id: UUID,
+        worker: str,
+        now: datetime,
+        outcome: Literal["completed", "retryable", "dead"],
+        failure_code: str | None = None,
+        available_at: datetime | None = None,
+    ) -> bool:
+        try:
+            with self._engine.begin() as connection:
+                status = connection.execute(
+                    text(
+                        """
+                        UPDATE marketplace_payment_reconciliation_job
+                        SET status = :status, lease_owner = NULL, lease_expires_at = NULL,
+                            available_at = coalesce(:available_at, available_at),
+                            safe_failure_code = :failure_code, updated_at = :now
+                        WHERE job_id = :job_id AND status = 'leased'
+                          AND lease_owner = :worker
+                        RETURNING status
+                        """
+                    ),
+                    {
+                        "status": outcome,
+                        "available_at": available_at,
+                        "failure_code": failure_code,
+                        "now": now,
+                        "job_id": job_id,
+                        "worker": worker,
+                    },
+                ).scalar_one_or_none()
+                return status is not None
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
@@ -1192,6 +1421,8 @@ class PostgresBookingRepository:
             state=row["state"],
             starts_at=row["starts_at"],
             ends_at=row["ends_at"],
+            buffer_before_minutes=row["buffer_before_minutes"],
+            buffer_after_minutes=row["buffer_after_minutes"],
             hold_expires_at=row["hold_expires_at"],
             amount_minor=row["amount_minor"],
             currency=row["currency"],
@@ -1390,6 +1621,31 @@ class BookingService:
             raise TutorApplicationNotFoundError
         return self._view(booking, actor_ref)
 
+    async def validate_reschedule(
+        self,
+        *,
+        principal: ClerkPrincipal,
+        booking_id: UUID,
+        starts_at: datetime,
+    ) -> int:
+        actor_ref = self._actor_ref(principal)
+        booking = await asyncio.to_thread(
+            self._repository.get_booking, booking_id=booking_id, actor_ref=actor_ref
+        )
+        if booking is None or booking.state != "confirmed":
+            raise TutorApplicationConflictError
+        duration = booking.ends_at - booking.starts_at
+        schedule_version = await self._discovery.validate_existing_booking_slot(
+            principal=principal,
+            tutor_id=booking.tutor_id,
+            booking_id=booking.booking_id,
+            starts_at=starts_at,
+            ends_at=starts_at + duration,
+        )
+        if schedule_version is None:
+            raise TutorApplicationConflictError
+        return schedule_version
+
     async def reconcile(self, *, principal: ClerkPrincipal, booking_id: UUID) -> BookingView:
         actor_ref = self._actor_ref(principal)
         booking = await asyncio.to_thread(
@@ -1442,6 +1698,106 @@ class BookingService:
     async def expire_holds(self, *, now: datetime, limit: int = 100) -> int:
         self._require_enabled()
         return await asyncio.to_thread(self._repository.expire_holds, now=now, limit=limit)
+
+    async def run_one_reconciliation_job(self, *, worker: str) -> bool:
+        """Converge one checkout safely across process restarts and ambiguous calls."""
+
+        self._require_enabled()
+        now = datetime.now(UTC)
+        job = await asyncio.to_thread(
+            self._repository.claim_reconciliation,
+            worker=worker,
+            now=now,
+            lease_seconds=60,
+        )
+        if job is None:
+            return False
+        booking = job.booking
+        if booking.state not in {"payment_pending", "payment_ambiguous"}:
+            await asyncio.to_thread(
+                self._repository.finish_reconciliation,
+                job_id=job.job_id,
+                worker=worker,
+                now=now,
+                outcome="completed",
+            )
+            return True
+        try:
+            platform = await self._verified_platform_account()
+            checkout: StripeCheckout
+            if booking.provider_checkout_id is None:
+                if self._checkout_success_url is None or self._checkout_cancel_url is None:
+                    raise StripeOperationError(code="checkout_urls_missing", ambiguous=False)
+                checkout = await self._require_provider().create_checkout(
+                    booking_id=booking.booking_id,
+                    amount_minor=booking.amount_minor,
+                    currency=booking.currency,
+                    title="GlideLingo human tutor lesson",
+                    success_url=self._checkout_success_url,
+                    cancel_url=self._checkout_cancel_url,
+                    idempotency_key=f"booking:{booking.booking_id}:checkout",
+                    platform_account_id=platform,
+                    environment=self._environment,
+                )
+                attached = await asyncio.to_thread(
+                    self._repository.attach_checkout,
+                    booking_id=booking.booking_id,
+                    learner_actor_ref=booking.learner_actor_ref,
+                    checkout=checkout,
+                )
+                if attached is None:
+                    raise StripeOperationError(code="checkout_attach_conflict", ambiguous=True)
+                booking = attached
+            else:
+                checkout = await self._require_provider().retrieve_checkout(
+                    checkout_id=booking.provider_checkout_id
+                )
+            if checkout.status == "open" and now >= booking.hold_expires_at:
+                checkout = await self._require_provider().expire_checkout(
+                    checkout_id=checkout.checkout_id
+                )
+            if checkout.status == "open":
+                await asyncio.to_thread(
+                    self._repository.finish_reconciliation,
+                    job_id=job.job_id,
+                    worker=worker,
+                    now=now,
+                    outcome="retryable" if job.attempt < 8 else "dead",
+                    failure_code="provider_open",
+                    available_at=max(booking.hold_expires_at, now + timedelta(seconds=30)),
+                )
+                return True
+            outcome, _ = await asyncio.to_thread(
+                self._repository.apply_checkout_observation,
+                checkout=checkout,
+                payload_sha256=None,
+                event_id=None,
+                event_type="reconciliation",
+                source="reconciliation",
+                environment=self._environment,
+                platform_account_id=platform,
+            )
+            if outcome not in {"applied", "out_of_order"}:
+                raise StripeOperationError(code="provider_mismatch", ambiguous=True)
+        except StripeOperationError as error:
+            await asyncio.to_thread(
+                self._repository.finish_reconciliation,
+                job_id=job.job_id,
+                worker=worker,
+                now=datetime.now(UTC),
+                outcome="retryable" if error.ambiguous and job.attempt < 8 else "dead",
+                failure_code=error.code[:64],
+                available_at=datetime.now(UTC) + timedelta(minutes=2),
+            )
+            return True
+        await asyncio.to_thread(
+            self._repository.finish_reconciliation,
+            job_id=job.job_id,
+            worker=worker,
+            now=datetime.now(UTC),
+            outcome="completed",
+        )
+        return True
 
     async def _verified_platform_account(self) -> str:
         if self._platform_account_id is None:

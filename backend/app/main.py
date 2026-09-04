@@ -264,6 +264,7 @@ def create_app(
             else None
         ),
         actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+        payout_execution_enabled=settings.human_tutor_payout_execution_enabled,
     )
     learning_bridge_runtime = marketplace_learning_bridge_service or LearningBridgeService(
         enabled=settings.human_tutor_learning_bridge_enabled,

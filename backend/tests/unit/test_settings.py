@@ -192,6 +192,8 @@ def test_tutor_messaging_requires_retention_and_exact_meeting_hosts() -> None:
 
 
 def test_tutor_commerce_requires_environment_matched_server_configuration() -> None:
+    with pytest.raises(ValidationError, match="payout execution requires tutor commerce"):
+        Settings(_env_file=None, human_tutor_payout_execution_enabled=True)
     common: dict[str, Any] = {
         "_env_file": None,
         "human_tutor_marketplace_enabled": True,

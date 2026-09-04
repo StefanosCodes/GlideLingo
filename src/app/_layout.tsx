@@ -158,6 +158,7 @@ function AppNavigation({ signedIn }: { signedIn: boolean }) {
           <Stack.Screen name="bookings/[bookingId]" />
           <Stack.Screen name="tutor/payouts" />
           <Stack.Screen name="marketplace-operations/bookings" />
+          <Stack.Screen name="marketplace-operations/reviews" />
         </Stack.Protected>
         <Stack.Protected guard={signedIn && isHumanTutorMarketplaceEnabled() && isHumanTutorCommerceEnabled() && isHumanTutorLearningBridgeEnabled()}>
           <Stack.Screen name="booking-learning/[bookingId]" />

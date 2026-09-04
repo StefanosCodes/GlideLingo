@@ -4,7 +4,7 @@ import asyncio
 import base64
 import json
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal, Protocol, cast
 from uuid import UUID, uuid4
 
@@ -121,6 +121,10 @@ class DiscoveryRepository(Protocol):
         duration_minutes: int | None,
         maximum_amount_minor: int | None,
         verified_credential: bool,
+        minimum_rating: float | None = None,
+        after_headline: str | None = None,
+        after_tutor_id: UUID | None = None,
+        limit: int = 201,
     ) -> list[StoredPublicTutor]: ...
 
     def get_public_tutor(
@@ -132,7 +136,12 @@ class DiscoveryRepository(Protocol):
 
 class BookingBusyReader(Protocol):
     def list_internal_busy(
-        self, *, tutor_id: UUID, starts_at: datetime, ends_at: datetime
+        self,
+        *,
+        tutor_id: UUID,
+        starts_at: datetime,
+        ends_at: datetime,
+        exclude_booking_id: UUID | None = None,
     ) -> tuple[TimeInterval, ...]: ...
 
 
@@ -363,6 +372,10 @@ class PostgresDiscoveryRepository:
         duration_minutes: int | None,
         maximum_amount_minor: int | None,
         verified_credential: bool,
+        minimum_rating: float | None = None,
+        after_headline: str | None = None,
+        after_tutor_id: UUID | None = None,
+        limit: int = 201,
     ) -> list[StoredPublicTutor]:
         conditions = [
             "application.status = 'approved'",
@@ -370,7 +383,12 @@ class PostgresDiscoveryRepository:
             "profile.payout_ready",
             "offering.state = 'active'",
         ]
-        parameters: dict[str, object] = {"learner_actor_ref": learner_actor_ref}
+        parameters: dict[str, object] = {
+            "learner_actor_ref": learner_actor_ref,
+            "after_headline": after_headline,
+            "after_tutor_id": after_tutor_id,
+            "limit": limit,
+        }
         if language is not None:
             conditions.append(
                 "EXISTS (SELECT 1 FROM marketplace_tutor_application_language language "
@@ -399,6 +417,13 @@ class PostgresDiscoveryRepository:
             parameters["maximum_amount_minor"] = maximum_amount_minor
         if verified_credential:
             conditions.append("credential.verification_status = 'verified'")
+        if minimum_rating is not None:
+            conditions.append("review.rating >= :minimum_rating")
+            parameters["minimum_rating"] = minimum_rating
+        if after_headline is not None and after_tutor_id is not None:
+            conditions.append(
+                "(lower(profile.headline), profile.tutor_id) > (:after_headline, :after_tutor_id)"
+            )
         try:
             with self._engine.connect() as connection:
                 rows = (
@@ -433,7 +458,7 @@ class PostgresDiscoveryRepository:
                         ) AS review ON true
                         WHERE """
                             + " AND ".join(conditions)
-                            + " ORDER BY lower(profile.headline), profile.tutor_id LIMIT 201"
+                            + " ORDER BY lower(profile.headline), profile.tutor_id LIMIT :limit"
                         ),
                         parameters,
                     )
@@ -542,7 +567,12 @@ class PostgresDiscoveryRepository:
             raise DependencyUnavailableError from error
 
     def list_internal_busy(
-        self, *, tutor_id: UUID, starts_at: datetime, ends_at: datetime
+        self,
+        *,
+        tutor_id: UUID,
+        starts_at: datetime,
+        ends_at: datetime,
+        exclude_booking_id: UUID | None = None,
     ) -> tuple[TimeInterval, ...]:
         try:
             with self._engine.connect() as connection:
@@ -551,9 +581,14 @@ class PostgresDiscoveryRepository:
                     for row in connection.execute(
                         text(
                             """
-                            SELECT starts_at, ends_at
+                            SELECT starts_at - make_interval(mins => buffer_before_minutes)
+                                     AS starts_at,
+                                   ends_at + make_interval(mins => buffer_after_minutes)
+                                     AS ends_at
                             FROM marketplace_booking
                             WHERE tutor_id = :tutor_id
+                              AND (:exclude_booking_id IS NULL
+                                   OR booking_id <> :exclude_booking_id)
                               AND state IN (
                                 'held', 'payment_pending', 'payment_ambiguous', 'confirmed'
                               )
@@ -562,7 +597,12 @@ class PostgresDiscoveryRepository:
                             ORDER BY starts_at, ends_at, booking_id
                             """
                         ),
-                        {"tutor_id": tutor_id, "starts_at": starts_at, "ends_at": ends_at},
+                        {
+                            "tutor_id": tutor_id,
+                            "starts_at": starts_at,
+                            "ends_at": ends_at,
+                            "exclude_booking_id": exclude_booking_id,
+                        },
                     )
                 )
         except SQLAlchemyError as error:
@@ -744,32 +784,43 @@ class MarketplaceDiscoveryService:
         available_before: datetime | None,
         cursor: str | None,
         limit: int,
+        minimum_rating: float | None = None,
     ) -> TutorSearchResponse:
         self._require_acquisition()
         actor_ref = self._actor_ref(principal)
-        tutors = await asyncio.to_thread(
-            self._repository.list_public_tutors,
-            learner_actor_ref=actor_ref,
-            language=language,
-            dialect=dialect,
-            specialty=specialty,
-            duration_minutes=duration_minutes,
-            maximum_amount_minor=maximum_amount_minor,
-            verified_credential=verified_credential,
-        )
-        if favorite:
-            tutors = [tutor for tutor in tutors if tutor.is_favorite]
         cursor_value = self._decode_cursor(cursor) if cursor is not None else None
-        if cursor_value is not None:
-            tutors = [
-                tutor
-                for tutor in tutors
-                if (tutor.headline.casefold(), str(tutor.tutor_id)) > cursor_value
-            ]
-        if available_before is not None:
-            now = datetime.now(UTC)
-            available: list[StoredPublicTutor] = []
+        after_headline = cursor_value[0] if cursor_value is not None else None
+        after_tutor_id = UUID(cursor_value[1]) if cursor_value is not None else None
+        now = datetime.now(UTC)
+        selected: list[StoredPublicTutor] = []
+        exhausted = False
+        while len(selected) <= limit and not exhausted:
+            tutors = await asyncio.to_thread(
+                self._repository.list_public_tutors,
+                learner_actor_ref=actor_ref,
+                language=language,
+                dialect=dialect,
+                specialty=specialty,
+                duration_minutes=duration_minutes,
+                maximum_amount_minor=maximum_amount_minor,
+                minimum_rating=minimum_rating,
+                verified_credential=verified_credential,
+                after_headline=after_headline,
+                after_tutor_id=after_tutor_id,
+                limit=min(201, max(limit + 1, 50)),
+            )
+            exhausted = len(tutors) < min(201, max(limit + 1, 50))
+            if not tutors:
+                break
             for tutor in tutors:
+                after_headline, after_tutor_id = tutor.headline.casefold(), tutor.tutor_id
+                if favorite and not tutor.is_favorite:
+                    continue
+                if available_before is None:
+                    selected.append(tutor)
+                    if len(selected) > limit:
+                        break
+                    continue
                 schedule = await asyncio.to_thread(
                     self._repository.get_manual_availability_by_tutor,
                     tutor_id=tutor.tutor_id,
@@ -791,10 +842,11 @@ class MarketplaceDiscoveryService:
                         ),
                     )
                     if slots:
-                        available.append(tutor)
-            tutors = available
-        page = tutors[:limit]
-        next_cursor = self._encode_cursor(page[-1]) if len(tutors) > limit and page else None
+                        selected.append(tutor)
+                        if len(selected) > limit:
+                            break
+        page = selected[:limit]
+        next_cursor = self._encode_cursor(page[-1]) if len(selected) > limit and page else None
         return TutorSearchResponse(
             items=[self._public_response(tutor) for tutor in page],
             next_cursor=next_cursor,
@@ -879,6 +931,56 @@ class MarketplaceDiscoveryService:
             slots=[
                 TutorSlotResponse(starts_at=slot.starts_at, ends_at=slot.ends_at) for slot in slots
             ],
+        )
+
+    async def validate_existing_booking_slot(
+        self,
+        *,
+        principal: ClerkPrincipal,
+        tutor_id: UUID,
+        booking_id: UUID,
+        starts_at: datetime,
+        ends_at: datetime,
+    ) -> int | None:
+        """Validate a participant reschedule without reopening acquisition.
+
+        Existing-booking support remains available when the acquisition kill switch is
+        off, but still fails closed for stale calendar data and enforces the tutor's
+        current manual schedule, lead time, buffers, and other active bookings.
+        """
+
+        self._actor_ref(principal)
+        schedule = await asyncio.to_thread(
+            self._repository.get_manual_availability_by_tutor,
+            tutor_id=tutor_id,
+            require_public=False,
+        )
+        if schedule is None or schedule.duration_minutes is None:
+            return None
+        if ends_at - starts_at != timedelta(minutes=schedule.duration_minutes):
+            return None
+        now = datetime.now(UTC)
+        calendar = await self._busy_snapshot(tutor_id=tutor_id, now=now)
+        if calendar.freshness in {"stale", "reconnect_required"}:
+            return None
+        slots = self._derive(
+            schedule,
+            now=now,
+            starts_at=starts_at,
+            ends_at=ends_at + timedelta(minutes=1),
+            limit=1,
+            busy_intervals=calendar.intervals
+            + await self._internal_busy(
+                tutor_id=tutor_id,
+                starts_at=starts_at,
+                ends_at=ends_at,
+                exclude_booking_id=booking_id,
+            ),
+        )
+        return (
+            schedule.profile_version
+            if any(slot.starts_at == starts_at and slot.ends_at == ends_at for slot in slots)
+            else None
         )
 
     async def preview_own_slots(
@@ -987,7 +1089,12 @@ class MarketplaceDiscoveryService:
         )
 
     async def _internal_busy(
-        self, *, tutor_id: UUID, starts_at: datetime, ends_at: datetime
+        self,
+        *,
+        tutor_id: UUID,
+        starts_at: datetime,
+        ends_at: datetime,
+        exclude_booking_id: UUID | None = None,
     ) -> tuple[TimeInterval, ...]:
         if self._booking_busy_reader is None:
             return ()
@@ -996,6 +1103,7 @@ class MarketplaceDiscoveryService:
             tutor_id=tutor_id,
             starts_at=starts_at,
             ends_at=ends_at,
+            exclude_booking_id=exclude_booking_id,
         )
 
     def _actor_ref(self, principal: ClerkPrincipal) -> str:

@@ -9,7 +9,7 @@ import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { Spacing } from '@/constants/theme';
 import { listMarketplaceBookings, type MarketplaceBooking } from '@/features/tutor-marketplace/api';
-import { isHumanTutorCommerceEnabled } from '@/features/tutor-marketplace/config';
+import { isHumanTutorCommerceEnabled, isHumanTutorMarketplaceAcquisitionEnabled } from '@/features/tutor-marketplace/config';
 import { useTheme } from '@/hooks/use-theme';
 
 type State = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; bookings: MarketplaceBooking[] };
@@ -47,7 +47,7 @@ export function MarketplaceBookingsScreen() {
       {enabled ? <GlideButton label="Try again" onPress={() => { setState({ kind: 'loading' }); setRetry((value) => value + 1); }} variant="secondary" /> : null}
     </GlideSurface> : null}
     {state.kind === 'ready' && state.bookings.length === 0 ? <GlideSurface padding="roomy" style={styles.card}>
-      <ThemedText type="title2">No tutor bookings yet.</ThemedText><GlideButton label="Find a tutor" onPress={() => router.push('/tutors')} variant="secondary" />
+      <ThemedText type="title2">No tutor bookings yet.</ThemedText>{isHumanTutorMarketplaceAcquisitionEnabled() ? <GlideButton label="Find a tutor" onPress={() => router.push('/tutors')} variant="secondary" /> : <ThemedText type="body" themeColor="textSecondary">New tutor discovery is currently paused. Existing bookings and support remain available.</ThemedText>}
     </GlideSurface> : null}
     {state.kind === 'ready' ? state.bookings.map((booking) => <GlideSurface key={booking.bookingId} padding="roomy" style={styles.card}>
       <ThemedText type="title2">{new Date(booking.startsAt).toLocaleString()}</ThemedText>

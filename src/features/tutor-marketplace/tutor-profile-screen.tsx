@@ -190,10 +190,11 @@ function CredentialEditor({ profile, saving, onSave }: {
 function OfferingEditor({ profile, saving, onSave }: {
   profile: TutorProfile;
   saving: boolean;
-  onSave: (input: { title: string; durationMinutes: 25; amountMinor: number; currency: 'USD' }) => void;
+  onSave: (input: { title: string; durationMinutes: 25 | 50; amountMinor: number; currency: 'USD' }) => void;
 }) {
   const [title, setTitle] = useState(profile.offering?.title ?? '25-minute conversation lesson');
   const [price, setPrice] = useState(profile.offering ? String(profile.offering.amountMinor / 100) : '25');
+  const [duration, setDuration] = useState<25 | 50>(profile.offering?.durationMinutes ?? 25);
   const amountMinor = Math.round(Number(price) * 100);
   const locked = profile.applicationStatus !== 'approved' || profile.isPublished;
   const valid = title.trim().length >= 3 && Number.isInteger(amountMinor) && amountMinor >= 500 && amountMinor <= 50_000;
@@ -203,11 +204,12 @@ function OfferingEditor({ profile, saving, onSave }: {
       <LabeledInput editable={!locked} label="Lesson title" maxLength={100} onChangeText={setTitle} value={title} />
       <LabeledInput accessibilityHint="Enter a price from 5 to 500 US dollars" editable={!locked} keyboardType="decimal-pad"
         label="Price in USD" maxLength={7} onChangeText={setPrice} value={price} />
+      <GlideButton disabled={locked || saving} label={`Lesson duration: ${duration} minutes`} onPress={() => setDuration((value) => value === 25 ? 50 : 25)} variant="secondary" />
       <ThemedText type="footnote" themeColor="textSecondary">
-        25 minutes · 20% marketplace commission · free cancellation until 12 hours before start
+        {duration} minutes · 20% marketplace commission · free cancellation until 12 hours before start
       </ThemedText>
       <GlideButton disabled={locked || !valid || saving} label={saving ? 'Saving offering…' : 'Save offering draft'}
-        onPress={() => onSave({ title: title.trim(), durationMinutes: 25, amountMinor, currency: 'USD' })}
+        onPress={() => onSave({ title: title.trim(), durationMinutes: duration, amountMinor, currency: 'USD' })}
         testID="save-tutor-offering" />
     </GlideSurface>
   );

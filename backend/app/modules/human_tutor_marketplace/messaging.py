@@ -84,6 +84,19 @@ class StoredNotificationJob:
     lease_expires_at: datetime
 
 
+NotificationOutcome = Literal["completed", "retryable", "rejected"]
+
+
+class MarketplaceNotificationProvider(Protocol):
+    async def deliver(
+        self,
+        *,
+        recipient_actor_ref: str,
+        template: Literal["new_message", "lesson_reminder", "completion_prompt"],
+        idempotency_key: str,
+    ) -> NotificationOutcome: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ConversationView:
     conversation_id: UUID
@@ -883,7 +896,10 @@ class PostgresMessagingRepository:
                         text(
                             """
                             UPDATE marketplace_message_notification_job
-                            SET status = :status, lease_owner = NULL, lease_expires_at = NULL,
+                            SET status = CASE
+                                  WHEN :status = 'retryable' AND attempt >= 8 THEN 'dead'
+                                  ELSE :status END,
+                                lease_owner = NULL, lease_expires_at = NULL,
                                 safe_failure_code = :code,
                                 available_at = CASE WHEN :status = 'retryable'
                                   THEN :now + make_interval(
@@ -989,6 +1005,7 @@ class MessagingService:
         actor_allowlist: tuple[str, ...],
         retention_days: int | None,
         accepting_new_conversations: bool = True,
+        notification_provider: MarketplaceNotificationProvider | None = None,
     ) -> None:
         self._enabled = enabled
         self._repository = repository
@@ -996,6 +1013,7 @@ class MessagingService:
         self._actor_allowlist = frozenset(actor_allowlist)
         self._retention_days = retention_days
         self._accepting_new_conversations = accepting_new_conversations
+        self._notification_provider = notification_provider
 
     async def create_conversation(
         self, *, principal: ClerkPrincipal, tutor_id: UUID
@@ -1174,6 +1192,43 @@ class MessagingService:
             self._repository.purge_expired_messages,
             cutoff=now - timedelta(days=self._retention_days),
             limit=limit,
+        )
+
+    async def run_one_notification_job(self, *, worker: str) -> bool:
+        if not self._enabled or self._retention_days is None or self._notification_provider is None:
+            return False
+        now = datetime.now(UTC)
+        job = await asyncio.to_thread(
+            self._repository.claim_notification,
+            lease_owner=worker,
+            now=now,
+            lease_seconds=60,
+        )
+        if job is None:
+            return False
+        outcome = await self._notification_provider.deliver(
+            recipient_actor_ref=job.recipient_actor_ref,
+            template="new_message",
+            idempotency_key=f"marketplace-message:{job.job_id}",
+        )
+        await asyncio.to_thread(
+            self._repository.finish_notification,
+            job_id=job.job_id,
+            lease_owner=worker,
+            now=datetime.now(UTC),
+            outcome=outcome,
+        )
+        return True
+
+    async def run_retention_batch(self, *, now: datetime, limit: int = 1000) -> bool:
+        if not self._enabled or self._retention_days is None:
+            return False
+        return bool(
+            await asyncio.to_thread(
+                self._repository.purge_expired_messages,
+                cutoff=now - timedelta(days=self._retention_days),
+                limit=limit,
+            )
         )
 
     async def get_notification_preference(self, *, principal: ClerkPrincipal) -> bool:

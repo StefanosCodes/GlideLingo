@@ -8,7 +8,7 @@ import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { Spacing } from '@/constants/theme';
-import { createMarketplaceBookingReview, getMarketplaceBooking, reconcileMarketplaceBooking, transitionMarketplaceBooking, type MarketplaceBooking } from '@/features/tutor-marketplace/api';
+import { createMarketplaceBookingReview, getMarketplaceBooking, reconcileMarketplaceBooking, recoverMarketplaceBookingMoney, transitionMarketplaceBooking, type MarketplaceBooking } from '@/features/tutor-marketplace/api';
 import { isHumanTutorCommerceEnabled, isHumanTutorLearningBridgeEnabled } from '@/features/tutor-marketplace/config';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -64,6 +64,13 @@ export function MarketplaceBookingDetailScreen() {
     catch { setActionError('This booking is not eligible for a review yet.'); }
     finally { setWorking(null); }
   };
+  const recoverMoney = async () => {
+    if (working || state.kind !== 'ready') return;
+    setWorking('recover'); setActionError(null);
+    try { setState({ kind: 'ready', booking: await recoverMarketplaceBookingMoney(state.booking.bookingId, 'Operator retried a documented terminal or ambiguous provider operation.') }); }
+    catch { setActionError('No recoverable money operation was available for this booking.'); }
+    finally { setWorking(null); }
+  };
 
   return <ScreenFrame testID="marketplace-booking-detail-screen">
     <View style={styles.header}><ThemedText type="eyebrow" themeColor="textSecondary">PROTECTED BOOKING</ThemedText><ThemedText type="display">Tutor lesson</ThemedText></View>
@@ -80,7 +87,7 @@ export function MarketplaceBookingDetailScreen() {
       {state.booking.meetingUrl ? <GlideButton label="Open approved meeting" onPress={() => void Linking.openURL(state.booking.meetingUrl!)} /> : null}
       {state.booking.ics ? <ThemedText type="footnote" themeColor="textSecondary">A bounded calendar event is ready for this confirmed lesson.</ThemedText> : null}
       {learningBridgeEnabled && state.booking.role !== 'operator' && ['confirmed', 'completed', 'learner_no_show', 'disputed', 'resolved_refund', 'resolved_release'].includes(state.booking.state) ? <GlideButton label="Learning context and follow-up" onPress={() => router.push(`/booking-learning/${state.booking.bookingId}`)} variant="secondary" /> : null}
-      {state.booking.state === 'confirmed' ? <>
+      {state.booking.state === 'confirmed' && state.booking.role !== 'operator' ? <>
         <TextInput accessibilityLabel="New booking start time" autoCapitalize="none" onChangeText={setNewStart} placeholder="2026-09-10T15:00:00Z" placeholderTextColor={theme.textTertiary} style={[styles.input, { borderColor: theme.border, color: theme.text }]} value={newStart} />
         <GlideButton disabled={working !== null || Number.isNaN(Date.parse(newStart))} label="Reschedule booking" onPress={() => void transition('reschedule', 'Participant requested a new lesson time.')} variant="secondary" />
         <GlideButton disabled={working !== null} label="Cancel booking" onPress={() => void transition('cancel', 'Participant requested booking cancellation.')} variant="secondary" />
@@ -96,6 +103,7 @@ export function MarketplaceBookingDetailScreen() {
         <GlideButton disabled={working !== null} label="Resolve with refund" onPress={() => void transition('resolve_refund', 'Operator approved a documented learner refund.')} />
         <GlideButton disabled={working !== null} label="Resolve and release payout" onPress={() => void transition('resolve_release', 'Operator denied the dispute with documented evidence.')} variant="secondary" />
       </> : null}
+      {state.booking.role === 'operator' && state.booking.moneyState && (state.booking.moneyState.endsWith('_ambiguous') || state.booking.moneyState.endsWith('_dead')) ? <GlideButton disabled={working !== null} label={working === 'recover' ? 'Recovering…' : 'Retry recoverable money operation'} onPress={() => void recoverMoney()} variant="secondary" /> : null}
       {actionError ? <ThemedText accessibilityRole="alert" type="footnote">{actionError}</ThemedText> : null}
     </GlideSurface> : null}
   </ScreenFrame>;

@@ -58,12 +58,34 @@ CREATE TABLE marketplace_calendar_busy_interval (
 CREATE INDEX marketplace_calendar_busy_interval_lookup_idx
     ON marketplace_calendar_busy_interval (tutor_id, generation, starts_at, ends_at);
 
+CREATE TABLE marketplace_calendar_refresh_job (
+    job_id uuid PRIMARY KEY,
+    tutor_id uuid NOT NULL UNIQUE
+        REFERENCES marketplace_calendar_connection(tutor_id) ON DELETE CASCADE,
+    status text NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued', 'leased', 'retryable', 'dead')),
+    attempt smallint NOT NULL DEFAULT 0 CHECK (attempt BETWEEN 0 AND 8),
+    available_at timestamptz NOT NULL DEFAULT now(),
+    lease_owner text CHECK (lease_owner IS NULL OR length(lease_owner) BETWEEN 1 AND 100),
+    lease_expires_at timestamptz,
+    safe_failure_code text CHECK (safe_failure_code IS NULL OR length(safe_failure_code) <= 64),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CHECK ((status = 'leased') = (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL))
+);
+
+CREATE INDEX marketplace_calendar_refresh_claim_idx
+    ON marketplace_calendar_refresh_job (available_at, created_at, job_id)
+    WHERE status IN ('queued', 'retryable');
+
 ALTER TABLE marketplace_calendar_oauth_state OWNER TO cloudsqlsuperuser;
 ALTER TABLE marketplace_calendar_connection OWNER TO cloudsqlsuperuser;
 ALTER TABLE marketplace_calendar_busy_interval OWNER TO cloudsqlsuperuser;
+ALTER TABLE marketplace_calendar_refresh_job OWNER TO cloudsqlsuperuser;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON marketplace_calendar_oauth_state TO glidelingo_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON marketplace_calendar_connection TO glidelingo_app;
 GRANT SELECT, INSERT, DELETE ON marketplace_calendar_busy_interval TO glidelingo_app;
+GRANT SELECT, INSERT, UPDATE ON marketplace_calendar_refresh_job TO glidelingo_app;
 
 COMMIT;

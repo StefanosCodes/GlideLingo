@@ -8,7 +8,7 @@ import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { Radii, Spacing } from '@/constants/theme';
-import { completeTutorCalendarOAuth, getOwnManualAvailability, getTutorCalendarConnection, previewOwnManualSlots, refreshTutorCalendar, replaceOwnManualAvailability, revokeTutorCalendar, startTutorCalendarOAuth, type CalendarConnection, type ManualAvailability, type TutorSlot } from '@/features/tutor-marketplace/api';
+import { completeTutorCalendarOAuth, getOwnManualAvailability, getTutorCalendarConnection, previewOwnManualSlots, refreshTutorCalendar, replaceOwnManualAvailability, revokeTutorCalendar, startTutorCalendarOAuth, type CalendarConnection, type ManualAvailability, type ManualAvailabilityDraft, type TutorSlot } from '@/features/tutor-marketplace/api';
 import { isHumanTutorGoogleCalendarEnabled } from '@/features/tutor-marketplace/config';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -31,9 +31,11 @@ export function TutorAvailabilityScreen() {
   const [calendar, setCalendar] = useState<CalendarConnection | null>(null);
   const [calendarBusy, setCalendarBusy] = useState(false);
   const [calendarError, setCalendarError] = useState(false);
-  const [weekday, setWeekday] = useState('0');
-  const [startLocal, setStartLocal] = useState('09:00');
-  const [endLocal, setEndLocal] = useState('12:00');
+  const [rules, setRules] = useState<ManualAvailabilityDraft['rules']>([]);
+  const [exceptions, setExceptions] = useState<ManualAvailabilityDraft['exceptions']>([]);
+  const [leadTime, setLeadTime] = useState('60');
+  const [bufferBefore, setBufferBefore] = useState('0');
+  const [bufferAfter, setBufferAfter] = useState('0');
   const [dialects, setDialects] = useState('');
   useEffect(() => {
     const controller = new AbortController();
@@ -45,8 +47,12 @@ export function TutorAvailabilityScreen() {
       previewOwnManualSlots(starts.toISOString(), ends.toISOString(), controller.signal),
     ]).then(([availability, preview]) => {
       if (controller.signal.aborted || current !== sequence.current) return;
-      const first = availability.rules[0];
-      if (first) { setWeekday(String(first.weekday)); setStartLocal(first.startLocal.slice(0, 5)); setEndLocal(first.endLocal.slice(0, 5)); }
+      const effectiveFrom = new Date().toISOString().slice(0, 10);
+      setRules(availability.rules.length ? availability.rules : [{ weekday: 0, startLocal: '09:00', endLocal: '12:00', effectiveFrom, effectiveUntil: null }]);
+      setExceptions(availability.exceptions);
+      setLeadTime(String(availability.leadTimeMinutes));
+      setBufferBefore(String(availability.bufferBeforeMinutes));
+      setBufferAfter(String(availability.bufferAfterMinutes));
       setDialects(availability.dialects.join(', '));
       setState({
         kind: 'ready', availability, preview: preview.slots, previewFreshness: preview.freshness,
@@ -103,15 +109,14 @@ export function TutorAvailabilityScreen() {
     if (state.kind !== 'ready' || saving) return;
     setSaving(true);
     try {
-      const effectiveFrom = new Date().toISOString().slice(0, 10);
       const availability = await replaceOwnManualAvailability({
         expectedProfileVersion: state.availability.profileVersion,
-        leadTimeMinutes: state.availability.leadTimeMinutes,
-        bufferBeforeMinutes: state.availability.bufferBeforeMinutes,
-        bufferAfterMinutes: state.availability.bufferAfterMinutes,
+        leadTimeMinutes: Number(leadTime),
+        bufferBeforeMinutes: Number(bufferBefore),
+        bufferAfterMinutes: Number(bufferAfter),
         dialects: dialects.split(',').map((value) => value.trim().toLowerCase()).filter(Boolean),
-        rules: [{ weekday: Number(weekday), startLocal, endLocal, effectiveFrom, effectiveUntil: null }],
-        exceptions: state.availability.exceptions,
+        rules,
+        exceptions,
       });
       const starts = new Date();
       const ends = new Date(starts.getTime() + 14 * 24 * 60 * 60 * 1000);
@@ -127,7 +132,31 @@ export function TutorAvailabilityScreen() {
   if (state.kind === 'loading') return <ScreenFrame><GlideSurface accessible accessibilityLabel="Loading tutor availability" padding="roomy" style={styles.card}><ActivityIndicator color={theme.tint} /><ThemedText type="headline">Loading availability…</ThemedText></GlideSurface></ScreenFrame>;
   if (state.kind === 'error') return <ScreenFrame><GlideSurface accessible accessibilityRole="alert" padding="roomy" style={styles.card} variant="tinted"><ThemedText type="title2">Availability could not be loaded.</ThemedText><GlideButton label="Try again" onPress={() => { setState({ kind: 'loading' }); setRetry((value) => value + 1); }} variant="secondary" /></GlideSurface></ScreenFrame>;
   return <ScreenFrame testID="tutor-availability-screen"><View style={styles.header}><ThemedText type="eyebrow" themeColor="textSecondary">TUTOR AVAILABILITY</ThemedText><ThemedText type="display">Set dependable weekly hours.</ThemedText><ThemedText type="body" themeColor="textSecondary">Times use {state.availability.timeZone}. Lead time and lesson buffers are enforced by the server.</ThemedText></View>
-    <GlideSurface padding="roomy" style={styles.card}><Field label="Weekday (Monday is 0)" onChangeText={setWeekday} value={weekday} /><Field label="Start time (HH:MM)" onChangeText={setStartLocal} value={startLocal} /><Field label="End time (HH:MM)" onChangeText={setEndLocal} value={endLocal} /><Field label="Dialects (comma separated)" onChangeText={setDialects} value={dialects} /><GlideButton disabled={saving || !/^[0-6]$/.test(weekday) || !/^\d{2}:\d{2}$/.test(startLocal) || !/^\d{2}:\d{2}$/.test(endLocal)} label={saving ? 'Saving hours…' : 'Save weekly hours'} onPress={() => void save()} /></GlideSurface>
+    <GlideSurface padding="roomy" style={styles.card}>
+      <Field label="Lead time in minutes" onChangeText={setLeadTime} value={leadTime} />
+      <Field label="Buffer before in minutes" onChangeText={setBufferBefore} value={bufferBefore} />
+      <Field label="Buffer after in minutes" onChangeText={setBufferAfter} value={bufferAfter} />
+      <Field label="Dialects (comma separated)" onChangeText={setDialects} value={dialects} />
+      <ThemedText type="title2">Weekly hours</ThemedText>
+      {rules.map((rule, index) => <GlideSurface key={`${index}-${rule.weekday}-${rule.effectiveFrom}`} padding="regular" style={styles.nested} variant="tinted">
+        <Field label={`Rule ${index + 1} weekday (Monday is 0)`} onChangeText={(value) => setRules((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, weekday: Number(value) } : item))} value={String(rule.weekday)} />
+        <Field label={`Rule ${index + 1} start time (HH:MM)`} onChangeText={(value) => setRules((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, startLocal: value } : item))} value={rule.startLocal.slice(0, 5)} />
+        <Field label={`Rule ${index + 1} end time (HH:MM)`} onChangeText={(value) => setRules((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, endLocal: value } : item))} value={rule.endLocal.slice(0, 5)} />
+        <Field label={`Rule ${index + 1} effective from (YYYY-MM-DD)`} onChangeText={(value) => setRules((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, effectiveFrom: value } : item))} value={rule.effectiveFrom} />
+        <GlideButton label={`Remove rule ${index + 1}`} onPress={() => setRules((current) => current.filter((_, itemIndex) => itemIndex !== index))} variant="tertiary" />
+      </GlideSurface>)}
+      <GlideButton label="Add weekly rule" onPress={() => setRules((current) => [...current, { weekday: 0, startLocal: '09:00', endLocal: '12:00', effectiveFrom: new Date().toISOString().slice(0, 10), effectiveUntil: null }])} variant="secondary" />
+      <ThemedText type="title2">Date exceptions</ThemedText>
+      {exceptions.map((exception, index) => <GlideSurface key={`${index}-${exception.localDate}`} padding="regular" style={styles.nested} variant="tinted">
+        <Field label={`Exception ${index + 1} date (YYYY-MM-DD)`} onChangeText={(value) => setExceptions((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, localDate: value } : item))} value={exception.localDate} />
+        <Field label={`Exception ${index + 1} start time (HH:MM)`} onChangeText={(value) => setExceptions((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, startLocal: value } : item))} value={exception.startLocal.slice(0, 5)} />
+        <Field label={`Exception ${index + 1} end time (HH:MM)`} onChangeText={(value) => setExceptions((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, endLocal: value } : item))} value={exception.endLocal.slice(0, 5)} />
+        <GlideButton label={`Toggle exception ${index + 1} (${exception.kind})`} onPress={() => setExceptions((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, kind: item.kind === 'available' ? 'unavailable' : 'available' } : item))} variant="secondary" />
+        <GlideButton label={`Remove exception ${index + 1}`} onPress={() => setExceptions((current) => current.filter((_, itemIndex) => itemIndex !== index))} variant="tertiary" />
+      </GlideSurface>)}
+      <GlideButton label="Add date exception" onPress={() => setExceptions((current) => [...current, { localDate: new Date().toISOString().slice(0, 10), startLocal: '09:00', endLocal: '12:00', kind: 'unavailable' }])} variant="secondary" />
+      <GlideButton disabled={saving || rules.length === 0 || rules.some((rule) => !Number.isInteger(rule.weekday) || rule.weekday < 0 || rule.weekday > 6 || !/^\d{2}:\d{2}$/.test(rule.startLocal) || !/^\d{2}:\d{2}$/.test(rule.endLocal)) || !Number.isInteger(Number(leadTime)) || !Number.isInteger(Number(bufferBefore)) || !Number.isInteger(Number(bufferAfter))} label={saving ? 'Saving availability…' : 'Save availability'} onPress={() => void save()} />
+    </GlideSurface>
     {calendarEnabled ? <GlideSurface accessible={calendarError} accessibilityRole={calendarError ? 'alert' : undefined} padding="roomy" style={styles.card} variant={calendarError ? 'tinted' : undefined}>
       <ThemedText type="title2">Google Calendar free/busy</ThemedText>
       <ThemedText type="body" themeColor="textSecondary">Only busy time ranges are used. Event names, descriptions, attendees, and locations are never retained.</ThemedText>
@@ -147,7 +176,7 @@ function Field({ label, value, onChangeText }: { label: string; value: string; o
   return <View style={styles.field}><ThemedText type="headline">{label}</ThemedText><TextInput accessibilityLabel={label} autoCapitalize="none" maxLength={80} onChangeText={onChangeText} style={[styles.input, { backgroundColor: theme.backgroundElement, borderColor: theme.border, color: theme.text }]} value={value} /></View>;
 }
 
-const styles = StyleSheet.create({ card: { gap: Spacing.two, width: '100%' }, field: { gap: Spacing.one }, header: { gap: Spacing.two, width: '100%' }, input: { borderRadius: Radii.medium, borderWidth: 1, minHeight: 48, paddingHorizontal: Spacing.three } });
+const styles = StyleSheet.create({ card: { gap: Spacing.two, width: '100%' }, field: { gap: Spacing.one }, header: { gap: Spacing.two, width: '100%' }, input: { borderRadius: Radii.medium, borderWidth: 1, minHeight: 48, paddingHorizontal: Spacing.three }, nested: { gap: Spacing.two, width: '100%' } });
 
 function calendarRedirectUri(): string {
   if (Platform.OS === 'web' && typeof globalThis.location?.origin === 'string') {

@@ -87,6 +87,13 @@ class CalendarOAuthStart:
     expires_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class StoredCalendarRefreshJob:
+    job_id: UUID
+    attempt: int
+    connection: StoredCalendarConnection
+
+
 class CalendarProvider(Protocol):
     def authorization_url(self, *, state: str, redirect_uri: str) -> str: ...
 
@@ -159,6 +166,21 @@ class CalendarRepository(Protocol):
     def delete_connection(self, *, actor_ref: str, expected_version: int) -> bool: ...
 
     def get_busy_snapshot(self, *, tutor_id: UUID, now: datetime) -> CalendarBusySnapshot: ...
+
+    def claim_refresh(
+        self, *, worker: str, now: datetime, lease_seconds: int
+    ) -> StoredCalendarRefreshJob | None: ...
+
+    def finish_refresh(
+        self,
+        *,
+        job_id: UUID,
+        worker: str,
+        now: datetime,
+        outcome: Literal["completed", "retryable", "dead"],
+        available_at: datetime,
+        failure_code: str | None,
+    ) -> bool: ...
 
 
 class CalendarTokenCipher:
@@ -327,6 +349,19 @@ class PostgresCalendarRepository:
                         "DELETE FROM marketplace_calendar_busy_interval WHERE tutor_id = :tutor_id"
                     ),
                     {"tutor_id": tutor_id},
+                )
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO marketplace_calendar_refresh_job (job_id, tutor_id)
+                        VALUES (:job_id, :tutor_id)
+                        ON CONFLICT (tutor_id) DO UPDATE
+                        SET status = 'queued', attempt = 0, available_at = now(),
+                            lease_owner = NULL, lease_expires_at = NULL,
+                            safe_failure_code = NULL, updated_at = now()
+                        """
+                    ),
+                    {"job_id": uuid4(), "tutor_id": tutor_id},
                 )
                 return StoredCalendarConnection(**dict(row))
         except SQLAlchemyError as error:
@@ -530,6 +565,115 @@ class PostgresCalendarRepository:
                     )
                 )
             return CalendarBusySnapshot("current", intervals, connection.last_refreshed_at)
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def claim_refresh(
+        self, *, worker: str, now: datetime, lease_seconds: int
+    ) -> StoredCalendarRefreshJob | None:
+        try:
+            with self._engine.begin() as connection:
+                row = (
+                    connection.execute(
+                        text(
+                            """
+                            WITH claimable AS (
+                              SELECT job_id FROM marketplace_calendar_refresh_job
+                              WHERE ((status IN ('queued', 'retryable') AND available_at <= :now)
+                                  OR (status = 'leased' AND lease_expires_at <= :now))
+                                AND attempt < 8
+                              ORDER BY available_at, created_at, job_id
+                              FOR UPDATE SKIP LOCKED LIMIT 1
+                            ), claimed AS (
+                              UPDATE marketplace_calendar_refresh_job AS job
+                              SET status = 'leased', attempt = attempt + 1,
+                                  lease_owner = :worker, lease_expires_at = :expires,
+                                  updated_at = :now
+                              FROM claimable WHERE job.job_id = claimable.job_id
+                              RETURNING job.job_id, job.tutor_id, job.attempt
+                            )
+                            SELECT claimed.job_id, claimed.attempt,
+                                   calendar.tutor_id, calendar.actor_ref,
+                                   calendar.encrypted_refresh_token,
+                                   calendar.token_key_version, calendar.status,
+                                   calendar.last_refreshed_at, calendar.cache_expires_at,
+                                   calendar.safe_failure_code, calendar.version
+                            FROM claimed JOIN marketplace_calendar_connection AS calendar
+                              ON calendar.tutor_id = claimed.tutor_id
+                            """
+                        ),
+                        {
+                            "worker": worker,
+                            "now": now,
+                            "expires": now + timedelta(seconds=lease_seconds),
+                        },
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if row is None:
+                    return None
+                return StoredCalendarRefreshJob(
+                    job_id=row["job_id"],
+                    attempt=row["attempt"],
+                    connection=StoredCalendarConnection(
+                        **{
+                            key: row[key]
+                            for key in (
+                                "tutor_id",
+                                "actor_ref",
+                                "encrypted_refresh_token",
+                                "token_key_version",
+                                "status",
+                                "last_refreshed_at",
+                                "cache_expires_at",
+                                "safe_failure_code",
+                                "version",
+                            )
+                        }
+                    ),
+                )
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def finish_refresh(
+        self,
+        *,
+        job_id: UUID,
+        worker: str,
+        now: datetime,
+        outcome: Literal["completed", "retryable", "dead"],
+        available_at: datetime,
+        failure_code: str | None,
+    ) -> bool:
+        status = "queued" if outcome == "completed" else outcome
+        try:
+            with self._engine.begin() as connection:
+                return (
+                    connection.execute(
+                        text(
+                            """
+                            UPDATE marketplace_calendar_refresh_job
+                            SET status = :status, attempt = CASE WHEN :status = 'queued'
+                                  THEN 0 ELSE attempt END,
+                                available_at = :available_at, lease_owner = NULL,
+                                lease_expires_at = NULL, safe_failure_code = :failure_code,
+                                updated_at = :now
+                            WHERE job_id = :job_id AND status = 'leased'
+                              AND lease_owner = :worker RETURNING 1
+                            """
+                        ),
+                        {
+                            "status": status,
+                            "available_at": available_at,
+                            "failure_code": failure_code,
+                            "now": now,
+                            "job_id": job_id,
+                            "worker": worker,
+                        },
+                    ).scalar_one_or_none()
+                    is not None
+                )
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
@@ -773,6 +917,80 @@ class CalendarService:
         if not deleted:
             raise TutorApplicationConflictError
         return CalendarConnectionView("disconnected", "not_connected", None, None)
+
+    async def run_one_refresh_job(self, *, worker: str) -> bool:
+        """Refresh one due free/busy cache behind a durable database lease."""
+
+        if not self._enabled or self._provider is None or self._cipher is None:
+            return False
+        now = datetime.now(UTC)
+        job = await asyncio.to_thread(
+            self._repository.claim_refresh,
+            worker=worker,
+            now=now,
+            lease_seconds=60,
+        )
+        if job is None:
+            return False
+        connection = job.connection
+        outcome: Literal["completed", "retryable", "dead"] = "completed"
+        failure_code: str | None = None
+        available_at = now + BUSY_CACHE_TTL
+        if (
+            connection.encrypted_refresh_token is None
+            or connection.token_key_version != self._cipher.key_version
+        ):
+            outcome, failure_code = "dead", "token_unavailable"
+        else:
+            try:
+                token = self._cipher.decrypt(
+                    tutor_id=connection.tutor_id,
+                    actor_ref=connection.actor_ref,
+                    ciphertext=connection.encrypted_refresh_token,
+                )
+                intervals = _normalize_busy(
+                    await self._provider.fetch_busy(
+                        refresh_token=token,
+                        starts_at=now,
+                        ends_at=now + timedelta(days=31),
+                    ),
+                    now,
+                    now + timedelta(days=31),
+                )
+                updated = await asyncio.to_thread(
+                    self._repository.replace_busy_cache,
+                    tutor_id=connection.tutor_id,
+                    expected_version=connection.version,
+                    intervals=intervals,
+                    refreshed_at=now,
+                    expires_at=now + BUSY_CACHE_TTL,
+                )
+                if updated is None:
+                    available_at = now + timedelta(seconds=30)
+            except CalendarProviderError as error:
+                reconnect = error.code == "revoked"
+                await asyncio.to_thread(
+                    self._repository.mark_failure,
+                    tutor_id=connection.tutor_id,
+                    expected_version=connection.version,
+                    code=error.code,
+                    reconnect_required=reconnect,
+                )
+                outcome = "dead" if reconnect or job.attempt >= 8 else "retryable"
+                failure_code = error.code
+                available_at = now + timedelta(minutes=2)
+            except (UnicodeDecodeError, ValueError):
+                outcome, failure_code = "dead", "invalid_token"
+        await asyncio.to_thread(
+            self._repository.finish_refresh,
+            job_id=job.job_id,
+            worker=worker,
+            now=datetime.now(UTC),
+            outcome=outcome,
+            available_at=available_at,
+            failure_code=failure_code,
+        )
+        return True
 
     def _require_runtime(self) -> None:
         if (

@@ -1,6 +1,7 @@
 import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from urllib.parse import parse_qs, urlencode, urlsplit
 from uuid import UUID
 
@@ -19,12 +20,14 @@ from app.modules.human_tutor_marketplace.calendar import (
     GOOGLE_FREEBUSY_SCOPE,
     CalendarBusySnapshot,
     CalendarProviderError,
+    CalendarRepository,
     CalendarService,
     CalendarTokenCipher,
     GoogleCalendarHttpAdapter,
     ProviderFailureCode,
     ProviderToken,
     StoredCalendarConnection,
+    StoredCalendarRefreshJob,
 )
 from app.modules.human_tutor_marketplace.identity import derive_marketplace_actor_ref
 
@@ -41,6 +44,9 @@ class MemoryCalendarRepository:
         self.connection: StoredCalendarConnection | None = None
         self.busy: tuple[TimeInterval, ...] = ()
         self.persisted_ciphertext: bytes | None = None
+        self.refresh_attempt = 1
+        self.refresh_claimed = False
+        self.refresh_finished: tuple[str, str | None] | None = None
 
     def get_approved_tutor_id(self, *, actor_ref: str) -> UUID | None:
         return TUTOR_ID if actor_ref == self.approved_actor else None
@@ -181,6 +187,31 @@ class MemoryCalendarRepository:
             return CalendarBusySnapshot("stale", (), connection.last_refreshed_at)
         return CalendarBusySnapshot("current", self.busy, connection.last_refreshed_at)
 
+    def claim_refresh(
+        self, *, worker: str, now: datetime, lease_seconds: int
+    ) -> StoredCalendarRefreshJob | None:
+        if self.connection is None or self.refresh_claimed:
+            return None
+        self.refresh_claimed = True
+        return StoredCalendarRefreshJob(
+            job_id=UUID("9948afe2-59ac-46f6-88cf-15c5f9994567"),
+            attempt=self.refresh_attempt,
+            connection=self.connection,
+        )
+
+    def finish_refresh(
+        self,
+        *,
+        job_id: UUID,
+        worker: str,
+        now: datetime,
+        outcome: str,
+        available_at: datetime,
+        failure_code: str | None,
+    ) -> bool:
+        self.refresh_finished = (outcome, failure_code)
+        return True
+
 
 class FakeCalendarProvider:
     def __init__(self) -> None:
@@ -219,7 +250,7 @@ def build_service(
 ) -> CalendarService:
     return CalendarService(
         enabled=True,
-        repository=repository,
+        repository=cast(CalendarRepository, repository),
         provider=provider,
         cipher=CalendarTokenCipher(key=b"e" * 32),
         state_key=STATE_KEY,
@@ -347,6 +378,29 @@ async def test_extra_oauth_scope_fails_closed_after_one_use() -> None:
         await service.complete_oauth(
             principal=tutor_principal(), state=state, code="provider-code", redirect_uri=REDIRECT
         )
+
+
+@pytest.mark.anyio
+async def test_durable_refresh_job_reuses_encrypted_token_and_terminalizes_exhaustion() -> None:
+    repository = MemoryCalendarRepository()
+    provider = FakeCalendarProvider()
+    service = build_service(repository, provider)
+    start = await service.start_oauth(principal=tutor_principal(), redirect_uri=REDIRECT)
+    state = parse_qs(urlsplit(start.authorization_url).query)["state"][0]
+    await service.complete_oauth(
+        principal=tutor_principal(), state=state, code="provider-code", redirect_uri=REDIRECT
+    )
+
+    assert await service.run_one_refresh_job(worker="calendar-a")
+    assert provider.fetch_count == 1
+    assert repository.refresh_finished == ("completed", None)
+
+    repository.refresh_claimed = False
+    repository.refresh_attempt = 8
+    repository.refresh_finished = None
+    provider.failure = "rate_limited"
+    assert await service.run_one_refresh_job(worker="calendar-b")
+    assert repository.refresh_finished == ("dead", "rate_limited")
 
 
 @pytest.mark.anyio

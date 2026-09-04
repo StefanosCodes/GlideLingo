@@ -49,3 +49,13 @@ test('discovery exposes an accessible retry after a bounded failure', async () =
   await fireEvent.press(screen.getByText('Try again'));
   await waitFor(() => expect(screen.getByText('No tutors match these filters yet.')).toBeTruthy());
 });
+
+test('a failed next page preserves the current deterministic results', async () => {
+  mockList.mockResolvedValueOnce({ items: [tutor], nextCursor: 'next-page' })
+    .mockRejectedValueOnce(new Error('offline'));
+  const screen = await render(<SafeAreaProvider initialMetrics={metrics}><TutorDiscoveryScreen /></SafeAreaProvider>);
+  await waitFor(() => expect(screen.getByText('Load more tutors')).toBeTruthy());
+  await fireEvent.press(screen.getByText('Load more tutors'));
+  await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+  expect(screen.getByText(tutor.headline)).toBeTruthy();
+});

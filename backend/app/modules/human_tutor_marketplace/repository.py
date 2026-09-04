@@ -287,41 +287,67 @@ class PostgresTutorApplicationRepository:
     ) -> StoredTutorProfile | None:
         try:
             with self._engine.begin() as connection:
-                row = (
+                prior = (
                     connection.execute(
                         text(
                             """
-                            UPDATE marketplace_tutor_profile AS profile
-                            SET headline = :headline,
-                                biography = :biography,
-                                time_zone = :time_zone,
-                                version = profile.version + 1,
-                                updated_at = now()
-                            FROM marketplace_tutor_application AS application
+                            SELECT profile.tutor_id, profile.time_zone,
+                                   profile.application_id
+                            FROM marketplace_tutor_profile AS profile
+                            JOIN marketplace_tutor_application AS application
+                              ON application.application_id = profile.application_id
                             WHERE profile.application_id = application.application_id
                               AND profile.actor_ref = :actor_ref
                               AND profile.version = :expected_version
                               AND application.status = 'approved'
                               AND profile.is_published = false
-                            RETURNING profile.application_id
+                            FOR UPDATE OF profile
                             """
                         ),
-                        {
-                            "actor_ref": actor_ref,
-                            "expected_version": request.expected_version,
-                            "headline": request.headline,
-                            "biography": request.biography,
-                            "time_zone": request.time_zone,
-                        },
+                        {"actor_ref": actor_ref, "expected_version": request.expected_version},
                     )
                     .mappings()
                     .one_or_none()
                 )
-                if row is None:
+                if prior is None:
                     return None
+                connection.execute(
+                    text(
+                        """
+                        UPDATE marketplace_tutor_profile
+                        SET headline = :headline, biography = :biography,
+                            time_zone = :time_zone, version = version + 1,
+                            updated_at = now()
+                        WHERE tutor_id = :tutor_id
+                        """
+                    ),
+                    {
+                        "tutor_id": prior["tutor_id"],
+                        "headline": request.headline,
+                        "biography": request.biography,
+                        "time_zone": request.time_zone,
+                    },
+                )
+                if prior["time_zone"] != request.time_zone:
+                    # Weekly wall-clock intent cannot be safely inferred across zones,
+                    # especially around DST. Invalidate it atomically and require an
+                    # explicit tutor reconfirmation in the new profile zone.
+                    connection.execute(
+                        text(
+                            "DELETE FROM marketplace_availability_exception "
+                            "WHERE tutor_id = :tutor_id"
+                        ),
+                        {"tutor_id": prior["tutor_id"]},
+                    )
+                    connection.execute(
+                        text(
+                            "DELETE FROM marketplace_availability_rule WHERE tutor_id = :tutor_id"
+                        ),
+                        {"tutor_id": prior["tutor_id"]},
+                    )
                 self._insert_audit(
                     connection,
-                    application_id=row["application_id"],
+                    application_id=prior["application_id"],
                     actor_ref=actor_ref,
                     action="profile_draft_updated",
                     from_status="private",

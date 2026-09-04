@@ -30,7 +30,10 @@ const metrics = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top:
 const availability: ManualAvailability = {
   tutorId: '2382f687-0ca0-4340-8e78-21ba32912869', profileVersion: 2,
   timeZone: 'America/Chicago', leadTimeMinutes: 60, bufferBeforeMinutes: 5, bufferAfterMinutes: 10,
-  dialects: ['el-cy'], rules: [], exceptions: [],
+  dialects: ['el-cy'], rules: [
+    { weekday: 0, startLocal: '09:00', endLocal: '12:00', effectiveFrom: '2026-09-04', effectiveUntil: null },
+    { weekday: 2, startLocal: '13:00', endLocal: '16:00', effectiveFrom: '2026-09-04', effectiveUntil: null },
+  ], exceptions: [{ localDate: '2026-09-09', startLocal: '13:00', endLocal: '14:00', kind: 'unavailable' }],
 };
 const preview: TutorSlots = { tutorId: availability.tutorId, timeZone: availability.timeZone, source: 'manual', freshness: 'current', slots: [] };
 const previousCalendarFlag = process.env.EXPO_PUBLIC_HUMAN_TUTOR_GOOGLE_CALENDAR_ENABLED;
@@ -54,9 +57,17 @@ test('tutor can recover from load failure and save a bounded weekly rule', async
   await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
   await fireEvent.press(screen.getByText('Try again'));
   await waitFor(() => expect(screen.getByText('Two-week preview')).toBeTruthy());
-  await fireEvent.press(screen.getByText('Save weekly hours'));
+  await fireEvent.press(screen.getByText('Save availability'));
   await waitFor(() => expect(mockReplace).toHaveBeenCalledTimes(1));
-  expect(mockReplace).toHaveBeenCalledWith(expect.objectContaining({ expectedProfileVersion: 2, dialects: ['el-cy'] }));
+  expect(mockReplace).toHaveBeenCalledWith(expect.objectContaining({
+    expectedProfileVersion: 2,
+    dialects: ['el-cy'],
+    rules: availability.rules,
+    exceptions: availability.exceptions,
+    leadTimeMinutes: 60,
+    bufferBeforeMinutes: 5,
+    bufferAfterMinutes: 10,
+  }));
 });
 
 test('calendar connection is explicit, minimal, and never blocks manual availability', async () => {

@@ -2,7 +2,8 @@ import asyncio
 from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from typing import cast
-from uuid import UUID
+from uuid import UUID, uuid5
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -103,6 +104,34 @@ class Repository:
 class StaleCalendar:
     def get_busy_snapshot(self, *, tutor_id: UUID, now: datetime) -> CalendarBusySnapshot:
         return CalendarBusySnapshot("stale", (), now - timedelta(minutes=30))
+
+
+class PagedRepository(Repository):
+    def __init__(self) -> None:
+        super().__init__()
+        namespace = UUID("9948afe2-59ac-46f6-88cf-15c5f9999999")
+        self.tutors = [
+            replace(
+                self.tutor,
+                tutor_id=uuid5(namespace, f"tutor-{index}"),
+                headline=f"Tutor {index:03d}",
+                is_favorite=index == 220,
+            )
+            for index in range(250)
+        ]
+
+    def list_public_tutors(self, **kwargs: object) -> list[StoredPublicTutor]:
+        after_headline = kwargs.get("after_headline")
+        after_tutor_id = kwargs.get("after_tutor_id")
+        limit = cast(int, kwargs["limit"])
+        start = 0
+        if isinstance(after_headline, str) and isinstance(after_tutor_id, UUID):
+            start = next(
+                index + 1
+                for index, tutor in enumerate(self.tutors)
+                if tutor.headline.casefold() == after_headline and tutor.tutor_id == after_tutor_id
+            )
+        return self.tutors[start : start + limit]
 
 
 def service(
@@ -210,3 +239,60 @@ def test_acquisition_kill_switch_blocks_discovery_but_preserves_tutor_schedule_a
         )
 
     assert asyncio.run(disabled.get_own_availability(principal=LEARNER)).profile_version == 3
+
+
+def test_post_filter_pagination_scans_beyond_the_first_201_candidates() -> None:
+    result = asyncio.run(
+        service(PagedRepository()).list_tutors(
+            principal=LEARNER,
+            language=None,
+            dialect=None,
+            specialty=None,
+            duration_minutes=None,
+            maximum_amount_minor=None,
+            verified_credential=False,
+            favorite=True,
+            available_before=None,
+            cursor=None,
+            limit=1,
+        )
+    )
+
+    assert [item.headline for item in result.items] == ["Tutor 220"]
+    assert result.next_cursor is None
+
+
+def test_reschedule_validation_enforces_current_schedule_and_calendar_freshness() -> None:
+    zone = ZoneInfo("America/Chicago")
+    local_today = datetime.now(zone).date()
+    days_until_friday = (4 - local_today.weekday()) % 7
+    if days_until_friday < 2:
+        days_until_friday += 7
+    starts_at = datetime.combine(
+        local_today + timedelta(days=days_until_friday), time(9, 5), zone
+    ).astimezone(UTC)
+    ends_at = starts_at + timedelta(minutes=25)
+
+    current = asyncio.run(
+        service(Repository()).validate_existing_booking_slot(
+            principal=LEARNER,
+            tutor_id=TUTOR_ID,
+            booking_id=UUID("9948afe2-59ac-46f6-88cf-15c5f9996789"),
+            starts_at=starts_at,
+            ends_at=ends_at,
+        )
+    )
+    stale = asyncio.run(
+        service(
+            Repository(), cast(CalendarRepository, StaleCalendar())
+        ).validate_existing_booking_slot(
+            principal=LEARNER,
+            tutor_id=TUTOR_ID,
+            booking_id=UUID("9948afe2-59ac-46f6-88cf-15c5f9996789"),
+            starts_at=starts_at,
+            ends_at=ends_at,
+        )
+    )
+
+    assert current == 3
+    assert stale is None

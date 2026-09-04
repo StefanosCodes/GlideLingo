@@ -6,7 +6,7 @@ ALTER TABLE marketplace_operator_capability
     ADD CONSTRAINT marketplace_operator_capability_capability_check CHECK (
         capability IN ('review_tutor_applications', 'manage_tutor_status',
                        'verify_tutor_credentials', 'review_message_reports',
-                       'manage_bookings')
+                       'manage_bookings', 'moderate_reviews')
     );
 
 CREATE TABLE marketplace_tutor_connect_account (
@@ -42,6 +42,8 @@ CREATE TABLE marketplace_booking (
     )),
     starts_at timestamptz NOT NULL,
     ends_at timestamptz NOT NULL,
+    buffer_before_minutes integer NOT NULL CHECK (buffer_before_minutes BETWEEN 0 AND 120),
+    buffer_after_minutes integer NOT NULL CHECK (buffer_after_minutes BETWEEN 0 AND 120),
     hold_expires_at timestamptz NOT NULL,
     amount_minor integer NOT NULL CHECK (amount_minor BETWEEN 500 AND 50000),
     currency text NOT NULL CHECK (currency = 'USD'),
@@ -102,8 +104,16 @@ BEGIN
         WHERE existing.tutor_id = NEW.tutor_id
           AND existing.booking_id <> NEW.booking_id
           AND existing.state IN ('held', 'payment_pending', 'payment_ambiguous', 'confirmed')
-          AND tstzrange(existing.starts_at, existing.ends_at, '[)')
-              && tstzrange(NEW.starts_at, NEW.ends_at, '[)')
+          AND tstzrange(
+                existing.starts_at - make_interval(mins => existing.buffer_before_minutes),
+                existing.ends_at + make_interval(mins => existing.buffer_after_minutes),
+                '[)'
+              )
+              && tstzrange(
+                NEW.starts_at - make_interval(mins => NEW.buffer_before_minutes),
+                NEW.ends_at + make_interval(mins => NEW.buffer_after_minutes),
+                '[)'
+              )
     ) THEN
         RAISE EXCEPTION 'active marketplace booking ranges may not overlap';
     END IF;
@@ -125,6 +135,8 @@ BEGIN
        OR NEW.tutor_id <> OLD.tutor_id
        OR NEW.tutor_actor_ref <> OLD.tutor_actor_ref
        OR NEW.offering_id <> OLD.offering_id
+       OR NEW.buffer_before_minutes <> OLD.buffer_before_minutes
+       OR NEW.buffer_after_minutes <> OLD.buffer_after_minutes
        OR NEW.starts_at <> OLD.starts_at
        OR NEW.ends_at <> OLD.ends_at
        OR NEW.amount_minor <> OLD.amount_minor

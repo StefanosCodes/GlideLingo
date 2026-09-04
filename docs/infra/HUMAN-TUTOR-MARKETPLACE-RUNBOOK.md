@@ -74,8 +74,10 @@ a sandbox, shared, unpinned, or unowned resource fails closed and stops activati
 
 Server and matching client flags start false. Enable only for explicitly approved allowlisted actors,
 in this order: base marketplace, optional Google calendar, messaging, commerce, learning bridge, then
-acquisition. Child server flags require the base flag and their complete configuration. The client is
-never payment or authorization authority.
+acquisition. Keep `GLIDELINGO_HUMAN_TUTOR_PAYOUT_EXECUTION_ENABLED` false until payout ownership and
+legal approval are separately evidenced; it may become true only while commerce is enabled. Child
+server flags require the base flag and their complete configuration. The client is never payment or
+authorization authority.
 
 `GLIDELINGO_HUMAN_TUTOR_MARKETPLACE_ACQUISITION_ENABLED` and
 `EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ACQUISITION_ENABLED` are the first rollback controls. Set both
@@ -83,30 +85,35 @@ false to stop public discovery, favorites/slots, new pre-booking conversations, 
 preserving tutor administration, participant messaging for existing conversations, booking history,
 lifecycle actions, earnings, and capability-scoped operator recovery.
 
-For a money incident, also stop new transfer eligibility at the deployment/worker scheduler while
-keeping authorized reconciliation available. Do not terminate a worker during an external provider
-request; allow the bounded request and database lease to resolve, or let the durable idempotency key
-and stale-lease recovery take over. Leave additive tables in place, preserve ledgers and audit facts,
-and roll corrections forward. A full base-flag shutdown is an emergency measure and requires a
-separate support path for every paid or owed booking.
+For a money incident, set `GLIDELINGO_HUMAN_TUTOR_PAYOUT_EXECUTION_ENABLED=false`. The worker then
+stops claiming transfers while continuing checkout reconciliation, refunds, reversals, reminders,
+calendar refresh, notification work, and retention. Do not terminate a worker during an external
+provider request; allow the bounded request and database lease to resolve, or let the durable
+idempotency key and stale-lease recovery take over. Leave additive tables in place, preserve ledgers
+and audit facts, and roll corrections forward. A full base-flag shutdown is an emergency measure and
+requires a separate support path for every paid or owed booking.
 
 ## Worker deployment
 
-The money worker command is:
+The marketplace worker command is:
 
 ```sh
 npm run marketplace:worker -- --poll-seconds 2
 ```
 
 Use `--once` only for a deployment probe. Start with one worker per environment and a database
-connection budget approved by the database owner. The worker claims one operation at a time with a
-60-second lease, uses the persisted idempotency key for Stripe, retries bounded transient and
-ambiguous outcomes, terminalizes after eight attempts, and requires `manage_bookings` recovery to
-requeue terminal work. `SIGTERM` and `SIGINT` stop after the current bounded claim; no actor, booking,
-payment, provider, token, or message identifiers are logged.
+connection budget approved by the database owner. In bounded recovery order, the worker expires only
+provider-free local holds, reconciles or explicitly expires provider checkout sessions, processes
+refund/transfer/reversal operations, sends reminders and message notifications through the narrow
+delivery adapter, refreshes Google free/busy caches, and applies message retention. Each durable queue
+uses a 60-second lease and stable provider idempotency keys where applicable; transient work retries
+with bounds and terminalizes after eight attempts. Money recovery requires `manage_bookings`.
+Revoked Google access becomes reconnect-required, and a new OAuth connection resets its refresh job.
+`SIGTERM` and `SIGINT` stop after the current bounded claim; no actor, booking, payment, provider,
+token, message content, or calendar event content is logged.
 
-The notification/reminder delivery process, sender ownership, retry policy, maintenance schedule, and
-alert routing must be deployed and evidenced separately before activation. A queued database row is
+The approved email adapter, sender ownership, maintenance cadence, and alert routing still must be
+deployed and evidenced before activation. A deterministic adapter result or queued database row is
 not evidence that an email or reminder was delivered.
 
 ## Dashboards and alerts
@@ -122,7 +129,9 @@ below are rehearsal defaults, not claimed production SLOs.
 | Overlapping-slot conflicts | conflict-category counter from checkout attempts | ticket on trend; page if confirmed overlap is ever observed (expected invariant: zero) |
 | Webhook age/failure | age of newest verified Stripe event and safe outcome counter | page if expected traffic exists and age exceeds 10 minutes, or verification/provider mismatch occurs |
 | Calendar staleness | aggregate connection status/cache age | warn above 5% stale/reconnect among connected pilot tutors; acquisition already suppresses unsafe slots |
+| Checkout reconciliation | oldest queued/retryable checkout reconciliation age and terminal count | page on any terminal result or a ready job older than 5 minutes; stop acquisition if provider expiry is uncertain |
 | Reminder lag | oldest available queued reminder age and terminal count | warn at 5 minutes; page at 15 minutes or any terminal reminder |
+| Notification lag | oldest available message-notification age and terminal count | warn at 5 minutes; page at 15 minutes or any terminal result |
 | Refund/transfer failure | money-operation kind/status/attempt and worker event outcome | page on terminal or provider-mismatch; warn on retry backlog older than 5 minutes |
 | Dispute rate | disputed bookings divided by completed/terminal bookings over a fixed window | review daily; threshold must be approved before pilot |
 | Worker saturation | ready/leased backlog, oldest available age, poll/error outcome | warn when oldest ready job exceeds 2 minutes; page at 10 minutes or repeated worker errors |
@@ -151,13 +160,18 @@ slots rather than appear current. Ask the tutor to reconnect through the signed 
 tokens or calendar event content. Disable the calendar child flag if systemic while preserving manual
 availability only when that degraded mode has explicit operational approval.
 
+A tutor profile time-zone change intentionally deletes the old wall-clock rules and exceptions in the
+same transaction. The tutor must explicitly recreate availability in the new zone; operators must not
+translate or restore the old rows by hand.
+
 ### Stuck payment or duplicate/ambiguous provider event
 
 Turn acquisition off if scope is uncertain. Compare signed webhook/retrieval outcome to the persisted
 safe state using the original idempotency key and verified account/environment. Allow reconciliation
-to converge duplicate and out-of-order events. Do not initiate a second payment or manually mark a
-booking paid. Provider mismatch, unverifiable ownership, or an exhausted reconciliation job pages the
-money owner.
+to converge duplicate and out-of-order events. After the local hold deadline, reconciliation first
+expires an open provider session; a verified late payment keeps inventory expired and queues one full
+idempotent compensating refund. Do not initiate a second payment or manually mark a booking paid.
+Provider mismatch, unverifiable ownership, or an exhausted reconciliation job pages the money owner.
 
 ### Refund, failed transfer, dispute, or reversal
 

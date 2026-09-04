@@ -27,6 +27,7 @@ from app.modules.human_tutor_marketplace.booking import (
     StripeOperationError,
 )
 from app.modules.human_tutor_marketplace.identity import derive_marketplace_actor_ref
+from app.modules.human_tutor_marketplace.messaging import MarketplaceNotificationProvider
 
 LifecycleAction = Literal[
     "reschedule",
@@ -70,7 +71,19 @@ class ReviewView:
     rating: int
     body: str | None
     moderation_state: Literal["published", "hidden"]
+    moderation_reason: str | None
+    moderated_at: datetime | None
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class StoredReminderJob:
+    job_id: UUID
+    booking_id: UUID
+    kind: Literal["lesson_reminder", "completion_prompt"]
+    attempt: int
+    learner_actor_ref: str
+    tutor_actor_ref: str
 
 
 def next_weekly_payout_at(eligible_at: datetime) -> datetime:
@@ -96,6 +109,7 @@ class PostgresLifecycleRepository:
         reason: str,
         new_starts_at: datetime | None,
         now: datetime,
+        expected_profile_version: int | None = None,
     ) -> bool:
         try:
             with self._engine.begin() as connection:
@@ -115,6 +129,18 @@ class PostgresLifecycleRepository:
                     if role not in {"learner", "tutor"} or current != "confirmed":
                         raise TutorApplicationConflictError
                     if new_starts_at is None or new_starts_at <= now + timedelta(hours=12):
+                        raise TutorApplicationConflictError
+                    current_profile_version = connection.execute(
+                        text(
+                            "SELECT version FROM marketplace_tutor_profile "
+                            "WHERE tutor_id = :tutor_id FOR UPDATE"
+                        ),
+                        {"tutor_id": row["tutor_id"]},
+                    ).scalar_one()
+                    if (
+                        expected_profile_version is None
+                        or current_profile_version != expected_profile_version
+                    ):
                         raise TutorApplicationConflictError
                     duration = row["ends_at"] - row["starts_at"]
                     updated = connection.execute(
@@ -196,9 +222,11 @@ class PostgresLifecycleRepository:
                     action=action,
                     now=now,
                 )
-                money_state = row["money_state"]
-                if action == "dispute":
-                    money_state = "charged"
+                money_state = (
+                    self._current_money_state(connection, booking_id)
+                    if action == "dispute"
+                    else row["money_state"]
+                )
                 if money_kind is not None:
                     money_state = f"{money_kind}_pending"
                     self._queue_money(
@@ -273,7 +301,7 @@ class PostgresLifecycleRepository:
             raise DependencyUnavailableError from error
 
     def claim_money_operation(
-        self, *, worker: str, now: datetime, lease_seconds: int
+        self, *, worker: str, now: datetime, lease_seconds: int, include_transfers: bool = True
     ) -> StoredMoneyOperation | None:
         try:
             with self._engine.begin() as connection:
@@ -294,11 +322,12 @@ class PostgresLifecycleRepository:
                         """
                         SELECT operation_id FROM marketplace_money_operation
                         WHERE state IN ('queued', 'retryable') AND available_at <= :now
+                          AND (:include_transfers OR kind <> 'transfer')
                         ORDER BY available_at, created_at, operation_id
                         FOR UPDATE SKIP LOCKED LIMIT 1
                         """
                     ),
-                    {"now": now},
+                    {"now": now, "include_transfers": include_transfers},
                 ).scalar_one_or_none()
                 if operation_id is None:
                     return None
@@ -412,6 +441,89 @@ class PostgresLifecycleRepository:
                         {"id": operation.booking_id},
                     )
                 return True
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def claim_reminder(
+        self, *, worker: str, now: datetime, lease_seconds: int
+    ) -> StoredReminderJob | None:
+        try:
+            with self._engine.begin() as connection:
+                row = (
+                    connection.execute(
+                        text(
+                            """
+                            WITH claimable AS (
+                              SELECT job_id FROM marketplace_booking_reminder_job
+                              WHERE ((state IN ('queued', 'retryable') AND available_at <= :now)
+                                  OR (state = 'leased' AND lease_expires_at <= :now))
+                                AND attempt < 8
+                              ORDER BY available_at, created_at, job_id
+                              FOR UPDATE SKIP LOCKED LIMIT 1
+                            )
+                            UPDATE marketplace_booking_reminder_job AS job
+                            SET state = 'leased', attempt = attempt + 1,
+                                lease_owner = :worker, lease_expires_at = :lease_expires,
+                                updated_at = :now
+                            FROM claimable, marketplace_booking AS booking
+                            WHERE job.job_id = claimable.job_id
+                              AND booking.booking_id = job.booking_id
+                            RETURNING job.job_id, job.booking_id, job.kind, job.attempt,
+                                      booking.learner_actor_ref, booking.tutor_actor_ref
+                            """
+                        ),
+                        {
+                            "worker": worker,
+                            "now": now,
+                            "lease_expires": now + timedelta(seconds=lease_seconds),
+                        },
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                return StoredReminderJob(**dict(row)) if row is not None else None
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def finish_reminder(
+        self,
+        *,
+        job_id: UUID,
+        worker: str,
+        now: datetime,
+        outcome: Literal["completed", "retryable", "rejected"],
+    ) -> bool:
+        try:
+            with self._engine.begin() as connection:
+                state = "dead" if outcome == "rejected" else outcome
+                return (
+                    connection.execute(
+                        text(
+                            """
+                            UPDATE marketplace_booking_reminder_job
+                            SET state = CASE WHEN :state = 'retryable' AND attempt >= 8
+                                             THEN 'dead' ELSE :state END,
+                                lease_owner = NULL, lease_expires_at = NULL,
+                                safe_failure_code = CASE WHEN :state = 'completed' THEN NULL
+                                  WHEN :state = 'dead' THEN 'rejected' ELSE 'unavailable' END,
+                                available_at = CASE WHEN :state = 'retryable'
+                                  THEN :now + make_interval(
+                                    secs => least(3600, 30 * power(2, attempt)))
+                                  ELSE available_at END,
+                                updated_at = :now
+                            WHERE job_id = :job_id AND state = 'leased'
+                              AND lease_owner = :worker RETURNING 1
+                            """
+                        ),
+                        {
+                            "state": state,
+                            "now": now,
+                            "job_id": job_id,
+                            "worker": worker,
+                        },
+                    ).scalar_one_or_none()
+                    is not None
+                )
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
@@ -554,7 +666,7 @@ class PostgresLifecycleRepository:
                         ON CONFLICT (booking_id) DO UPDATE
                         SET rating = marketplace_booking_review.rating
                         RETURNING review_id, booking_id, tutor_id, rating, body,
-                                  moderation_state, created_at
+                                  moderation_state, moderation_reason, moderated_at, created_at
                         """
                         ),
                         {
@@ -571,6 +683,71 @@ class PostgresLifecycleRepository:
                 return self._review(row) if row is not None else None
         except (IntegrityError, DBAPIError) as error:
             raise TutorApplicationConflictError from error
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def list_reviews_for_operator(
+        self, *, operator_actor_ref: str, limit: int
+    ) -> tuple[ReviewView, ...] | None:
+        try:
+            with self._engine.connect() as connection:
+                if not self._has_capability(connection, operator_actor_ref, "moderate_reviews"):
+                    return None
+                return tuple(
+                    self._review(row)
+                    for row in connection.execute(
+                        text(
+                            """
+                            SELECT review_id, booking_id, tutor_id, rating, body,
+                                   moderation_state, moderation_reason, moderated_at, created_at
+                            FROM marketplace_booking_review
+                            ORDER BY created_at DESC, review_id LIMIT :limit
+                            """
+                        ),
+                        {"limit": limit},
+                    ).mappings()
+                )
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def moderate_review(
+        self,
+        *,
+        operator_actor_ref: str,
+        review_id: UUID,
+        moderation_state: Literal["published", "hidden"],
+        reason: str,
+        now: datetime,
+    ) -> ReviewView | None:
+        try:
+            with self._engine.begin() as connection:
+                if not self._has_capability(connection, operator_actor_ref, "moderate_reviews"):
+                    return None
+                row = (
+                    connection.execute(
+                        text(
+                            """
+                            UPDATE marketplace_booking_review
+                            SET moderation_state = :state, moderation_reason = :reason,
+                                moderated_by_actor_ref = :actor, moderated_at = :now
+                            WHERE review_id = :review_id
+                            RETURNING review_id, booking_id, tutor_id, rating, body,
+                                      moderation_state, moderation_reason,
+                                      moderated_at, created_at
+                            """
+                        ),
+                        {
+                            "state": moderation_state,
+                            "reason": reason,
+                            "actor": operator_actor_ref,
+                            "now": now,
+                            "review_id": review_id,
+                        },
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                return self._review(row) if row is not None else None
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
@@ -648,9 +825,39 @@ class PostgresLifecycleRepository:
             if action == "resolve_refund":
                 if row["money_state"] == "transferred":
                     return "resolved_refund", "reversal", row["tutor_amount_minor"], now
+                if row["money_state"] != "charged":
+                    raise TutorApplicationConflictError
                 return "resolved_refund", "refund", row["amount_minor"], now
+            if row["money_state"] == "transferred":
+                return "resolved_release", None, 0, now
+            if row["money_state"] != "charged":
+                raise TutorApplicationConflictError
             return "resolved_release", "transfer", row["tutor_amount_minor"], now
         raise TutorApplicationConflictError
+
+    @staticmethod
+    def _current_money_state(connection: Connection, booking_id: UUID) -> str:
+        transferred = connection.execute(
+            text(
+                "SELECT 1 FROM marketplace_money_ledger "
+                "WHERE booking_id = :id AND kind = 'transfer' LIMIT 1"
+            ),
+            {"id": booking_id},
+        ).scalar_one_or_none()
+        if transferred is not None:
+            return "transferred"
+        operation_state = connection.execute(
+            text(
+                "SELECT state FROM marketplace_money_operation "
+                "WHERE booking_id = :id AND kind = 'transfer'"
+            ),
+            {"id": booking_id},
+        ).scalar_one_or_none()
+        if operation_state in {"leased", "queued", "retryable"}:
+            return "transfer_pending"
+        if operation_state in {"ambiguous", "dead"}:
+            return "transfer_ambiguous"
+        return "charged"
 
     @staticmethod
     def _role(connection: Connection, *, row: RowMapping, actor_ref: str) -> str:
@@ -831,6 +1038,8 @@ class LifecycleService:
         provider: StripeMarketplaceProvider | None,
         pseudonym_key: bytes | None,
         actor_allowlist: tuple[str, ...],
+        payout_execution_enabled: bool = True,
+        notification_provider: MarketplaceNotificationProvider | None = None,
     ) -> None:
         self._enabled = enabled
         self._repository = repository
@@ -838,6 +1047,8 @@ class LifecycleService:
         self._provider = provider
         self._pseudonym_key = pseudonym_key
         self._actor_allowlist = frozenset(actor_allowlist)
+        self._payout_execution_enabled = payout_execution_enabled
+        self._notification_provider = notification_provider
 
     async def transition(
         self,
@@ -848,6 +1059,15 @@ class LifecycleService:
         reason: str,
         new_starts_at: datetime | None,
     ) -> BookingView:
+        expected_profile_version: int | None = None
+        if action == "reschedule":
+            if new_starts_at is None:
+                raise TutorApplicationConflictError
+            expected_profile_version = await self._booking_service.validate_reschedule(
+                principal=principal,
+                booking_id=booking_id,
+                starts_at=new_starts_at,
+            )
         actor_ref = self._actor_ref(principal)
         updated = await asyncio.to_thread(
             self._repository.transition,
@@ -857,6 +1077,7 @@ class LifecycleService:
             reason=reason,
             new_starts_at=new_starts_at,
             now=datetime.now(UTC),
+            expected_profile_version=expected_profile_version,
         )
         if not updated:
             raise TutorApplicationNotFoundError
@@ -882,6 +1103,38 @@ class LifecycleService:
             raise TutorApplicationNotFoundError
         return review
 
+    async def list_reviews(
+        self, *, principal: ClerkPrincipal, limit: int
+    ) -> tuple[ReviewView, ...]:
+        reviews = await asyncio.to_thread(
+            self._repository.list_reviews_for_operator,
+            operator_actor_ref=self._actor_ref(principal),
+            limit=limit,
+        )
+        if reviews is None:
+            raise HumanTutorMarketplaceForbiddenError
+        return reviews
+
+    async def moderate_review(
+        self,
+        *,
+        principal: ClerkPrincipal,
+        review_id: UUID,
+        moderation_state: Literal["published", "hidden"],
+        reason: str,
+    ) -> ReviewView:
+        review = await asyncio.to_thread(
+            self._repository.moderate_review,
+            operator_actor_ref=self._actor_ref(principal),
+            review_id=review_id,
+            moderation_state=moderation_state,
+            reason=reason,
+            now=datetime.now(UTC),
+        )
+        if review is None:
+            raise HumanTutorMarketplaceForbiddenError
+        return review
+
     async def earnings(self, *, principal: ClerkPrincipal) -> EarningsView:
         return await asyncio.to_thread(
             self._repository.earnings,
@@ -895,6 +1148,7 @@ class LifecycleService:
             worker=worker,
             now=datetime.now(UTC),
             lease_seconds=60,
+            include_transfers=self._payout_execution_enabled,
         )
         if operation is None:
             return False
@@ -950,6 +1204,46 @@ class LifecycleService:
                 ambiguous=True,
                 now=datetime.now(UTC),
             )
+        return True
+
+    async def run_one_reminder_job(self, *, worker: str) -> bool:
+        self._require_enabled()
+        if self._notification_provider is None:
+            return False
+        job = await asyncio.to_thread(
+            self._repository.claim_reminder,
+            worker=worker,
+            now=datetime.now(UTC),
+            lease_seconds=60,
+        )
+        if job is None:
+            return False
+        outcomes = []
+        for role, recipient in (
+            ("learner", job.learner_actor_ref),
+            ("tutor", job.tutor_actor_ref),
+        ):
+            outcomes.append(
+                await self._notification_provider.deliver(
+                    recipient_actor_ref=recipient,
+                    template=job.kind,
+                    idempotency_key=f"marketplace-reminder:{job.job_id}:{role}",
+                )
+            )
+        outcome: Literal["completed", "retryable", "rejected"] = (
+            "rejected"
+            if "rejected" in outcomes
+            else "retryable"
+            if "retryable" in outcomes
+            else "completed"
+        )
+        await asyncio.to_thread(
+            self._repository.finish_reminder,
+            job_id=job.job_id,
+            worker=worker,
+            now=datetime.now(UTC),
+            outcome=outcome,
+        )
         return True
 
     async def recover_money(

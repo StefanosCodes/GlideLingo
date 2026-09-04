@@ -106,6 +106,18 @@ export type PublicTutor = {
 
 export type TutorSearchResult = { items: PublicTutor[]; nextCursor: string | null };
 
+export type MarketplaceReview = {
+  reviewId: string;
+  bookingId: string;
+  tutorId: string;
+  rating: number;
+  body: string | null;
+  moderationState: 'published' | 'hidden';
+  moderationReason: string | null;
+  moderatedAt: string | null;
+  createdAt: string;
+};
+
 export type ManualAvailabilityDraft = {
   expectedProfileVersion: number;
   leadTimeMinutes: number;
@@ -414,6 +426,7 @@ export async function listPublicTutors(
     specialty?: string;
     durationMinutes?: 25 | 50;
     maximumAmountMinor?: number;
+    minimumRating?: number;
     verifiedCredential?: boolean;
     favorite?: boolean;
     availableBefore?: string;
@@ -435,6 +448,7 @@ export async function listPublicTutors(
         language: filters.language,
         limit: filters.limit ?? 20,
         maximum_amount_minor: filters.maximumAmountMinor,
+        minimum_rating: filters.minimumRating,
         specialty: filters.specialty,
         verified_credential: filters.verifiedCredential,
       },
@@ -697,6 +711,20 @@ export async function reconcileMarketplaceBooking(bookingId: string): Promise<Ma
   });
 }
 
+export async function recoverMarketplaceBookingMoney(
+  bookingId: string,
+  reason: string,
+): Promise<MarketplaceBooking> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { reason },
+      parse: parseMarketplaceBooking,
+      path: `/v1/marketplace-operations/bookings/${bookingId}/money-recovery`,
+    });
+    return result.data;
+  });
+}
+
 export async function transitionMarketplaceBooking(
   bookingId: string,
   action: 'reschedule' | 'cancel' | 'complete' | 'learner_no_show' | 'tutor_no_show' | 'dispute' | 'resolve_refund' | 'resolve_release',
@@ -727,6 +755,53 @@ export async function createMarketplaceBookingReview(
     });
     return result.data;
   });
+}
+
+export async function listMarketplaceReviews(signal?: AbortSignal): Promise<MarketplaceReview[]> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({
+      parse: (value) => {
+        if (!isRecord(value) || !Array.isArray(value.items)) return null;
+        const items = value.items.map(parseMarketplaceReview);
+        return items.every((item): item is MarketplaceReview => item !== null) ? items : null;
+      },
+      path: '/v1/marketplace-operations/reviews',
+      query: { limit: 50 },
+      signal,
+    });
+    return result.data;
+  });
+}
+
+export async function moderateMarketplaceReview(
+  reviewId: string,
+  moderationState: 'published' | 'hidden',
+  reason: string,
+): Promise<MarketplaceReview> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { moderation_state: moderationState, reason },
+      parse: parseMarketplaceReview,
+      path: `/v1/marketplace-operations/reviews/${reviewId}/moderation`,
+    });
+    return result.data;
+  });
+}
+
+export function parseMarketplaceReview(value: unknown): MarketplaceReview | null {
+  if (!isRecord(value) || !isUuid(value.review_id) || !isUuid(value.booking_id) ||
+    !isUuid(value.tutor_id) || typeof value.rating !== 'number' || !Number.isInteger(value.rating) ||
+    value.rating < 1 || value.rating > 5 ||
+    (value.body !== null && typeof value.body !== 'string') ||
+    (value.moderation_state !== 'published' && value.moderation_state !== 'hidden') ||
+    (value.moderation_reason !== null && typeof value.moderation_reason !== 'string') ||
+    !isNullableIsoTimestamp(value.moderated_at) || !isIsoTimestamp(value.created_at)) return null;
+  return {
+    reviewId: value.review_id, bookingId: value.booking_id, tutorId: value.tutor_id,
+    rating: value.rating as number, body: value.body as string | null,
+    moderationState: value.moderation_state, moderationReason: value.moderation_reason as string | null,
+    moderatedAt: value.moderated_at, createdAt: value.created_at,
+  };
 }
 
 export async function getTutorEarnings(signal?: AbortSignal): Promise<TutorEarnings> {

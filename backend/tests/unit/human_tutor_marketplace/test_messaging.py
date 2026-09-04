@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime, timedelta
 from typing import cast
 from uuid import UUID
 
@@ -10,11 +11,46 @@ from app.core.errors import (
     TutorApplicationConflictError,
 )
 from app.modules.human_tutor_marketplace.messaging import (
+    MarketplaceNotificationProvider,
     MessagingRepository,
     MessagingService,
+    StoredNotificationJob,
     validate_approved_meeting_url,
     validate_message_body,
 )
+
+
+class NotificationRepository:
+    def __init__(self) -> None:
+        now = datetime.now(UTC)
+        self.job: StoredNotificationJob | None = StoredNotificationJob(
+            job_id=UUID("9948afe2-59ac-46f6-88cf-15c5f9994567"),
+            message_id=UUID("9948afe2-59ac-46f6-88cf-15c5f9995678"),
+            recipient_actor_ref="mktusr_v1_" + "a" * 43,
+            attempt=1,
+            lease_owner="worker-a",
+            lease_expires_at=now + timedelta(seconds=60),
+        )
+        self.finished: tuple[UUID, str] | None = None
+
+    def claim_notification(self, **kwargs: object) -> StoredNotificationJob | None:
+        job, self.job = self.job, None
+        return job
+
+    def finish_notification(self, *, job_id: UUID, outcome: str, **kwargs: object) -> bool:
+        self.finished = (job_id, outcome)
+        return True
+
+
+class NotificationProvider:
+    def __init__(self) -> None:
+        self.delivery: tuple[str, str, str] | None = None
+
+    async def deliver(
+        self, *, recipient_actor_ref: str, template: str, idempotency_key: str
+    ) -> str:
+        self.delivery = (recipient_actor_ref, template, idempotency_key)
+        return "retryable"
 
 
 def test_prebooking_messages_reject_links_contact_coordinates_and_control_bytes() -> None:
@@ -76,3 +112,27 @@ def test_acquisition_kill_switch_blocks_only_new_conversations() -> None:
                 tutor_id=UUID("9948afe2-59ac-46f6-88cf-15c5f9991234"),
             )
         )
+
+
+def test_notification_processor_uses_stable_identity_free_payload_and_records_retry() -> None:
+    repository = NotificationRepository()
+    provider = NotificationProvider()
+    service = MessagingService(
+        enabled=True,
+        repository=cast(MessagingRepository, repository),
+        pseudonym_key=b"messaging-test-key-at-least-32-bytes",
+        actor_allowlist=(),
+        retention_days=90,
+        notification_provider=cast(MarketplaceNotificationProvider, provider),
+    )
+
+    assert asyncio.run(service.run_one_notification_job(worker="worker-a"))
+    assert provider.delivery == (
+        "mktusr_v1_" + "a" * 43,
+        "new_message",
+        "marketplace-message:9948afe2-59ac-46f6-88cf-15c5f9994567",
+    )
+    assert repository.finished == (
+        UUID("9948afe2-59ac-46f6-88cf-15c5f9994567"),
+        "retryable",
+    )

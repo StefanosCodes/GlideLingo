@@ -1,9 +1,11 @@
+import asyncio
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from threading import Barrier
+from time import sleep
 from typing import Any, cast
 from uuid import UUID, uuid4
 
@@ -15,13 +17,18 @@ from app.core.config import Settings
 from app.core.errors import TutorApplicationConflictError
 from app.modules.human_tutor_marketplace.availability import TimeInterval
 from app.modules.human_tutor_marketplace.booking import (
+    BookingService,
     PostgresBookingRepository,
     StripeCheckout,
     StripeConnectAccount,
+    StripeMarketplaceProvider,
     StripeMoneyResult,
 )
 from app.modules.human_tutor_marketplace.calendar import PostgresCalendarRepository
-from app.modules.human_tutor_marketplace.discovery import PostgresDiscoveryRepository
+from app.modules.human_tutor_marketplace.discovery import (
+    MarketplaceDiscoveryService,
+    PostgresDiscoveryRepository,
+)
 from app.modules.human_tutor_marketplace.identity import derive_marketplace_actor_ref
 from app.modules.human_tutor_marketplace.learning_bridge import (
     FollowUpRecommendation,
@@ -92,6 +99,51 @@ OUTSIDER_ACTOR = derive_marketplace_actor_ref(
 )
 
 
+class FakeReconciliationStripe:
+    def __init__(self) -> None:
+        self.checkouts: dict[str, StripeCheckout] = {}
+        self.created_idempotency_keys: list[str] = []
+
+    async def get_platform_account_id(self) -> str:
+        return "acct_reviewed123"
+
+    async def create_checkout(self, **kwargs: Any) -> StripeCheckout:
+        booking_id = cast(UUID, kwargs["booking_id"])
+        self.created_idempotency_keys.append(cast(str, kwargs["idempotency_key"]))
+        checkout = StripeCheckout(
+            checkout_id=f"cs_test_{booking_id.hex[:12]}",
+            url="https://checkout.stripe.com/c/pay/reconciled123",
+            payment_intent_id=f"pi_{booking_id.hex[:12]}",
+            status="open",
+            payment_status="unpaid",
+            livemode=False,
+            booking_id=booking_id,
+            platform_account_id="acct_reviewed123",
+            created_at=datetime.now(UTC),
+        )
+        self.checkouts[checkout.checkout_id] = checkout
+        return checkout
+
+    async def retrieve_checkout(self, *, checkout_id: str) -> StripeCheckout:
+        return self.checkouts[checkout_id]
+
+    async def expire_checkout(self, *, checkout_id: str) -> StripeCheckout:
+        expired = self.checkouts[checkout_id]
+        expired = StripeCheckout(
+            checkout_id=expired.checkout_id,
+            url=None,
+            payment_intent_id=expired.payment_intent_id,
+            status="expired",
+            payment_status="unpaid",
+            livemode=expired.livemode,
+            booking_id=expired.booking_id,
+            platform_account_id=expired.platform_account_id,
+            created_at=datetime.now(UTC),
+        )
+        self.checkouts[checkout_id] = expired
+        return expired
+
+
 @pytest.fixture
 def marketplace_engine() -> Generator[Engine]:
     database_url = Settings().database_url.get_secret_value()
@@ -148,6 +200,7 @@ def marketplace_engine() -> Generator[Engine]:
                     (OPERATOR_ACTOR, "verify_tutor_credentials"),
                     (OPERATOR_ACTOR, "review_message_reports"),
                     (OPERATOR_ACTOR, "manage_bookings"),
+                    (OPERATOR_ACTOR, "moderate_reviews"),
                 ],
             )
         finally:
@@ -792,6 +845,51 @@ def test_discovery_availability_and_favorites_use_only_eligible_public_supply(
 
 
 @pytest.mark.integration
+def test_profile_timezone_change_invalidates_wall_clock_availability(
+    marketplace_engine: Engine,
+) -> None:
+    core = PostgresTutorApplicationRepository(engine=marketplace_engine)
+    discovery = PostgresDiscoveryRepository(engine=marketplace_engine)
+    _, profile = create_approved_tutor(core)
+    schedule = discovery.replace_manual_availability(
+        actor_ref=TUTOR_ACTOR,
+        request=ReplaceManualAvailabilityRequest(
+            expected_profile_version=profile.version,
+            lead_time_minutes=60,
+            buffer_before_minutes=5,
+            buffer_after_minutes=10,
+            dialects=["el-cy"],
+            rules=[
+                AvailabilityRuleInput(
+                    weekday=4,
+                    start_local=time(9),
+                    end_local=time(12),
+                    effective_from=date(2026, 1, 1),
+                )
+            ],
+            exceptions=[],
+        ),
+    )
+    assert schedule is not None and len(schedule.rules) == 1
+
+    updated = core.update_profile_draft(
+        actor_ref=TUTOR_ACTOR,
+        request=UpdateTutorProfileDraftRequest(
+            expected_version=schedule.profile_version,
+            headline=profile.headline,
+            biography=profile.biography,
+            time_zone="UTC",
+        ),
+    )
+
+    assert updated is not None and updated.time_zone == "UTC"
+    invalidated = discovery.get_manual_availability_by_actor(actor_ref=TUTOR_ACTOR)
+    assert invalidated is not None
+    assert invalidated.rules == ()
+    assert invalidated.exceptions == ()
+
+
+@pytest.mark.integration
 def test_calendar_oauth_replay_cache_concurrency_and_encrypted_storage(
     marketplace_engine: Engine,
 ) -> None:
@@ -1080,6 +1178,28 @@ def test_messaging_participant_safety_reports_rate_limits_and_jobs(
             {"job_id": job.job_id},
         ).one()
     assert job_status == ("retryable", "unavailable")
+    with marketplace_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE marketplace_message_notification_job "
+                "SET attempt = 7, available_at = :now WHERE job_id = :job_id"
+            ),
+            {"now": now, "job_id": job.job_id},
+        )
+    exhausted = messaging.claim_notification(lease_owner="worker-a", now=now, lease_seconds=30)
+    assert exhausted is not None and exhausted.attempt == 8
+    assert messaging.finish_notification(
+        job_id=exhausted.job_id,
+        lease_owner="worker-a",
+        now=now,
+        outcome="retryable",
+    )
+    with marketplace_engine.connect() as connection:
+        exhausted_status = connection.execute(
+            text("SELECT status FROM marketplace_message_notification_job WHERE job_id = :job_id"),
+            {"job_id": job.job_id},
+        ).scalar_one()
+    assert exhausted_status == "dead"
 
     old = now - timedelta(days=100)
     with marketplace_engine.begin() as connection:
@@ -1721,6 +1841,164 @@ def test_booking_holds_overlap_webhooks_money_and_participant_scope(
 
 
 @pytest.mark.integration
+def test_buffers_and_provider_checkout_terminal_state_guard_inventory(
+    marketplace_engine: Engine,
+) -> None:
+    _, booking, profile = create_bookable_tutor(marketplace_engine)
+    now = datetime.now(UTC)
+    with marketplace_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE marketplace_tutor_profile SET buffer_before_minutes = 5, "
+                "buffer_after_minutes = 10 WHERE tutor_id = :id"
+            ),
+            {"id": profile.tutor_id},
+        )
+    first = booking.create_hold(
+        learner_actor_ref=LEARNER_ACTOR,
+        tutor_id=profile.tutor_id,
+        starts_at=now + timedelta(days=2),
+        idempotency_key=uuid4(),
+        now=now,
+        hold_seconds=600,
+        environment="SANDBOX",
+        platform_account_id="acct_reviewed123",
+    )
+    assert first is not None
+    assert first.buffer_before_minutes == 5 and first.buffer_after_minutes == 10
+    with pytest.raises(TutorApplicationConflictError):
+        booking.create_hold(
+            learner_actor_ref=OUTSIDER_ACTOR,
+            tutor_id=profile.tutor_id,
+            starts_at=first.ends_at,
+            idempotency_key=uuid4(),
+            now=now,
+            hold_seconds=600,
+            environment="SANDBOX",
+            platform_account_id="acct_reviewed123",
+        )
+    pending = booking.attach_checkout(
+        booking_id=first.booking_id,
+        learner_actor_ref=LEARNER_ACTOR,
+        checkout=StripeCheckout(
+            checkout_id=f"cs_test_{first.booking_id.hex[:12]}",
+            url="https://checkout.stripe.com/c/pay/buffered123",
+            payment_intent_id=f"pi_{first.booking_id.hex[:12]}",
+            status="open",
+            payment_status="unpaid",
+            livemode=False,
+            booking_id=first.booking_id,
+            platform_account_id="acct_reviewed123",
+            created_at=now,
+        ),
+    )
+    assert pending is not None
+    assert booking.expire_holds(now=now + timedelta(minutes=20), limit=10) == 0
+    pending_after_expiry = booking.get_booking(booking_id=first.booking_id, actor_ref=LEARNER_ACTOR)
+    assert pending_after_expiry is not None and pending_after_expiry.state == "payment_pending"
+
+    plain = booking.create_hold(
+        learner_actor_ref=LEARNER_ACTOR,
+        tutor_id=profile.tutor_id,
+        starts_at=now + timedelta(days=4),
+        idempotency_key=uuid4(),
+        now=now,
+        hold_seconds=600,
+        environment="SANDBOX",
+        platform_account_id="acct_reviewed123",
+    )
+    assert plain is not None
+    assert booking.expire_holds(now=now + timedelta(minutes=20), limit=10) == 1
+    plain_after_expiry = booking.get_booking(booking_id=plain.booking_id, actor_ref=LEARNER_ACTOR)
+    assert plain_after_expiry is not None and plain_after_expiry.state == "expired"
+
+    # A verified provider success after the local hold deadline must not win the
+    # worker race and resurrect inventory that the marketplace can sell again.
+    outcome, late = booking.apply_checkout_observation(
+        checkout=StripeCheckout(
+            checkout_id=pending.provider_checkout_id or "",
+            url=None,
+            payment_intent_id=f"pi_{first.booking_id.hex[:12]}",
+            status="complete",
+            payment_status="paid",
+            livemode=False,
+            booking_id=first.booking_id,
+            platform_account_id="acct_reviewed123",
+            created_at=now + timedelta(minutes=21),
+        ),
+        payload_sha256="f" * 64,
+        event_id=f"evt_{first.booking_id.hex[:12]}",
+        event_type="checkout.session.completed",
+        source="provider_webhook",
+        environment="SANDBOX",
+        platform_account_id="acct_reviewed123",
+    )
+    assert outcome == "applied" and late is not None
+    assert late.state == "expired" and late.money_state == "refund_pending"
+    with marketplace_engine.connect() as connection:
+        assert (
+            connection.execute(
+                text(
+                    "SELECT amount_minor FROM marketplace_money_operation "
+                    "WHERE booking_id = :id AND kind = 'refund'"
+                ),
+                {"id": first.booking_id},
+            ).scalar_one()
+            == first.amount_minor
+        )
+
+
+@pytest.mark.integration
+def test_reconciliation_recovers_ambiguous_create_and_expires_provider_before_release(
+    marketplace_engine: Engine,
+) -> None:
+    _, repository, profile = create_bookable_tutor(marketplace_engine)
+    provider = FakeReconciliationStripe()
+    service = BookingService(
+        enabled=True,
+        repository=repository,
+        provider=cast(StripeMarketplaceProvider, provider),
+        discovery=cast(MarketplaceDiscoveryService, object()),
+        pseudonym_key=b"marketplace-integration-pseudonym-key-32-bytes",
+        actor_allowlist=("user_learner_integration",),
+        environment="SANDBOX",
+        platform_account_id="acct_reviewed123",
+        connect_refresh_url=None,
+        connect_return_url=None,
+        checkout_success_url="https://app.example.test/success",
+        checkout_cancel_url="https://app.example.test/cancel",
+        meeting_hosts=("meet.example.com",),
+    )
+    old_now = datetime.now(UTC)
+    held = repository.create_hold(
+        learner_actor_ref=LEARNER_ACTOR,
+        tutor_id=profile.tutor_id,
+        starts_at=datetime.now(UTC) + timedelta(days=3),
+        idempotency_key=uuid4(),
+        now=old_now,
+        hold_seconds=1,
+        environment="SANDBOX",
+        platform_account_id="acct_reviewed123",
+    )
+    assert held is not None
+    assert (
+        repository.mark_checkout_ambiguous(
+            booking_id=held.booking_id,
+            learner_actor_ref=LEARNER_ACTOR,
+            reason_code="provider_timeout",
+        )
+        is not None
+    )
+    sleep(1.05)
+
+    assert asyncio.run(service.run_one_reconciliation_job(worker="reconcile-a"))
+    reconciled = repository.get_booking(booking_id=held.booking_id, actor_ref=LEARNER_ACTOR)
+    assert reconciled is not None and reconciled.state == "expired"
+    assert provider.created_idempotency_keys == [f"booking:{held.booking_id}:checkout"]
+    assert not asyncio.run(service.run_one_reconciliation_job(worker="reconcile-b"))
+
+
+@pytest.mark.integration
 def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
     marketplace_engine: Engine,
 ) -> None:
@@ -1788,6 +2066,7 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         reason="Learner and tutor agreed to a later lesson time.",
         new_starts_at=new_start,
         now=now,
+        expected_profile_version=profile.version,
     )
     with marketplace_engine.connect() as connection:
         revision = connection.execute(
@@ -2045,13 +2324,21 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         body="A calm and useful verified lesson review.",
     )
     assert review is not None and review.moderation_state == "published"
-
     public_tutor = PostgresDiscoveryRepository(engine=marketplace_engine).get_public_tutor(
         learner_actor_ref=LEARNER_ACTOR,
         tutor_id=profile.tutor_id,
     )
     assert public_tutor is not None
     assert public_tutor.rating == 5.0 and public_tutor.rating_count == 1
+    assert lifecycle.list_reviews_for_operator(operator_actor_ref=OUTSIDER_ACTOR, limit=10) is None
+    moderated = lifecycle.moderate_review(
+        operator_actor_ref=OPERATOR_ACTOR,
+        review_id=review.review_id,
+        moderation_state="hidden",
+        reason="Operator hid unsafe review content after documented moderation.",
+        now=now,
+    )
+    assert moderated is not None and moderated.moderation_state == "hidden"
 
     payout_window = next_weekly_payout_at(now + timedelta(days=15))
     race_completed_at = payout_window - timedelta(hours=24)
@@ -2132,6 +2419,68 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         ("reversal", 2000),
         ("refund", 2500),
     ]
+
+    reverse_order = confirmed(race_completed_at - timedelta(days=1))
+    assert lifecycle.transition(
+        booking_id=reverse_order.booking_id,
+        actor_ref=TUTOR_ACTOR,
+        action="complete",
+        reason="Tutor completed the reverse-order race fixture.",
+        new_starts_at=None,
+        now=race_completed_at,
+    )
+    assert (
+        lifecycle.claim_money_operation(
+            worker="payout-paused",
+            now=payout_window,
+            lease_seconds=60,
+            include_transfers=False,
+        )
+        is None
+    )
+    transfer_first = lifecycle.claim_money_operation(
+        worker="transfer-first", now=payout_window, lease_seconds=60
+    )
+    assert transfer_first is not None and transfer_first.booking_id == reverse_order.booking_id
+    assert lifecycle.finish_money_operation(
+        operation=transfer_first,
+        result=StripeMoneyResult("tr_transferfirst1", False, 2000, "USD"),
+        worker="transfer-first",
+    )
+    assert lifecycle.transition(
+        booking_id=reverse_order.booking_id,
+        actor_ref=LEARNER_ACTOR,
+        action="dispute",
+        reason="Learner disputed exactly after the transfer committed.",
+        new_starts_at=None,
+        now=payout_window,
+    )
+    assert lifecycle.transition(
+        booking_id=reverse_order.booking_id,
+        actor_ref=OPERATOR_ACTOR,
+        action="resolve_refund",
+        reason="Operator approved the reverse-order race refund.",
+        new_starts_at=None,
+        now=payout_window,
+    )
+    reverse_reversal = lifecycle.claim_money_operation(
+        worker="reverse-reversal", now=payout_window, lease_seconds=60
+    )
+    assert reverse_reversal is not None and reverse_reversal.kind == "reversal"
+    assert lifecycle.finish_money_operation(
+        operation=reverse_reversal,
+        result=StripeMoneyResult("trr_transferfirst1", False, 2000, "USD"),
+        worker="reverse-reversal",
+    )
+    reverse_refund = lifecycle.claim_money_operation(
+        worker="reverse-refund", now=payout_window, lease_seconds=60
+    )
+    assert reverse_refund is not None and reverse_refund.kind == "refund"
+    assert lifecycle.finish_money_operation(
+        operation=reverse_refund,
+        result=StripeMoneyResult("re_transferfirst1", False, 2500, "USD"),
+        worker="reverse-refund",
+    )
 
 
 @pytest.mark.integration
@@ -2268,6 +2617,7 @@ def test_learning_context_consent_expiry_and_non_authoritative_follow_up(
         reason="Participants agreed to move the context-enabled booking.",
         new_starts_at=new_start,
         now=now,
+        expected_profile_version=profile.version,
     )
     after_reschedule = bridge.get_context(
         booking_id=held.booking_id, actor_ref=TUTOR_ACTOR, now=now

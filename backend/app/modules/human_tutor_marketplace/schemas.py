@@ -646,7 +646,22 @@ class BookingReviewResponse(BaseModel):
     rating: int = Field(ge=1, le=5)
     body: str | None
     moderation_state: Literal["published", "hidden"]
+    moderation_reason: str | None
+    moderated_at: datetime | None
     created_at: datetime
+
+
+class BookingReviewListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[BookingReviewResponse]
+
+
+class ModerateBookingReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    moderation_state: Literal["published", "hidden"]
+    reason: str = Field(min_length=8, max_length=1000)
 
 
 class TutorEarningsResponse(BaseModel):

@@ -48,6 +48,7 @@ UPDATE marketplace_booking SET money_state = 'charged' WHERE state = 'confirmed'
 
 ALTER TABLE marketplace_booking
     ADD CONSTRAINT marketplace_booking_money_presence_check CHECK (
+        state = 'expired' OR
         (state IN ('confirmed', 'completed', 'cancelled', 'learner_no_show',
                    'tutor_no_show', 'disputed', 'resolved_refund', 'resolved_release'))
         = (money_state IS NOT NULL)
@@ -151,7 +152,21 @@ CREATE TABLE marketplace_booking_review (
     moderation_state text NOT NULL DEFAULT 'published' CHECK (
         moderation_state IN ('published', 'hidden')
     ),
-    created_at timestamptz NOT NULL DEFAULT now()
+    moderation_reason text CHECK (
+        moderation_reason IS NULL OR length(moderation_reason) BETWEEN 8 AND 1000
+    ),
+    moderated_by_actor_ref text CHECK (
+        moderated_by_actor_ref IS NULL OR
+        moderated_by_actor_ref ~ '^mktusr_v1_[A-Za-z0-9_-]{43}$'
+    ),
+    moderated_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (
+        (moderation_reason IS NULL AND moderated_by_actor_ref IS NULL AND moderated_at IS NULL)
+        OR
+        (moderation_reason IS NOT NULL AND moderated_by_actor_ref IS NOT NULL
+         AND moderated_at IS NOT NULL)
+    )
 );
 
 CREATE FUNCTION marketplace_enforce_money_ledger()
@@ -229,6 +244,8 @@ BEGIN
        OR NEW.tutor_id <> OLD.tutor_id
        OR NEW.tutor_actor_ref <> OLD.tutor_actor_ref
        OR NEW.offering_id <> OLD.offering_id
+       OR NEW.buffer_before_minutes <> OLD.buffer_before_minutes
+       OR NEW.buffer_after_minutes <> OLD.buffer_after_minutes
        OR NEW.amount_minor <> OLD.amount_minor OR NEW.currency <> OLD.currency
        OR NEW.commission_basis_points <> OLD.commission_basis_points
        OR NEW.commission_amount_minor <> OLD.commission_amount_minor

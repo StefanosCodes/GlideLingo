@@ -12,6 +12,7 @@ import {
   parseMarketplaceMessageReport,
   parseMarketplaceBooking,
   parseMarketplaceLearningContext,
+  parseMarketplaceReview,
   parseTutorApplication,
   parseTutorProfile,
   parseTutorSlots,
@@ -117,6 +118,31 @@ describe('booking response boundary', () => {
     expect(parseMarketplaceBooking(booking)).toMatchObject({ state: 'payment_pending', amountMinor: 2500 });
     expect(parseMarketplaceBooking({ ...booking, checkout_url: 'https://attacker.test/pay' })).toBeNull();
     expect(parseMarketplaceBooking({ ...booking, state: 'confirmed' })).toBeNull();
+  });
+});
+
+describe('verified review moderation boundary', () => {
+  const review = {
+    review_id: '335516e3-6ab7-4de4-83ae-1ac7d6b76cdb',
+    booking_id: 'f8d97d12-3e8a-49c6-bb22-55c49956c8b9',
+    tutor_id: '2382f687-0ca0-4340-8e78-21ba32912869',
+    rating: 5,
+    body: 'A calm and useful lesson.',
+    moderation_state: 'hidden',
+    moderation_reason: 'Contains prohibited contact details.',
+    moderated_at: '2026-09-04T12:20:00Z',
+    created_at: '2026-09-04T12:10:00Z',
+  };
+
+  test('accepts only bounded review and moderation fields', () => {
+    expect(parseMarketplaceReview(review)).toMatchObject({
+      rating: 5,
+      moderationState: 'hidden',
+      moderationReason: 'Contains prohibited contact details.',
+    });
+    expect(parseMarketplaceReview({ ...review, rating: 7 })).toBeNull();
+    expect(parseMarketplaceReview({ ...review, moderation_state: 'deleted' })).toBeNull();
+    expect(parseMarketplaceReview({ ...review, moderated_at: 'not-a-time' })).toBeNull();
   });
 });
 

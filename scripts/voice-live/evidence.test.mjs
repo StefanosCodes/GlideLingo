@@ -114,9 +114,11 @@ test('provider configuration does not depend on optional echoed input settings',
     session: {
       ...sessionCreated.session,
       audio: { output: sessionCreated.session.audio.output },
+      tool_choice: undefined,
     },
   });
   assert.equal(tracker.diagnostics().providerConfigurationObserved, true);
   assert.equal(tracker.diagnostics().transcriptionConfigured, false);
   assert.equal(tracker.diagnostics().turnDetectionDisabled, false);
+  assert.equal(tracker.diagnostics().toolChoiceNone, false);
 });

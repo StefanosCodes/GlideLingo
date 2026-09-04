@@ -97,8 +97,7 @@ export function createEvidenceTracker({ model, voice }) {
         state.providerConfigurationObserved =
           state.sessionModelMatches &&
           state.sessionVoiceMatches &&
-          state.toolsDisabled &&
-          state.toolChoiceNone;
+          state.toolsDisabled;
         maybeComplete();
       }
       if (event.type === 'conversation.item.input_audio_transcription.completed') {

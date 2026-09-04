@@ -47,6 +47,12 @@ configured Authorization value and HMAC signature. Google and Apple sign-in do n
 
 ## Daily development loop
 
+GitHub exposes four workflows. **CI** runs automatically for pull requests and `main` and is the
+only pre-merge surface: it covers the client, backend/PostgreSQL, Terraform, website, and the visible
+Expo web/Electron journey, then reports one protected client-facing gate. **Deploy Development** updates the API automatically after a
+relevant merge; its manual selector can also stage the dormant tutor with zero traffic. **Deploy
+production API** and **Desktop Release** remain intentional release actions.
+
 ```bash
 git switch -c feat/<small-change>
 npm run env:check
@@ -60,7 +66,9 @@ npm run verify:full-stack
 git push -u origin feat/<small-change>
 ```
 
-Open a pull request into `main`. CI repeats the deterministic checks. Keep changes on a feature
+Open a pull request into `main`. Wait for every CI job to pass before merging. The three protected
+job names remain `Expo and Electron`, `FastAPI and PostgreSQL`, and `Terraform`, while the website
+and functional jobs are additional required evidence in the same run. Keep changes on a feature
 branch; `main` is the reviewed source of truth.
 
 ## Production API release

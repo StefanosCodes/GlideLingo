@@ -1,4 +1,4 @@
-name: Verify
+name: CI
 
 on:
   pull_request:
@@ -10,12 +10,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: verify-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   client:
-    name: Expo and Electron
+    name: Client unit and build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -244,3 +244,97 @@ jobs:
       - name: Validate production Terraform
         working-directory: infra/gcp/environments/production
         run: terraform validate
+
+  website:
+    name: Website production states
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - name: Build explicit production coming-soon state
+        env:
+          CF_PAGES_BRANCH: main
+          PUBLIC_MAC_DOWNLOAD_STATE: disabled
+        run: npm run build
+      - name: Install browser engines
+        run: npx playwright install --with-deps chromium webkit
+      - name: Build active production state
+        env:
+          CF_PAGES_BRANCH: main
+          PUBLIC_MAC_DOWNLOAD_STATE: active
+          PUBLIC_MAC_DOWNLOAD_URL: https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/GlideLingo-0.1.0-universal.dmg
+          PUBLIC_MAC_CHECKSUM_URL: https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/SHA256SUMS.txt
+          PUBLIC_MAC_VERSION: "0.1.0"
+          PUBLIC_MAC_RELEASE_DATE: "2026-08-31"
+        run: npm run build
+      - name: Exercise active production output
+        run: npm run test:e2e:built
+      - name: Verify active-to-disabled rollback output
+        env:
+          CF_PAGES_BRANCH: main
+          PUBLIC_MAC_DOWNLOAD_STATE: disabled
+          PUBLIC_MAC_DOWNLOAD_URL: https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/GlideLingo-0.1.0-universal.dmg
+          PUBLIC_MAC_CHECKSUM_URL: https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/SHA256SUMS.txt
+          PUBLIC_MAC_VERSION: "0.1.0"
+          PUBLIC_MAC_RELEASE_DATE: "2026-08-31"
+        run: npm run build
+
+  functional:
+    name: Expo web and Electron functional
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.GLIDELINGO_CLERK_TEST_PUBLISHABLE_KEY }}
+      E2E_ELECTRON_CLERK_PUBLISHABLE_KEY: ${{ vars.GLIDELINGO_CLERK_PUBLISHABLE_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: Require functional test configuration
+        run: |
+          test -n "${EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY}"
+          test -n "${E2E_ELECTRON_CLERK_PUBLISHABLE_KEY}"
+      - run: npm ci
+      - name: Install pinned Chromium
+        run: npx playwright install chromium
+      - name: Exercise Expo web and Electron
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: operational-ui-e2e-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            playwright-report/operational-ui-e2e/
+            test-results/operational-ui-e2e/
+          retention-days: 14
+
+  client_gate:
+    name: Expo and Electron
+    if: ${{ always() }}
+    needs: [client, website, functional]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      CLIENT_RESULT: ${{ needs.client.result }}
+      WEBSITE_RESULT: ${{ needs.website.result }}
+      FUNCTIONAL_RESULT: ${{ needs.functional.result }}
+    steps:
+      - name: Require every client-facing check to pass
+        run: |
+          test "${CLIENT_RESULT}" = "success"
+          test "${WEBSITE_RESULT}" = "success"
+          test "${FUNCTIONAL_RESULT}" = "success"

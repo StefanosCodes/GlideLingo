@@ -116,7 +116,8 @@ GitHub, runs the full-stack suite, and builds all six unsigned release-shaped ar
 `release-dry-run/`. It then validates their checksums, updater metadata, packaged version, and x64 +
 arm64 slices.
 
-The preflight deliberately uses development configuration and unsigned output. It never reads
+The preflight installs the desktop dependencies from their exact committed lockfile, then uses
+development configuration and unsigned output. It never reads
 production release secrets, signs an app, publishes a release, or enables the updater. Its output is
 verification evidence, never a distribution artifact. A failed preflight must be fixed before the
 version PR is merged.

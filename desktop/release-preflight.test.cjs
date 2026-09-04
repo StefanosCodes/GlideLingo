@@ -128,7 +128,7 @@ test('release preflight runs the complete local gate before validating unsigned 
   assert.equal(result.releaseTag, 'desktop-v1.0.7');
   assert.deepEqual(commands.slice(2, 5), [
     ['npm', ['run', 'env:check']],
-    ['npm', ['ci', '--prefix', 'desktop', '--ignore-scripts', '--dry-run']],
+    ['npm', ['ci', '--prefix', 'desktop', '--ignore-scripts']],
     ['npm', ['run', 'verify:full-stack']],
   ]);
   assert.ok(commands.at(-1)[1].includes('electron-builder'));

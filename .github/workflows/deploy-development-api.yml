@@ -1,7 +1,17 @@
-name: Deploy development API
+name: Deploy Development
 
 on:
   workflow_dispatch:
+    inputs:
+      component:
+        description: Development component to deploy
+        required: true
+        default: api
+        type: choice
+        options:
+          - api
+          - tutor
+          - all
   push:
     branches: [main]
     paths:
@@ -17,7 +27,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: deploy-development-api
+  group: deploy-development
   cancel-in-progress: false
 
 env:
@@ -31,8 +41,9 @@ env:
   CLERK_AUTHORIZED_PARTIES: '["http://localhost:8081","http://127.0.0.1:8081","https://desktop.glidelingo.com"]'
 
 jobs:
-  deploy:
-    name: Verify, build, deploy, and smoke
+  api:
+    name: API — verify, deploy, and smoke
+    if: ${{ github.event_name == 'push' || inputs.component == 'api' || inputs.component == 'all' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: development
@@ -247,3 +258,69 @@ jobs:
 
           echo "revision=${candidate_revision}" >> "${GITHUB_OUTPUT}"
           echo "url=${service_url}" >> "${GITHUB_OUTPUT}"
+
+  tutor:
+    name: Tutor — verify and stage disabled revision
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.component == 'tutor' || inputs.component == 'all') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: development
+    env:
+      GCP_SERVICE: glidelingo-lesson-tutor
+      IMAGE_NAME: glidelingo-lesson-tutor
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          working-directory: services/lesson-tutor
+
+      - name: Verify private tutor
+        run: npm run setup:tutor && npm run tutor:verify
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Install Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+
+      - name: Configure Artifact Registry authentication
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+      - id: image
+        name: Build and push immutable image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_tag="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_REPOSITORY}/${IMAGE_NAME}:${GITHUB_SHA}"
+          docker build --file services/lesson-tutor/Dockerfile --tag "${image_tag}" .
+          docker push "${image_tag}"
+          digest="$(gcloud artifacts docker images describe "${image_tag}" --format='value(image_summary.digest)')"
+          echo "uri=${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_REPOSITORY}/${IMAGE_NAME}@${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Deploy disabled revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          service_json="$(gcloud run services describe "${GCP_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
+          enabled="$(jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "GLIDELINGO_TUTOR_ENABLED")][0].value // ""' <<< "${service_json}")"
+          test "${enabled}" = "false"
+          gcloud run deploy "${GCP_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --image="${{ steps.image.outputs.uri }}" \
+            --no-traffic \
+            --quiet
+          revision_json="$(gcloud run services describe "${GCP_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
+          latest_created="$(jq -r '.status.latestCreatedRevisionName // ""' <<< "${revision_json}")"
+          latest_ready="$(jq -r '.status.latestReadyRevisionName // ""' <<< "${revision_json}")"
+          test -n "${latest_created}"
+          test "${latest_ready}" = "${latest_created}"

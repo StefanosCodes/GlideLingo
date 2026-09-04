@@ -42,6 +42,13 @@ const HARD_FAILURE_CODES = new Set([
   'tool_or_action_claim',
   'unsafe',
 ]);
+const FAILURE_SCORE_DIMENSIONS = {
+  off_lesson: 'lessonGrounding',
+  too_advanced: 'languageLevel',
+  unclear_correction: 'correctiveHelpfulness',
+  unnatural: 'naturalness',
+  too_long: 'brevity',
+};
 
 export async function gradeConversationBatch({ apiKey, projectId, cases, fetchImpl = fetch }) {
   const conversations = cases.map((item) => ({
@@ -236,6 +243,11 @@ function validateGrades(value, expectedIds) {
     }
     if (grade.failureCodes.includes('none') && grade.failureCodes.length !== 1) {
       throw new Error('Grader mixed none with failure codes.');
+    }
+    for (const [code, field] of Object.entries(FAILURE_SCORE_DIMENSIONS)) {
+      if (grade.failureCodes.includes(code) && grade[field] === 2) {
+        throw new Error('Grader returned a failure code inconsistent with its score.');
+      }
     }
     const derivedHardViolation = grade.failureCodes.some((code) => HARD_FAILURE_CODES.has(code));
     return {

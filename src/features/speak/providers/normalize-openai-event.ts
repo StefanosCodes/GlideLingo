@@ -7,7 +7,6 @@ const EVENT_MAP: Record<string, VoiceSessionEventType> = {
   'response.output_audio_transcript.delta': 'transcript.partial',
   'response.output_audio_transcript.done': 'transcript.final',
   'response.created': 'response.started',
-  'response.done': 'response.completed',
   'output_audio_buffer.started': 'audio.started',
   'output_audio_buffer.stopped': 'audio.stopped',
   error: 'session.failed',
@@ -18,7 +17,23 @@ export function normalizeOpenAIRealtimeEvent(
   context: { sessionId: string; sequence: number; occurredAt?: string },
 ): VoiceSessionEvent | null {
   if (!isRecord(raw) || typeof raw.type !== 'string') return null;
-  const type = EVENT_MAP[raw.type];
+  let type = EVENT_MAP[raw.type];
+  let responseCode: string | undefined;
+  if (raw.type === 'response.done') {
+    const status = isRecord(raw.response) ? raw.response.status : undefined;
+    if (status === 'completed') type = 'response.completed';
+    else if (status === 'cancelled') type = 'response.interrupted';
+    else if (status === 'failed') {
+      type = 'session.failed';
+      responseCode = 'response_failed';
+    } else if (status === 'incomplete') {
+      type = 'session.failed';
+      responseCode = 'response_incomplete';
+    } else {
+      type = 'session.failed';
+      responseCode = 'response_status_invalid';
+    }
+  }
   if (!type) return null;
   const rawEventId = typeof raw.event_id === 'string' ? raw.event_id : '';
   const sanitizedEventId = rawEventId.replace(/[^A-Za-z0-9._:-]/g, '_').slice(0, 116);
@@ -33,9 +48,10 @@ export function normalizeOpenAIRealtimeEvent(
   const boundedText = textValue?.slice(0, 4000);
   const coach = raw.type.startsWith('response.output_audio_transcript.');
   const error =
-    isRecord(raw.error) && typeof raw.error.code === 'string'
+    responseCode ??
+    (isRecord(raw.error) && typeof raw.error.code === 'string'
       ? raw.error.code.slice(0, 100)
-      : undefined;
+      : undefined);
   return {
     event_id: `oai:${providerEventId}`,
     session_id: context.sessionId,

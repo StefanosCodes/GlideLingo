@@ -62,3 +62,23 @@ test('keeps a provider event ID stable when the same event is replayed', () => {
     normalizeOpenAIRealtimeEvent(raw, { ...context, sequence: 9 })?.event_id,
   );
 });
+
+test.each([
+  { status: 'completed', type: 'response.completed', code: undefined },
+  { status: 'cancelled', type: 'response.interrupted', code: undefined },
+  { status: 'failed', type: 'session.failed', code: 'response_failed' },
+  { status: 'incomplete', type: 'session.failed', code: 'response_incomplete' },
+] as const)('normalizes response.done status $status safely', ({ status, type, code }) => {
+  expect(
+    normalizeOpenAIRealtimeEvent(
+      { type: 'response.done', event_id: `evt_${status}`, response: { status } },
+      context,
+    ),
+  ).toMatchObject({ type, ...(code ? { code } : {}) });
+});
+
+test('fails closed when response.done omits a recognized status', () => {
+  expect(
+    normalizeOpenAIRealtimeEvent({ type: 'response.done', event_id: 'evt_invalid' }, context),
+  ).toMatchObject({ type: 'session.failed', code: 'response_status_invalid' });
+});

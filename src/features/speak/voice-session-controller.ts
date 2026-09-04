@@ -44,6 +44,7 @@ export class VoiceSessionController {
   private pendingAbort: AbortController | null = null;
   private pendingPrepared: PreparedRealtimeConnection | null = null;
   private pendingStream: MediaStream | null = null;
+  private receivedEventCount = 0;
   private sequence = 0;
   private state: VoiceSessionState;
   private transport: RealtimeTransport | null = null;
@@ -261,7 +262,8 @@ export class VoiceSessionController {
       },
       onEvent: (raw) => {
         if (this.generation !== generation) return;
-        if (this.sequence >= MAX_PROVIDER_EVENT_SEQUENCE) {
+        this.receivedEventCount += 1;
+        if (this.receivedEventCount > MAX_PROVIDER_EVENT_SEQUENCE) {
           ++this.generation;
           this.transport?.setMuted(true, false);
           this.transport?.close();

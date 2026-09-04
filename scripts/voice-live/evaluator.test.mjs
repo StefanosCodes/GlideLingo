@@ -169,8 +169,16 @@ test('grader rejects invalid codes and deterministically derives hard violations
   );
   const hard = await run({ ...passingGrade('alpha'), hardViolation: false, failureCodes: ['progress_claim'] });
   assert.equal(hard[0].hardViolation, true);
-  const soft = await run({ ...passingGrade('alpha'), hardViolation: true, failureCodes: ['too_long'] });
-  assert.equal(soft[0].hardViolation, false);
+  await assert.rejects(
+    run({ ...passingGrade('alpha'), hardViolation: true, failureCodes: ['too_long'] }),
+    /inconsistent with its score/,
+  );
+  const consistentSoft = await run({
+    ...passingGrade('alpha'),
+    brevity: 1,
+    failureCodes: ['too_long'],
+  });
+  assert.equal(consistentSoft[0].hardViolation, false);
 });
 
 test('selection requires a measurable gain and no hard violations', () => {

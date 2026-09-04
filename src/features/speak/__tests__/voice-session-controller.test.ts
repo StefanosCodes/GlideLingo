@@ -538,3 +538,42 @@ test('untrusted provider event volume cannot exceed the server sequence bound or
   const sent = end.mock.calls[0]?.[1].events ?? [];
   expect(Math.max(...sent.map((event) => event.sequence))).toBe(10_000);
 });
+
+test('malformed provider events count toward the event-volume fail-safe', async () => {
+  const media = mediaFakes();
+  let rawEvent: ((event: unknown) => void) | undefined;
+  const close = jest.fn();
+  const setMuted = jest.fn();
+  const end = jest.fn(async () => ({
+    session_id: ADMISSION.session_id,
+    lifecycle: 'ended' as const,
+    end_reason: 'failed' as const,
+    scenario_completed: false as const,
+    transcript: [],
+    evidence: { applied: false as const, reason: 'authored_scenario_evidence_not_integrated' },
+  }));
+  const controller = new VoiceSessionController(jest.fn(), true, {
+    requestMicrophone: jest.fn(async () => media.stream),
+    prepare: jest.fn(async () => media.prepared),
+    create: jest.fn(async () => ADMISSION),
+    connect: jest.fn(async (options: ConnectRealtimeOptions) => {
+      rawEvent = options.onEvent;
+      options.onConnected();
+      return { admission: ADMISSION, close, interrupt: jest.fn(() => false), setMuted };
+    }),
+    reconnect: jest.fn(),
+    end,
+  } as never);
+
+  await controller.start({ ...REQUEST, client_capabilities: [...REQUEST.client_capabilities] });
+  for (let index = 0; index <= 10_000; index += 1) rawEvent?.({ type: 'unknown' });
+  await Promise.resolve();
+
+  expect(controller.snapshot).toMatchObject({
+    lifecycle: 'failed',
+    failureCode: 'provider_event_limit',
+  });
+  expect(close).toHaveBeenCalledTimes(1);
+  expect(setMuted).toHaveBeenCalledWith(true, false);
+  expect(end).toHaveBeenCalledTimes(1);
+});

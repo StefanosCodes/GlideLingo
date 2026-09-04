@@ -102,6 +102,7 @@ test('release tag must match the packaged desktop version', () => {
 
 test('release environment accepts macOS and rejects unsigned or non-macOS builds', () => {
   assert.deepEqual(validateReleaseEnvironment(apiKeyEnvironment, 'darwin'), {
+    affiliateReferralsEnabled: false,
     apiOrigin: 'https://api.glidelingo.com',
     billingMode: 'sandbox',
     clerkOrigin: 'https://clerk.glidelingo.com',
@@ -117,7 +118,7 @@ test('release environment accepts macOS and rejects unsigned or non-macOS builds
   );
 });
 
-test('release packaging embeds the validated billing mode and exact origins', () => {
+test('release packaging embeds one default-off referral flag with the validated configuration', () => {
   const calls = [];
   buildDesktopRelease(
     apiKeyEnvironment,
@@ -130,6 +131,9 @@ test('release packaging embeds the validated billing mode and exact origins', ()
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[0].args, ['run', 'desktop:export']);
   assert.ok(
+    calls[1].args.includes('--config.extraMetadata.glidelingoAffiliateReferralsEnabled=false'),
+  );
+  assert.ok(
     calls[1].args.includes('--config.extraMetadata.glidelingoBillingMode=sandbox'),
   );
   assert.ok(
@@ -137,5 +141,15 @@ test('release packaging embeds the validated billing mode and exact origins', ()
   );
   assert.ok(
     calls[1].args.includes('--config.extraMetadata.glidelingoClerkOrigin=https://clerk.glidelingo.com'),
+  );
+
+  const enabledCalls = [];
+  buildDesktopRelease(
+    { ...apiKeyEnvironment, EXPO_PUBLIC_AFFILIATE_REFERRALS_ENABLED: 'true' },
+    (command, args, environment) => enabledCalls.push({ command, args, environment }),
+    'darwin',
+  );
+  assert.ok(
+    enabledCalls[1].args.includes('--config.extraMetadata.glidelingoAffiliateReferralsEnabled=true'),
   );
 });

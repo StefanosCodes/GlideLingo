@@ -7,6 +7,7 @@ import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { Spacing } from '@/constants/theme';
 import { wasSsoCallbackCancelled } from '@/features/auth/sso-callback-recovery';
+import { referralAuthReturnPath } from '@/features/affiliates/referral-session';
 import { useTheme } from '@/hooks/use-theme';
 
 type CallbackState = 'completing' | 'cancelled' | 'failed';
@@ -25,10 +26,11 @@ export default function SsoCallbackRoute() {
     if (callbackState !== 'completing') return;
 
     let active = true;
+    const fallbackRedirectUrl = referralAuthReturnPath();
     void clerk
       .handleRedirectCallback({
-        signInFallbackRedirectUrl: '/',
-        signUpFallbackRedirectUrl: '/',
+        signInFallbackRedirectUrl: fallbackRedirectUrl,
+        signUpFallbackRedirectUrl: fallbackRedirectUrl,
       })
       .catch(() => {
         if (active) setCallbackState('failed');

@@ -5,6 +5,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { DESKTOP_AUTH_CALLBACK_URL, selectWebOauthFlow } from '@/features/auth/oauth-flow';
 import { SIGN_IN_METHODS_COPY } from '@/features/auth/sign-in-copy';
+import { referralAuthReturnPath } from '@/features/affiliates/referral-session';
 import { useTheme } from '@/hooks/use-theme';
 
 export default function SignInRoute() {
@@ -16,6 +17,7 @@ export default function SignInRoute() {
   const desktopCallbackUrl = oauthFlow === 'redirect'
     ? DESKTOP_AUTH_CALLBACK_URL
     : undefined;
+  const fallbackRedirectUrl = referralAuthReturnPath();
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]} testID="auth-sign-in">
@@ -31,11 +33,11 @@ export default function SignInRoute() {
         </ThemedText>
       </View>
       <SignIn
-        fallbackRedirectUrl="/"
+        fallbackRedirectUrl={fallbackRedirectUrl}
         forceRedirectUrl={desktopCallbackUrl}
         oauthFlow={oauthFlow}
         routing="hash"
-        signUpFallbackRedirectUrl="/"
+        signUpFallbackRedirectUrl={fallbackRedirectUrl}
         signUpForceRedirectUrl={desktopCallbackUrl}
         withSignUp
       />

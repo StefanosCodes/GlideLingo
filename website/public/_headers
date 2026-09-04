@@ -20,3 +20,7 @@
 
 /videos/*
   Cache-Control: public, max-age=604800
+
+/referral/*
+  Cache-Control: no-store
+  Referrer-Policy: no-referrer

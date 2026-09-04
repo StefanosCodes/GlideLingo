@@ -11,21 +11,27 @@ const {
   PRODUCTION_API_ORIGIN,
   PRODUCTION_CLERK_ORIGIN,
   buildContentSecurityPolicy,
-  findAuthCallbackUrl,
+  dispatchSupportedAppUrl,
+  findSupportedAppUrl,
   isAllowedAuthWindowUrl,
   isAllowedNavigation,
   isExactPackagedRendererUrl,
   isSafeExternalUrl,
   installAuthPopupNavigationSecurity,
-  mapAuthCallbackToRendererUrl,
-  parseAuthCallbackUrl,
+  parseSupportedAppUrl,
+  redactUrlForLogging,
+  resolveAffiliateReferralsEnabled,
   resolveRendererPath,
   validateDevelopmentUrl,
   validateProductionApiOrigin,
   validateProductionClerkOrigin,
 } = require('./runtime.cjs');
 const { startMacUpdater } = require('./updater.cjs');
-const { glidelingoApiOrigin, glidelingoClerkOrigin } = require('./package.json');
+const {
+  glidelingoAffiliateReferralsEnabled,
+  glidelingoApiOrigin,
+  glidelingoClerkOrigin,
+} = require('./package.json');
 
 const DEVELOPMENT_URL = validateDevelopmentUrl(process.env.ELECTRON_RENDERER_URL);
 const PRODUCTION_URL = `${PACKAGED_RENDERER_ORIGIN}/`;
@@ -43,8 +49,15 @@ const CONTENT_SECURITY_POLICY = buildContentSecurityPolicy({
   apiOrigin: PACKAGED_API_ORIGIN,
   clerkOrigin: PACKAGED_CLERK_ORIGIN,
 });
+const AFFILIATE_REFERRALS_ENABLED = resolveAffiliateReferralsEnabled({
+  developmentUrl: DEVELOPMENT_URL,
+  environmentValue: process.env.EXPO_PUBLIC_AFFILIATE_REFERRALS_ENABLED,
+  packagedValue: glidelingoAffiliateReferralsEnabled,
+});
 let mainWindow = null;
-let pendingAuthCallbackUrl = findAuthCallbackUrl(process.argv);
+let pendingAppUrl = findSupportedAppUrl(process.argv, {
+  referralsEnabled: AFFILIATE_REFERRALS_ENABLED,
+});
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
@@ -129,21 +142,18 @@ function openExternalUrl(targetUrl) {
   }
 }
 
-function handleAuthCallback(targetUrl) {
-  const acceptedCallbackUrl = parseAuthCallbackUrl(targetUrl);
-  const callbackUrl = mapAuthCallbackToRendererUrl(targetUrl);
-  if (!acceptedCallbackUrl || !callbackUrl) return false;
-
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    pendingAuthCallbackUrl = acceptedCallbackUrl;
-    return true;
-  }
-
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
-  void mainWindow.loadURL(callbackUrl);
-  return true;
+function handleAppUrl(targetUrl) {
+  return dispatchSupportedAppUrl(targetUrl, {
+    activateWindow() {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    },
+    hasWindow: () => Boolean(mainWindow && !mainWindow.isDestroyed()),
+    loadRendererUrl: (rendererUrl) => { void mainWindow.loadURL(rendererUrl); },
+    referralsEnabled: AFFILIATE_REFERRALS_ENABLED,
+    storePendingUrl: (appUrl) => { pendingAppUrl = appUrl; },
+  });
 }
 
 function authPopupWindowOptions(parent) {
@@ -227,9 +237,9 @@ function createWindow() {
   });
 
   window.webContents.on('will-navigate', (event, url) => {
-    if (parseAuthCallbackUrl(url)) {
+    if (parseSupportedAppUrl(url, { referralsEnabled: AFFILIATE_REFERRALS_ENABLED })) {
       event.preventDefault();
-      handleAuthCallback(url);
+      handleAppUrl(url);
       return;
     }
 
@@ -266,7 +276,7 @@ function createWindow() {
 
           console.log(
             `[desktop-smoke] loaded ${rendered.signedOut ? 'signed-out' : 'authenticated'} state at ` +
-              window.webContents.getURL(),
+              redactUrlForLogging(window.webContents.getURL()),
           );
           app.quit();
         } catch (error) {
@@ -284,10 +294,10 @@ function createWindow() {
 
   void window.loadURL(RENDERER_URL);
 
-  if (pendingAuthCallbackUrl) {
-    const callbackUrl = pendingAuthCallbackUrl;
-    pendingAuthCallbackUrl = null;
-    window.webContents.once('did-finish-load', () => handleAuthCallback(callbackUrl));
+  if (pendingAppUrl) {
+    const appUrl = pendingAppUrl;
+    pendingAppUrl = null;
+    window.webContents.once('did-finish-load', () => handleAppUrl(appUrl));
   }
 
   return window;
@@ -295,13 +305,13 @@ function createWindow() {
 
 app.on('open-url', (event, url) => {
   event.preventDefault();
-  handleAuthCallback(url);
+  handleAppUrl(url);
 });
 
 app.on('second-instance', (_event, argv) => {
-  const callbackUrl = findAuthCallbackUrl(argv);
-  if (callbackUrl) {
-    handleAuthCallback(callbackUrl);
+  const appUrl = findSupportedAppUrl(argv, { referralsEnabled: AFFILIATE_REFERRALS_ENABLED });
+  if (appUrl) {
+    handleAppUrl(appUrl);
     return;
   }
   if (mainWindow && !mainWindow.isDestroyed()) {

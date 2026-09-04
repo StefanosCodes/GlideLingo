@@ -919,8 +919,8 @@ without the referenced diff and test results.
 
 | Milestone | Status | Base SHA | Head SHA | Verification evidence | Remaining gate |
 | --- | --- | --- | --- | --- | --- |
-| 0. Baseline and contract | Not started | — | — | — | — |
-| 1. Domain/policy/identity | Not started | — | — | — | — |
+| 0. Baseline and contract | In progress | `c454ef4d616de809e00c9a9624636e714a6379f8` | `1d4f8f52e3873f4e7d5344eca6ae8cc303d0cfbd` | Live PR/migration queue reconciled; isolated lanes assigned; product contract and activation boundaries recorded | Confirm production Stripe/Google ownership, launch currency/countries, named operators, and legal/privacy approvals before activation |
+| 1. Domain/policy/identity | In progress | `c454ef4d616de809e00c9a9624636e714a6379f8` | `1d4f8f52e3873f4e7d5344eca6ae8cc303d0cfbd` | `npm run verify:full-stack`; 17 focused client tests; 125 backend unit tests; 17 PostgreSQL integration tests; principal review passed after atomic capability/self-review/retry hardening | Add editable tutor draft, credentials, offering/policy snapshots, publish/suspend controls, and protected operator UI |
 | 2. Discovery/manual availability | Not started | — | — | — | — |
 | 3. Google free/busy | Not started | — | — | — | — |
 | 4. Messaging/coordination | Not started | — | — | — | — |

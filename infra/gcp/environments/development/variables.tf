@@ -93,6 +93,17 @@ variable "clerk_authorized_parties" {
   }
 }
 
+variable "desktop_minimum_supported_version" {
+  description = "Minimum numeric SemVer allowed to continue using the packaged macOS client."
+  type        = string
+  default     = "0.0.0"
+
+  validation {
+    condition     = length(var.desktop_minimum_supported_version) <= 64 && can(regex("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$", var.desktop_minimum_supported_version))
+    error_message = "The desktop minimum supported version must be at most 64 characters and use numeric SemVer (x.y.z)."
+  }
+}
+
 variable "revenuecat_enabled" {
   description = "Enable server-owned RevenueCat authorization only after every documented sandbox gate passes."
   type        = bool

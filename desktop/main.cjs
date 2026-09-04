@@ -4,7 +4,7 @@ const { pathToFileURL } = require('node:url');
 
 const { createClerkBridge } = require('@clerk/electron');
 const { storage: createClerkStorage } = require('@clerk/electron/storage');
-const { app, BrowserWindow, dialog, net, protocol, session, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, net, protocol, session, shell } = require('electron');
 
 const {
   APP_SCHEME,
@@ -28,7 +28,11 @@ const {
   validateProductionApiOrigin,
   validateProductionClerkOrigin,
 } = require('./runtime.cjs');
-const { startMacUpdater } = require('./updater.cjs');
+const {
+  registerDesktopUpdateIpc,
+  shouldQuitForRequiredUpdate,
+  startMacUpdater,
+} = require('./updater.cjs');
 const {
   glidelingoAffiliateReferralsEnabled,
   glidelingoApiOrigin,
@@ -60,6 +64,9 @@ let mainWindow = null;
 let pendingAppUrl = findSupportedAppUrl(process.argv, {
   referralsEnabled: AFFILIATE_REFERRALS_ENABLED,
 });
+let desktopUpdateCoordinator = null;
+let disposeDesktopUpdateIpc = null;
+let requiredQuitRequested = false;
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
@@ -218,6 +225,15 @@ function createWindow() {
   mainWindow = window;
   window.once('closed', () => {
     if (mainWindow === window) mainWindow = null;
+  });
+  window.on('close', () => {
+    if (
+      !requiredQuitRequested &&
+      shouldQuitForRequiredUpdate(desktopUpdateCoordinator)
+    ) {
+      requiredQuitRequested = true;
+      setImmediate(() => app.quit());
+    }
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -480,15 +496,22 @@ app.whenReady().then(async () => {
   }
 
   installSessionSecurity();
-  const initialWindow = createWindow();
-  initialWindow.once('ready-to-show', () => {
-    startMacUpdater({
-      app,
-      dialog,
-      parentWindow: initialWindow,
-      developmentUrl: DEVELOPMENT_URL,
-    });
+  createWindow();
+  desktopUpdateCoordinator = startMacUpdater({
+    app,
+    apiOrigin: PACKAGED_API_ORIGIN,
+    developmentUrl: DEVELOPMENT_URL,
+    fetchImpl: (...args) => net.fetch(...args),
   });
+  if (desktopUpdateCoordinator) {
+    disposeDesktopUpdateIpc = registerDesktopUpdateIpc({
+      coordinator: desktopUpdateCoordinator,
+      getWindow: () => mainWindow,
+      ipcMain,
+      isExactPackagedRendererUrl,
+      shell,
+    });
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -504,6 +527,11 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('before-quit', () => {
+  disposeDesktopUpdateIpc?.();
+  disposeDesktopUpdateIpc = null;
 });
 
 app.on('before-quit', () => {

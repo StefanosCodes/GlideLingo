@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.desktop_update import router as desktop_update_router
 from app.api.health import router as health_router
 from app.auth.clerk import ClerkTokenVerifier
 from app.auth.router import router as auth_router
@@ -120,6 +121,7 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.database_probe = create_database_probe(database_engine)
+    application.state.desktop_minimum_supported_version = settings.desktop_minimum_supported_version
     application.state.revenuecat_webhook_max_body_bytes = settings.revenuecat_webhook_max_body_bytes
     application.state.billing_service = billing_service or BillingService(
         enabled=settings.revenuecat_enabled,
@@ -245,6 +247,7 @@ def create_app(
     )
     application.add_middleware(RequestIdMiddleware)
     application.include_router(health_router)
+    application.include_router(desktop_update_router)
     application.include_router(lesson_tutor_router)
     application.include_router(billing_router)
     application.include_router(affiliate_router)

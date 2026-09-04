@@ -144,6 +144,16 @@ export function selectCandidate(baselineSummary, evaluatedCandidates) {
   return eligible[0] || null;
 }
 
+export function passesHoldout(baselineSummary, candidateSummary) {
+  return (
+    candidateSummary.hardViolationCount === 0 &&
+    candidateSummary.minimumScore >= 6 &&
+    candidateSummary.averageScore >= 8 &&
+    (baselineSummary.hardViolationCount > 0 ||
+      candidateSummary.averageScore >= baselineSummary.averageScore)
+  );
+}
+
 export function privacySafeEvaluationReport({
   headSha,
   projectId,

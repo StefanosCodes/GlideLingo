@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   extractOutputText,
   gradeConversationBatch,
+  passesHoldout,
   privacySafeEvaluationReport,
   proposeScenarioCandidates,
   selectCandidate,
@@ -200,6 +201,23 @@ test('selection prioritizes removing baseline hard violations above score gain',
     ],
   );
   assert.equal(selected.candidate.id, 'safe');
+});
+
+test('holdout prioritizes removing hard violations while preserving quality floors', () => {
+  assert.equal(
+    passesHoldout(
+      { averageScore: 10, minimumScore: 10, hardViolationCount: 2 },
+      { averageScore: 9.5, minimumScore: 9, hardViolationCount: 0 },
+    ),
+    true,
+  );
+  assert.equal(
+    passesHoldout(
+      { averageScore: 10, minimumScore: 10, hardViolationCount: 0 },
+      { averageScore: 9.5, minimumScore: 9, hardViolationCount: 0 },
+    ),
+    false,
+  );
 });
 
 test('privacy-safe report never contains source transcripts or audio', () => {

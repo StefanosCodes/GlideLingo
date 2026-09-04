@@ -9,6 +9,7 @@ import {
   TUNING_CASES,
   gradeConversationBatch,
   privacySafeEvaluationReport,
+  passesHoldout,
   proposeScenarioCandidates,
   selectCandidate,
   summarizeGrades,
@@ -191,11 +192,7 @@ try {
     });
     discardTranscripts(candidateHoldoutConversations);
     candidateHoldout = summarizeGrades(candidateHoldoutGrades);
-    const passedHoldout =
-      candidateHoldout.hardViolationCount === 0 &&
-      candidateHoldout.minimumScore >= 6 &&
-      candidateHoldout.averageScore >= 8 &&
-      candidateHoldout.averageScore >= baselineHoldout.averageScore;
+    const passedHoldout = passesHoldout(baselineHoldout, candidateHoldout);
     if (passedHoldout) {
       recommendation = {
         selected: selected.candidate.id,

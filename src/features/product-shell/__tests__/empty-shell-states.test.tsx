@@ -2,6 +2,7 @@ import { beforeEach, expect, jest, test } from '@jest/globals';
 import { render } from '@testing-library/react-native';
 
 import HomeScreen from '@/app/(app)/index';
+import CourseScreen from '@/app/(app)/course';
 import ProgressScreen from '@/app/(app)/progress';
 
 const mockPush = jest.fn();
@@ -32,7 +33,16 @@ beforeEach(() => {
       {
         id: 'course',
         levelLabel: 'A1',
-        modules: [],
+        modules: [
+          {
+            id: 'authored-unit',
+            lessons: [{ id: 'authored-lesson', title: 'Ready', durationMin: 8, contentStatus: 'authored' }],
+          },
+          {
+            id: 'planned-unit',
+            lessons: [{ id: 'planned-lesson', title: 'Planned', durationMin: 8, contentStatus: 'placeholder' }],
+          },
+        ],
         summary: 'Course summary',
         title: 'Greek Foundations',
       },
@@ -65,4 +75,23 @@ test('keeps an unavailable-storage warning visible in empty Progress', async () 
 
   expect(screen.getByRole('alert')).toBeTruthy();
   expect(screen.getByText('Progress is available for this session only.')).toBeTruthy();
+});
+
+test('Home and Course enrollment cards count only authored lessons', async () => {
+  const home = await render(<HomeScreen />);
+  expect(home.getByText('A1 · 1 AUTHORED LESSON')).toBeTruthy();
+
+  const course = await render(<CourseScreen />);
+  expect(course.getByText('A1 · 1 AUTHORED LESSON')).toBeTruthy();
+  expect(course.queryByText(/2 UNITS/)).toBeNull();
+});
+
+test('Progress ignores stale placeholder completion IDs', async () => {
+  mockLearningState.enrolledCourse = (mockLearningState.courses as unknown[])[0];
+  mockLearningState.completedLessonIds = ['authored-lesson', 'planned-lesson'];
+  mockLearningState.progress = 1;
+
+  const screen = await render(<ProgressScreen />);
+  expect(screen.getByText('1 authored lesson complete')).toBeTruthy();
+  expect(screen.queryByText('2 lessons complete')).toBeNull();
 });

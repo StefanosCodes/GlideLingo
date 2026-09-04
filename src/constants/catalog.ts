@@ -261,8 +261,16 @@ export function isLessonAvailable(lesson: Lesson) {
   return lesson.contentStatus !== 'placeholder';
 }
 
+export function availableLessonsForModule(module: CourseModule) {
+  return module.lessons.filter(isLessonAvailable);
+}
+
+export function availableModulesForCourse(course: Course) {
+  return course.modules.filter((module) => availableLessonsForModule(module).length > 0);
+}
+
 export function isModuleComplete(module: CourseModule, completedLessonIds: string[]) {
-  const availableLessons = module.lessons.filter(isLessonAvailable);
+  const availableLessons = availableLessonsForModule(module);
   return availableLessons.length > 0 && availableLessons.every((lesson) => completedLessonIds.includes(lesson.id));
 }
 
@@ -272,7 +280,7 @@ export function completedModuleIdsFor(course: Course, completedLessonIds: string
 
 export function courseProgress(course: Course, completedLessonIds: string[]) {
   const total = course.modules.reduce(
-    (count, module) => count + module.lessons.filter(isLessonAvailable).length,
+    (count, module) => count + availableLessonsForModule(module).length,
     0,
   );
   if (total === 0) return 0;
@@ -287,7 +295,7 @@ export function courseProgress(course: Course, completedLessonIds: string[]) {
 
 export function currentModule(course: Course, completedLessonIds: string[]) {
   return course.modules.find(
-    (module) => module.lessons.some(isLessonAvailable) && !isModuleComplete(module, completedLessonIds),
+    (module) => availableLessonsForModule(module).length > 0 && !isModuleComplete(module, completedLessonIds),
   ) ?? null;
 }
 
@@ -301,11 +309,12 @@ export function nextLesson(course: Course, completedLessonIds: string[]) {
   return null;
 }
 
-export type ModuleStatus = 'complete' | 'current' | 'upcoming';
+export type ModuleStatus = 'complete' | 'current' | 'upcoming' | 'unavailable';
 
 export function moduleStatus(course: Course, moduleId: string, completedLessonIds: string[]): ModuleStatus {
   const module = getModule(course, moduleId);
   if (!module) return 'upcoming';
+  if (availableLessonsForModule(module).length === 0) return 'unavailable';
   if (isModuleComplete(module, completedLessonIds)) return 'complete';
   const current = currentModule(course, completedLessonIds);
   if (current?.id === moduleId) return 'current';

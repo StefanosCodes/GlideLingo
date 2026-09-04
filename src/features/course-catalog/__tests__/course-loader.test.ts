@@ -1,6 +1,8 @@
 import { expect, test } from '@jest/globals';
 
 import {
+  availableLessonsForModule,
+  availableModulesForCourse,
   courseProgress,
   courses,
   currentModule,
@@ -121,7 +123,10 @@ test('draft placeholder metadata never becomes the next lesson or inflates avail
   expect(nextLesson(course, afterAuthoredLesson)).toBeNull();
   expect(currentModule(course, afterAuthoredLesson)).toBeNull();
   expect(courseProgress(course, afterAuthoredLesson)).toBe(1);
-  expect(moduleStatus(course, 'el-introduce', afterAuthoredLesson)).toBe('upcoming');
+  expect(moduleStatus(course, 'el-introduce', afterAuthoredLesson)).toBe('unavailable');
+  expect(moduleStatus(course, 'el-origin', afterAuthoredLesson)).toBe('unavailable');
+  expect(availableLessonsForModule(course.modules[0])).toHaveLength(1);
+  expect(availableModulesForCourse(course)).toHaveLength(1);
 });
 
 test('legacy catalog metadata and phrase extraction remain compatible', () => {

@@ -6,6 +6,7 @@ import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { ProgressBar } from '@/components/ui/progress-bar';
+import { availableLessonsForModule } from '@/constants/catalog';
 import { Spacing } from '@/constants/theme';
 import { strongestCapabilityEvidence } from '@/features/learning-progress/evidence-policy';
 import { LearningStateNotice } from '@/features/product-shell/learning-state-notice';
@@ -36,6 +37,11 @@ export default function ProgressScreen() {
   const capabilities = strongestCapabilityEvidence(lessonEvidence);
   const dueReview = reviewItems.find((item) => item.due) ?? null;
   const percent = Math.round(progress * 100);
+  const completedAuthoredLessonCount = enrolledCourse
+    ? enrolledCourse.modules
+      .flatMap(availableLessonsForModule)
+      .filter((lesson) => completedLessonIds.includes(lesson.id)).length
+    : 0;
 
   if (!enrolledCourse) {
     return (
@@ -70,7 +76,11 @@ export default function ProgressScreen() {
       <LearningStateNotice status={persistenceStatus} />
 
       <View style={styles.metrics}>
-        <Metric label="COURSE" value={`${percent}%`} detail={`${completedLessonIds.length} lessons complete`} />
+        <Metric
+          label="COURSE"
+          value={`${percent}%`}
+          detail={`${completedAuthoredLessonCount} authored ${completedAuthoredLessonCount === 1 ? 'lesson' : 'lessons'} complete`}
+        />
         <Metric
           label="WEEKLY RHYTHM"
           value={weeklyPracticeGoal ? `${practiceDaysThisWeek}/${weeklyPracticeGoal}` : 'Not set'}

@@ -6,6 +6,7 @@ import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { ProgressBar } from '@/components/ui/progress-bar';
+import { availableLessonsForModule } from '@/constants/catalog';
 import { Spacing } from '@/constants/theme';
 import { strongestCapabilityEvidence } from '@/features/learning-progress/evidence-policy';
 import { LessonLectureView } from '@/features/learning-session/lesson-lecture-view';
@@ -52,6 +53,10 @@ export default function HomeScreen() {
   }
 
   if (!enrolledCourse) {
+    const authoredLessonCount = catalogCourse.modules.reduce(
+      (count, module) => count + availableLessonsForModule(module).length,
+      0,
+    );
     return (
       <ScreenFrame>
         <View style={styles.intro}>
@@ -66,7 +71,7 @@ export default function HomeScreen() {
         <LearningStateNotice status={persistenceStatus} />
         <GlideSurface padding="roomy" style={styles.primaryCard} variant="hero">
           <ThemedText type="eyebrow" themeColor="textSecondary">
-            {catalogCourse.levelLabel} · {catalogCourse.modules.length} UNITS
+            {catalogCourse.levelLabel} · {authoredLessonCount} AUTHORED {authoredLessonCount === 1 ? 'LESSON' : 'LESSONS'}
           </ThemedText>
           <ThemedText type="title">{catalogCourse.title}</ThemedText>
           <ThemedText type="callout" themeColor="textSecondary">
@@ -99,10 +104,11 @@ export default function HomeScreen() {
   const dueReview = reviewItems.find((item) => item.due) ?? null;
   const recentCapability = mostRecentEvidence(strongestCapabilityEvidence(lessonEvidence));
   const coursePercent = Math.round(progress * 100);
+  const unitLessons = unit ? availableLessonsForModule(unit) : [];
   const unitCompleted = unit
-    ? unit.lessons.filter((item) => completedLessonIds.includes(item.id)).length
+    ? unitLessons.filter((item) => completedLessonIds.includes(item.id)).length
     : 0;
-  const unitProgress = unit ? unitCompleted / unit.lessons.length : 1;
+  const unitProgress = unitLessons.length > 0 ? unitCompleted / unitLessons.length : 1;
   const nextAction = selectHomeNextAction({
     courseProgress: progress,
     dueReview,

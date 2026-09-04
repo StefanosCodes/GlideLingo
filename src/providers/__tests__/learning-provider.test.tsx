@@ -2,7 +2,11 @@ import { afterEach, beforeEach, expect, jest, test } from '@jest/globals';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { Pressable, Text } from 'react-native';
 
-import { LearningProvider, useLearning } from '@/providers/learning-provider';
+import {
+  assertLessonAvailableForCompletion,
+  LearningProvider,
+  useLearning,
+} from '@/providers/learning-provider';
 import { LEGACY_IMPORT_OWNER_KEY, learningStorageKey } from '@/providers/learning-storage';
 
 const storage = new Map<string, string>();
@@ -119,6 +123,16 @@ test('provider refuses to activate a placeholder lesson', async () => {
 
   await fireEvent.press(screen.getByLabelText('Open placeholder lesson'));
   expect(screen.getByTestId('active-lesson').props.children).toBe('none');
+});
+
+test('completion rejects placeholder and unknown lesson IDs at the provider boundary', () => {
+  expect(() => assertLessonAvailableForCompletion('el-letters-2')).toThrow(
+    'Cannot complete an unavailable lesson.',
+  );
+  expect(() => assertLessonAvailableForCompletion('missing-lesson')).toThrow(
+    'Cannot complete an unavailable lesson.',
+  );
+  expect(() => assertLessonAvailableForCompletion('el-letters-1')).not.toThrow();
 });
 
 test('provider records at most one meaningful day per local date in the scoped V2 store', async () => {

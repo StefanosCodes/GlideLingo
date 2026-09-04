@@ -6,6 +6,7 @@ import { ScreenFrame } from '@/components/screen-frame';
 import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
+import { availableLessonsForModule, availableModulesForCourse } from '@/constants/catalog';
 import { Spacing } from '@/constants/theme';
 import { LearningStateNotice } from '@/features/product-shell/learning-state-notice';
 import { useLearning } from '@/providers/learning-provider';
@@ -53,26 +54,35 @@ export default function CourseScreen() {
           </ThemedText>
         </View>
         <LearningStateNotice status={persistenceStatus} />
-        {courses.map((course) => (
-          <GlideSurface key={course.id} padding="roomy" style={styles.courseCard}>
-            <ThemedText type="eyebrow" themeColor="textSecondary">
-              {course.levelLabel} · {course.modules.length} UNITS
-            </ThemedText>
-            <ThemedText type="title2">{course.title}</ThemedText>
-            <ThemedText type="callout" themeColor="textSecondary">
-              {course.summary}
-            </ThemedText>
-            <GlideButton label="Preview course" onPress={() => router.push(`/course/${course.id}`)} />
-          </GlideSurface>
-        ))}
+        {courses.map((course) => {
+          const authoredLessonCount = course.modules.reduce(
+            (count, module) => count + availableLessonsForModule(module).length,
+            0,
+          );
+          return (
+            <GlideSurface key={course.id} padding="roomy" style={styles.courseCard}>
+              <ThemedText type="eyebrow" themeColor="textSecondary">
+                {course.levelLabel} · {authoredLessonCount} AUTHORED {authoredLessonCount === 1 ? 'LESSON' : 'LESSONS'}
+              </ThemedText>
+              <ThemedText type="title2">{course.title}</ThemedText>
+              <ThemedText type="callout" themeColor="textSecondary">
+                {course.summary}
+              </ThemedText>
+              <GlideButton label="Preview course" onPress={() => router.push(`/course/${course.id}`)} />
+            </GlideSurface>
+          );
+        })}
       </ScreenFrame>
     );
   }
 
   const currentUnit = currentModule ?? nextLesson?.module ?? null;
   const currentLesson = nextLesson?.lesson ?? null;
+  const authoredUnits = availableModulesForCourse(enrolledCourse);
+  const plannedUnitCount = enrolledCourse.modules.length - authoredUnits.length;
+  const currentUnitLessons = currentUnit ? availableLessonsForModule(currentUnit) : [];
   const unitDone = currentUnit
-    ? currentUnit.lessons.filter((lesson) => completedLessonIds.includes(lesson.id)).length
+    ? currentUnitLessons.filter((lesson) => completedLessonIds.includes(lesson.id)).length
     : 0;
 
   function beginLesson(lessonId: string) {
@@ -86,9 +96,13 @@ export default function CourseScreen() {
         <ThemedText type="eyebrow" themeColor="textSecondary">
           COURSE · {enrolledCourse.title.toUpperCase()}
         </ThemedText>
-        <ThemedText type="display">{enrolledCourse.modules.length} units to your first conversations.</ThemedText>
+        <ThemedText type="display">
+          {authoredUnits.length} authored {authoredUnits.length === 1 ? 'unit' : 'units'} available today.
+        </ThemedText>
         <ThemedText type="body" themeColor="textSecondary" style={styles.introCopy}>
-          Each unit has a visible outcome: understand the pattern, practice it, then use it with less support.
+          {plannedUnitCount > 0
+            ? `${plannedUnitCount} planned ${plannedUnitCount === 1 ? 'unit remains' : 'units remain'} unavailable until every lesson is authored and reviewed.`
+            : 'Each available unit has a visible outcome: understand the pattern, practice it, then use it with less support.'}
         </ThemedText>
       </View>
 
@@ -97,7 +111,7 @@ export default function CourseScreen() {
       {currentUnit ? (
         <GlideSurface padding="roomy" style={styles.currentUnit} variant="tinted">
           <ThemedText type="eyebrow" themeColor="textSecondary">
-            CURRENT UNIT · {unitDone} OF {currentUnit.lessons.length} LESSONS
+            CURRENT UNIT · {unitDone} OF {currentUnitLessons.length} AUTHORED {currentUnitLessons.length === 1 ? 'LESSON' : 'LESSONS'}
           </ThemedText>
           <ThemedText type="title2">{currentUnit.title}</ThemedText>
           <ThemedText type="callout" themeColor="textSecondary">
@@ -124,7 +138,7 @@ export default function CourseScreen() {
           <ThemedText type="eyebrow" themeColor="textSecondary">
             COURSE PATH
           </ThemedText>
-          <ThemedText type="title2">All units</ThemedText>
+          <ThemedText type="title2">All planned units</ThemedText>
         </View>
         <ModuleTree density="page" onSelectLesson={beginLesson} />
       </View>

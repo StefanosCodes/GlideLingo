@@ -97,6 +97,24 @@ test('the portability package validates deterministically with an exact content 
   assert.equal(publication.contentHash, await computeContentHash(validFixture));
 });
 
+test('a stale content hash reports the exact publication location', async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'glidelingo-course-content-hash-'));
+  t.after(() => rm(temporaryRoot, { force: true, recursive: true }));
+  const packageDirectory = path.join(temporaryRoot, 'portability');
+  await cp(validFixture, packageDirectory, { recursive: true });
+  const publicationPath = path.join(packageDirectory, 'publication.json');
+  const publication = JSON.parse(await readFile(publicationPath, 'utf8'));
+  publication.contentHash = `sha256:${'0'.repeat(64)}`;
+  await writeFile(publicationPath, `${JSON.stringify(publication, null, 2)}\n`);
+
+  const result = await validateCoursePackage(packageDirectory, { root: temporaryRoot });
+  const match = result.diagnostics.find((item) => item.code === 'content-hash');
+  assert.ok(match, result.diagnostics.map(formatDiagnostic).join('\n'));
+  assert.equal(match.file, 'portability/publication.json');
+  assert.equal(match.pointer, '/contentHash');
+  assert.match(match.message, /^must equal deterministic package hash sha256:[a-f0-9]{64}$/);
+});
+
 test('the draft Greek migration package validates without inventing a guided scenario', async () => {
   const result = await validateCoursePackage(greekMigrationPackage);
   assert.deepEqual(result.diagnostics, []);

@@ -12,6 +12,7 @@ const statusLabel: Record<ModuleStatus, string> = {
   complete: 'Done',
   current: 'Now',
   upcoming: '',
+  unavailable: 'Not available',
 };
 
 type PressState = { pressed: boolean; hovered?: boolean };

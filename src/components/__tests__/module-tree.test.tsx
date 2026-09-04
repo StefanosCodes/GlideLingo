@@ -57,7 +57,7 @@ test('marks placeholder lessons unavailable and prevents opening them', async ()
   mockSelectLesson.mockClear();
   const screen = await render(<ModuleTree density="page" onSelectLesson={mockSelectLesson} />);
 
-  await fireEvent.press(screen.getByLabelText('Unauthored unit. Upcoming'));
+  await fireEvent.press(screen.getByLabelText('Unauthored unit. Not available'));
   const unavailable = screen.getByLabelText('Placeholder lesson. Not available');
 
   expect(unavailable.props.accessibilityState).toMatchObject({ disabled: true });

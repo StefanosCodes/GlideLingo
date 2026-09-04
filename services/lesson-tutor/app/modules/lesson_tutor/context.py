@@ -1,15 +1,18 @@
 """Trusted authored lesson lookup and model-visibility rules."""
 
-import json
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.errors import LessonContextNotFoundError
-
-LESSON_FILES = {"el-letters-1": Path("courses/en-el-GR/missions/el-letters-1.json")}
+from app.modules.course_content import (
+    CanonicalActivity,
+    CourseContentError,
+    CourseV1ContentRepository,
+)
 
 
 class HearBeat(BaseModel):
@@ -38,15 +41,6 @@ class CheckBeat(BaseModel):
 Beat = Annotated[HearBeat | NoticeBeat | CheckBeat, Field(discriminator="type")]
 
 
-class AuthoredLesson(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    lessonId: str
-    lessonTitle: str
-    moduleTitle: str
-    objective: str
-    beats: list[Beat]
-
-
 @dataclass(frozen=True)
 class LessonTutorContext:
     lesson_id: str
@@ -58,6 +52,42 @@ class LessonTutorContext:
     canonical_answer: str | None
     answer_disclosure_terms: tuple[str, ...]
     answer_attempted: bool
+
+
+def _answer_aliases(answer: str) -> list[str]:
+    if len(answer) != 1:
+        return []
+    try:
+        name = unicodedata.name(answer)
+    except ValueError:
+        return []
+    marker = "GREEK SMALL LETTER "
+    return [name.removeprefix(marker).lower()] if name.startswith(marker) else []
+
+
+def _adapt_activity(activity: CanonicalActivity) -> Beat:
+    if activity.rendererType == "explain" and activity.audioId and activity.text:
+        return HearBeat(type="hear", greek=activity.prompt, gloss=activity.text)
+    if activity.rendererType == "explain" and activity.text:
+        return NoticeBeat(type="notice", text=activity.text)
+    if (
+        activity.rendererType == "script_recognition"
+        and activity.choices
+        and activity.acceptedChoiceIds
+    ):
+        choices_by_id = {choice.id: choice.text for choice in activity.choices}
+        answer = choices_by_id.get(activity.acceptedChoiceIds[0])
+        if answer is None:
+            raise CourseContentError("Canonical activity has no accepted authored choice")
+        return CheckBeat(
+            type="check",
+            prompt=activity.prompt,
+            choices=[choice.text for choice in activity.choices],
+            answer=answer,
+            answerAliases=_answer_aliases(answer),
+            greek=activity.text,
+        )
+    raise CourseContentError("Canonical activity is unsupported by the lesson tutor adapter")
 
 
 def _describe_beat(
@@ -97,29 +127,29 @@ def _describe_beat(
 def load_lesson_context(
     *, content_root: Path, lesson_id: str, visible_step_index: int, selected_choice: str | None
 ) -> LessonTutorContext:
-    relative_path = LESSON_FILES.get(lesson_id)
-    if relative_path is None:
-        raise LessonContextNotFoundError
     try:
-        lesson = AuthoredLesson.model_validate(
-            json.loads((content_root.resolve() / relative_path).read_text(encoding="utf-8"))
-        )
-    except (OSError, json.JSONDecodeError, ValidationError) as error:
+        bundle = CourseV1ContentRepository(content_root=content_root).load_lesson(lesson_id)
+        beats = [
+            _adapt_activity(activity)
+            for activity in bundle.lesson.activities
+            if activity.phase != "revisit"
+        ]
+    except CourseContentError as error:
         raise LessonContextNotFoundError from error
-    if lesson.lessonId != lesson_id or not 0 <= visible_step_index < len(lesson.beats):
+    if not 0 <= visible_step_index < len(beats):
         raise LessonContextNotFoundError
-    current_beat = lesson.beats[visible_step_index]
+    current_beat = beats[visible_step_index]
     validated_choice = (
         selected_choice
         if isinstance(current_beat, CheckBeat) and selected_choice in current_beat.choices
         else None
     )
     lines = [
-        f"Lesson: {lesson.lessonTitle}",
-        f"Module: {lesson.moduleTitle}",
-        f"Objective: {lesson.objective}",
+        f"Lesson: {bundle.lesson.title}",
+        f"Module: {bundle.mission.title}",
+        f"Objective: {bundle.lesson.immediateOutcome}",
     ]
-    for index, beat in enumerate(lesson.beats[: visible_step_index + 1]):
+    for index, beat in enumerate(beats[: visible_step_index + 1]):
         lines.extend(
             _describe_beat(
                 beat,
@@ -130,9 +160,9 @@ def load_lesson_context(
         )
     return LessonTutorContext(
         lesson_id=lesson_id,
-        lesson_title=lesson.lessonTitle,
-        module_title=lesson.moduleTitle,
-        objective=lesson.objective,
+        lesson_title=bundle.lesson.title,
+        module_title=bundle.mission.title,
+        objective=bundle.lesson.immediateOutcome,
         visible_step_index=visible_step_index,
         model_visible_context="\n".join(lines),
         canonical_answer=current_beat.answer if isinstance(current_beat, CheckBeat) else None,

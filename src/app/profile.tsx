@@ -6,6 +6,7 @@ import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { ProgressBar } from '@/components/ui/progress-bar';
+import { availableModulesForCourse } from '@/constants/catalog';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
 import { AccountSummary } from '@/features/auth/account-summary';
 import {
@@ -55,6 +56,7 @@ export default function ProfileScreen() {
   const percent = Math.round(progress * 100);
   const capabilities = strongestCapabilityEvidence(lessonEvidence);
   const strongest = capabilities[0] ?? null;
+  const availableUnitCount = enrolledCourse ? availableModulesForCourse(enrolledCourse).length : 0;
 
   function setRhythm(goal: WeeklyPracticeGoal) {
     setWeeklyPracticeGoal(goal);
@@ -93,7 +95,7 @@ export default function ProfileScreen() {
           <ThemedText type="title2">{enrolledCourse?.title ?? `${language.name} learner`}</ThemedText>
           <ThemedText type="footnote" themeColor="textSecondary">
             {enrolledCourse
-              ? `${completedModuleIds.length} of ${enrolledCourse.modules.length} units complete · ${percent}% of the course path`
+              ? `${completedModuleIds.length} of ${availableUnitCount} authored ${availableUnitCount === 1 ? 'unit' : 'units'} complete · ${percent}% of available lessons`
               : language.available
                 ? 'Choose a course to begin building your profile.'
                 : 'No published course is available yet.'}

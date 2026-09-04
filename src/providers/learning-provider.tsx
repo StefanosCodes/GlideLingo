@@ -17,6 +17,7 @@ import {
   completedModuleIdsFor,
   courseProgress,
   currentModule,
+  findLesson,
   getCourse,
   getCoursesForLanguage,
   getLesson,
@@ -123,6 +124,13 @@ function latestWriteTime(value: StoredLearningV2) {
     ...Object.values(value.fieldWrites.enrolledByLanguage ?? {}).map((stamp) => stamp?.at ?? 0),
     ...Object.values(value.fieldWrites.weeklyGoalChanges ?? {}).map((stamp) => stamp.at),
   );
+}
+
+export function assertLessonAvailableForCompletion(lessonId: string) {
+  const lesson = findLesson(lessonId)?.lesson;
+  if (!lesson || !isLessonAvailable(lesson)) {
+    throw new Error('Cannot complete an unavailable lesson.');
+  }
 }
 
 function persistenceStatus(kind: 'found' | 'missing' | 'corrupt' | 'read-error'): LearningPersistenceStatus {
@@ -375,6 +383,7 @@ export function LearningProvider({
   );
 
   const completeLesson = useCallback((completion: LessonCompletionInput) => {
+    assertLessonAvailableForCompletion(completion.lessonId);
     const completedAt = Date.now();
     const currentLearning = learningRef.current;
     const currentPracticeDays = currentLearning.practiceDayKeys;

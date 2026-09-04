@@ -1514,7 +1514,7 @@ def test_messaging_participant_safety_reports_rate_limits_and_jobs(
         limit=50,
     ) == ((), False)
 
-    now = datetime.now(UTC)
+    now = datetime.now(UTC) - timedelta(minutes=1)
     learner_client_id = uuid4()
     state, learner_message = messaging.send_message(
         conversation_id=conversation.conversation_id,

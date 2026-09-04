@@ -631,12 +631,18 @@ class PostgresMessagingRepository:
                         text(
                             """
                             INSERT INTO marketplace_message_notification_job
-                              (job_id, message_id, recipient_actor_ref)
-                            VALUES (:job_id, :message_id, :other)
+                              (job_id, message_id, recipient_actor_ref, available_at,
+                               created_at, updated_at)
+                            VALUES (:job_id, :message_id, :other, :now, :now, :now)
                             ON CONFLICT (message_id, recipient_actor_ref) DO NOTHING
                             """
                         ),
-                        {"job_id": uuid4(), "message_id": row["message_id"], "other": other},
+                        {
+                            "job_id": uuid4(),
+                            "message_id": row["message_id"],
+                            "other": other,
+                            "now": now,
+                        },
                     )
                 return "created", self._message(row)
         except IntegrityError as error:

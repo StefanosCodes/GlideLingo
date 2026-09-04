@@ -65,6 +65,10 @@ from app.modules.human_tutor_marketplace.discovery import (
     MarketplaceDiscoveryService,
     PostgresDiscoveryRepository,
 )
+from app.modules.human_tutor_marketplace.lifecycle import (
+    LifecycleService,
+    PostgresLifecycleRepository,
+)
 from app.modules.human_tutor_marketplace.messaging import (
     MessagingService,
     PostgresMessagingRepository,
@@ -93,6 +97,7 @@ def create_app(
     marketplace_calendar_service: CalendarService | None = None,
     marketplace_messaging_service: MessagingService | None = None,
     marketplace_booking_service: BookingService | None = None,
+    marketplace_lifecycle_service: LifecycleService | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings.log_level)
@@ -240,6 +245,18 @@ def create_app(
         meeting_hosts=settings.human_tutor_approved_meeting_hosts,
         hold_seconds=settings.human_tutor_booking_hold_seconds,
     )
+    lifecycle_runtime = marketplace_lifecycle_service or LifecycleService(
+        enabled=settings.human_tutor_commerce_enabled,
+        repository=PostgresLifecycleRepository(engine=database_engine),
+        booking_service=booking_runtime,
+        provider=stripe_marketplace_provider,
+        pseudonym_key=(
+            settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
+            if settings.human_tutor_marketplace_pseudonym_key is not None
+            else None
+        ),
+        actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -334,6 +351,7 @@ def create_app(
         application.state.marketplace_calendar_service = calendar_runtime
     application.state.marketplace_messaging_service = messaging_runtime
     application.state.marketplace_booking_service = booking_runtime
+    application.state.marketplace_lifecycle_service = lifecycle_runtime
     application.state.marketplace_stripe_webhook_max_body_bytes = (
         settings.human_tutor_stripe_webhook_max_body_bytes
     )

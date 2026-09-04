@@ -33,7 +33,13 @@ BookingState = Literal[
     "payment_ambiguous",
     "payment_failed",
     "confirmed",
+    "completed",
     "cancelled",
+    "learner_no_show",
+    "tutor_no_show",
+    "disputed",
+    "resolved_refund",
+    "resolved_release",
     "expired",
 ]
 WebhookOutcome = Literal["applied", "duplicate", "out_of_order", "ignored"]
@@ -76,6 +82,14 @@ class StripeCheckout:
     created_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class StripeMoneyResult:
+    operation_id: str
+    livemode: bool
+    amount_minor: int
+    currency: str
+
+
 class StripeMarketplaceProvider(Protocol):
     async def get_platform_account_id(self) -> str: ...
 
@@ -102,6 +116,24 @@ class StripeMarketplaceProvider(Protocol):
     ) -> StripeCheckout: ...
 
     async def retrieve_checkout(self, *, checkout_id: str) -> StripeCheckout: ...
+
+    async def create_refund(
+        self, *, payment_intent_id: str, amount_minor: int, idempotency_key: str
+    ) -> StripeMoneyResult: ...
+
+    async def create_transfer(
+        self,
+        *,
+        destination_account_id: str,
+        amount_minor: int,
+        currency: str,
+        booking_id: UUID,
+        idempotency_key: str,
+    ) -> StripeMoneyResult: ...
+
+    async def create_reversal(
+        self, *, transfer_id: str, amount_minor: int, idempotency_key: str
+    ) -> StripeMoneyResult: ...
 
     async def close(self) -> None: ...
 
@@ -199,6 +231,51 @@ class StripeHttpMarketplaceProvider:
     async def retrieve_checkout(self, *, checkout_id: str) -> StripeCheckout:
         return _parse_checkout(await self._request("GET", f"/v1/checkout/sessions/{checkout_id}"))
 
+    async def create_refund(
+        self, *, payment_intent_id: str, amount_minor: int, idempotency_key: str
+    ) -> StripeMoneyResult:
+        payload = await self._request(
+            "POST",
+            "/v1/refunds",
+            data={"payment_intent": payment_intent_id, "amount": str(amount_minor)},
+            idempotency_key=idempotency_key,
+        )
+        return _parse_money_result(payload, prefix="re_")
+
+    async def create_transfer(
+        self,
+        *,
+        destination_account_id: str,
+        amount_minor: int,
+        currency: str,
+        booking_id: UUID,
+        idempotency_key: str,
+    ) -> StripeMoneyResult:
+        payload = await self._request(
+            "POST",
+            "/v1/transfers",
+            data={
+                "amount": str(amount_minor),
+                "currency": currency.lower(),
+                "destination": destination_account_id,
+                "transfer_group": f"booking_{booking_id}",
+                "metadata[booking_id]": str(booking_id),
+            },
+            idempotency_key=idempotency_key,
+        )
+        return _parse_money_result(payload, prefix="tr_")
+
+    async def create_reversal(
+        self, *, transfer_id: str, amount_minor: int, idempotency_key: str
+    ) -> StripeMoneyResult:
+        payload = await self._request(
+            "POST",
+            f"/v1/transfers/{transfer_id}/reversals",
+            data={"amount": str(amount_minor)},
+            idempotency_key=idempotency_key,
+        )
+        return _parse_money_result(payload, prefix="trr_")
+
     async def close(self) -> None:
         await self._client.aclose()
 
@@ -271,12 +348,16 @@ class StoredBooking:
     checkout_url: str | None
     meeting_url_snapshot: str | None
     confirmed_at: datetime | None
+    schedule_version: int
+    money_state: str | None
+    completed_at: datetime | None
+    dispute_deadline_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
 class BookingView:
     booking_id: UUID
-    role: Literal["learner", "tutor"]
+    role: Literal["learner", "tutor", "operator"]
     tutor_id: UUID
     state: BookingState
     starts_at: datetime
@@ -289,6 +370,9 @@ class BookingView:
     checkout_url: str | None
     meeting_url: str | None
     ics: str | None
+    schedule_version: int
+    money_state: str | None
+    dispute_deadline_at: datetime | None
 
 
 class BookingRepository(Protocol):
@@ -713,14 +797,23 @@ class PostgresBookingRepository:
     def list_bookings(self, *, actor_ref: str) -> tuple[StoredBooking, ...]:
         try:
             with self._engine.connect() as connection:
+                operator = connection.execute(
+                    text(
+                        "SELECT 1 FROM marketplace_operator_capability "
+                        "WHERE actor_ref = :actor AND capability = 'manage_bookings' "
+                        "AND revoked_at IS NULL"
+                    ),
+                    {"actor": actor_ref},
+                ).scalar_one_or_none()
                 return tuple(
                     self._booking(row)
                     for row in connection.execute(
                         text(
-                            "SELECT * FROM marketplace_booking WHERE learner_actor_ref = :actor "
-                            "OR tutor_actor_ref = :actor ORDER BY starts_at DESC, booking_id"
+                            "SELECT * FROM marketplace_booking WHERE :operator "
+                            "OR learner_actor_ref = :actor OR tutor_actor_ref = :actor "
+                            "ORDER BY starts_at DESC, booking_id LIMIT 100"
                         ),
-                        {"actor": actor_ref},
+                        {"actor": actor_ref, "operator": operator is not None},
                     ).mappings()
                 )
         except SQLAlchemyError as error:
@@ -733,7 +826,11 @@ class PostgresBookingRepository:
                     connection.execute(
                         text(
                             "SELECT * FROM marketplace_booking WHERE booking_id = :booking_id "
-                            "AND (learner_actor_ref = :actor OR tutor_actor_ref = :actor)"
+                            "AND (learner_actor_ref = :actor OR tutor_actor_ref = :actor "
+                            "OR EXISTS ("
+                            "SELECT 1 FROM marketplace_operator_capability "
+                            "WHERE actor_ref = :actor AND capability = 'manage_bookings' "
+                            "AND revoked_at IS NULL))"
                         ),
                         {"booking_id": booking_id, "actor": actor_ref},
                     )
@@ -829,6 +926,8 @@ class PostgresBookingRepository:
                                       provider_payment_intent_id = coalesce(
                                         provider_payment_intent_id, :payment_intent_id),
                                       provider_event_at = :event_at, confirmed_at = :confirmed_at,
+                                      money_state = CASE WHEN :state = 'confirmed'
+                                        THEN 'charged' ELSE money_state END,
                                       checkout_url = NULL, updated_at = now()
                                     WHERE booking_id = :booking_id RETURNING *
                                     """
@@ -857,6 +956,46 @@ class PostgresBookingRepository:
                                 None,
                             )
                             if target == "confirmed":
+                                connection.execute(
+                                    text(
+                                        """
+                                        INSERT INTO marketplace_money_ledger
+                                          (entry_id, booking_id, operation_id,
+                                           kind, amount_minor, currency)
+                                        VALUES (:entry_id, :booking_id, NULL,
+                                                'charge', :amount_minor, :currency)
+                                        ON CONFLICT (booking_id) WHERE kind = 'charge'
+                                        DO NOTHING
+                                        """
+                                    ),
+                                    {
+                                        "entry_id": uuid4(),
+                                        "booking_id": checkout.booking_id,
+                                        "amount_minor": row["amount_minor"],
+                                        "currency": row["currency"],
+                                    },
+                                )
+                                connection.execute(
+                                    text(
+                                        """
+                                        INSERT INTO marketplace_booking_reminder_job
+                                          (job_id, booking_id, kind, available_at)
+                                        VALUES
+                                          (:reminder_id, :booking_id, 'lesson_reminder',
+                                           :starts_at - interval '24 hours'),
+                                          (:completion_id, :booking_id, 'completion_prompt',
+                                           :ends_at)
+                                        ON CONFLICT (booking_id, kind) DO NOTHING
+                                        """
+                                    ),
+                                    {
+                                        "reminder_id": uuid4(),
+                                        "completion_id": uuid4(),
+                                        "booking_id": checkout.booking_id,
+                                        "starts_at": row["starts_at"],
+                                        "ends_at": row["ends_at"],
+                                    },
+                                )
                                 self._record_confirmation_message(
                                     connection,
                                     booking_id=checkout.booking_id,
@@ -1065,6 +1204,10 @@ class PostgresBookingRepository:
             checkout_url=row["checkout_url"],
             meeting_url_snapshot=row["meeting_url_snapshot"],
             confirmed_at=row["confirmed_at"],
+            schedule_version=row["schedule_version"],
+            money_state=row["money_state"],
+            completed_at=row["completed_at"],
+            dispute_deadline_at=row["dispute_deadline_at"],
         )
 
 
@@ -1324,10 +1467,20 @@ class BookingService:
 
     @staticmethod
     def _view(booking: StoredBooking, actor_ref: str) -> BookingView:
-        role: Literal["learner", "tutor"] = (
-            "learner" if booking.learner_actor_ref == actor_ref else "tutor"
+        role: Literal["learner", "tutor", "operator"] = (
+            "learner"
+            if booking.learner_actor_ref == actor_ref
+            else "tutor"
+            if booking.tutor_actor_ref == actor_ref
+            else "operator"
         )
-        confirmed = booking.state == "confirmed"
+        confirmed = booking.state in {
+            "confirmed",
+            "completed",
+            "learner_no_show",
+            "disputed",
+            "resolved_release",
+        }
         return BookingView(
             booking_id=booking.booking_id,
             role=role,
@@ -1339,12 +1492,15 @@ class BookingService:
             amount_minor=booking.amount_minor,
             currency=booking.currency,
             commission_amount_minor=booking.commission_amount_minor,
-            tutor_amount_minor=booking.tutor_amount_minor if role == "tutor" else 0,
+            tutor_amount_minor=booking.tutor_amount_minor if role in {"tutor", "operator"} else 0,
             checkout_url=booking.checkout_url
             if role == "learner" and booking.state == "payment_pending"
             else None,
             meeting_url=booking.meeting_url_snapshot if confirmed else None,
             ics=build_booking_ics(booking) if confirmed else None,
+            schedule_version=booking.schedule_version,
+            money_state=booking.money_state,
+            dispute_deadline_at=booking.dispute_deadline_at,
         )
 
 
@@ -1429,6 +1585,22 @@ def _parse_connect_account(value: dict[str, object]) -> StripeConnectAccount:
         len(due),
         datetime.now(UTC),
     )
+
+
+def _parse_money_result(value: dict[str, object], *, prefix: str) -> StripeMoneyResult:
+    operation_id = _required_provider_id(value, "id", prefix)
+    livemode = value.get("livemode")
+    amount = value.get("amount")
+    currency = value.get("currency")
+    if (
+        not isinstance(livemode, bool)
+        or not isinstance(amount, int)
+        or amount <= 0
+        or amount > 50_000
+        or currency != "usd"
+    ):
+        raise StripeOperationError(code="invalid_response", ambiguous=False)
+    return StripeMoneyResult(operation_id, livemode, amount, currency.upper())
 
 
 def _parse_checkout(

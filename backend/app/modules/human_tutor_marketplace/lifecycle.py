@@ -1,0 +1,965 @@
+"""Booking lifecycle, delayed money jobs, earnings, and verified reviews."""
+
+import asyncio
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Literal
+from uuid import UUID, uuid4
+
+from sqlalchemy import Engine, text
+from sqlalchemy.engine import Connection, RowMapping
+from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
+
+from app.auth.clerk import ClerkPrincipal
+from app.core.errors import (
+    DependencyUnavailableError,
+    HumanTutorMarketplaceForbiddenError,
+    HumanTutorMarketplaceUnavailableError,
+    TutorApplicationConflictError,
+    TutorApplicationNotFoundError,
+)
+from app.modules.human_tutor_marketplace.booking import (
+    BookingService,
+    BookingView,
+    Environment,
+    StripeMarketplaceProvider,
+    StripeMoneyResult,
+    StripeOperationError,
+)
+from app.modules.human_tutor_marketplace.identity import derive_marketplace_actor_ref
+
+LifecycleAction = Literal[
+    "reschedule",
+    "cancel",
+    "complete",
+    "learner_no_show",
+    "tutor_no_show",
+    "dispute",
+    "resolve_refund",
+    "resolve_release",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class StoredMoneyOperation:
+    operation_id: UUID
+    booking_id: UUID
+    kind: Literal["refund", "transfer", "reversal"]
+    state: str
+    amount_minor: int
+    currency: str
+    idempotency_key: str
+    provider_environment: Environment
+    provider_payment_intent_id: str | None
+    destination_account_id: str
+    prior_transfer_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class EarningsView:
+    pending_minor: int
+    transferred_minor: int
+    currency: Literal["USD"] = "USD"
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewView:
+    review_id: UUID
+    booking_id: UUID
+    tutor_id: UUID
+    rating: int
+    body: str | None
+    moderation_state: Literal["published", "hidden"]
+    created_at: datetime
+
+
+def next_weekly_payout_at(eligible_at: datetime) -> datetime:
+    """Return the first Monday 15:00 UTC payout window at or after eligibility."""
+
+    eligible_utc = eligible_at.astimezone(UTC)
+    candidate = (eligible_utc + timedelta(days=(-eligible_utc.weekday()) % 7)).replace(
+        hour=15, minute=0, second=0, microsecond=0
+    )
+    return candidate if candidate >= eligible_utc else candidate + timedelta(days=7)
+
+
+class PostgresLifecycleRepository:
+    def __init__(self, *, engine: Engine) -> None:
+        self._engine = engine
+
+    def transition(
+        self,
+        *,
+        booking_id: UUID,
+        actor_ref: str,
+        action: LifecycleAction,
+        reason: str,
+        new_starts_at: datetime | None,
+        now: datetime,
+    ) -> bool:
+        try:
+            with self._engine.begin() as connection:
+                row = (
+                    connection.execute(
+                        text("SELECT * FROM marketplace_booking WHERE booking_id = :id FOR UPDATE"),
+                        {"id": booking_id},
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if row is None:
+                    return False
+                role = self._role(connection, row=row, actor_ref=actor_ref)
+                current = row["state"]
+                if action == "reschedule":
+                    if role not in {"learner", "tutor"} or current != "confirmed":
+                        raise TutorApplicationConflictError
+                    if new_starts_at is None or new_starts_at <= now + timedelta(hours=12):
+                        raise TutorApplicationConflictError
+                    duration = row["ends_at"] - row["starts_at"]
+                    updated = connection.execute(
+                        text(
+                            """
+                            UPDATE marketplace_booking
+                            SET starts_at = :starts_at, ends_at = :ends_at,
+                                schedule_version = schedule_version + 1, updated_at = :now
+                            WHERE booking_id = :id RETURNING schedule_version
+                            """
+                        ),
+                        {
+                            "starts_at": new_starts_at,
+                            "ends_at": new_starts_at + duration,
+                            "now": now,
+                            "id": booking_id,
+                        },
+                    ).scalar_one()
+                    connection.execute(
+                        text(
+                            """
+                            INSERT INTO marketplace_booking_schedule_revision
+                              (revision_id, booking_id, version, prior_starts_at,
+                               prior_ends_at, starts_at, ends_at, actor_ref, reason)
+                            VALUES (:revision_id, :booking_id, :version, :prior_starts,
+                                    :prior_ends, :starts, :ends, :actor_ref, :reason)
+                            """
+                        ),
+                        {
+                            "revision_id": uuid4(),
+                            "booking_id": booking_id,
+                            "version": updated,
+                            "prior_starts": row["starts_at"],
+                            "prior_ends": row["ends_at"],
+                            "starts": new_starts_at,
+                            "ends": new_starts_at + duration,
+                            "actor_ref": actor_ref,
+                            "reason": reason,
+                        },
+                    )
+                    connection.execute(
+                        text(
+                            """
+                            UPDATE marketplace_booking_reminder_job
+                            SET state = 'cancelled', updated_at = :now
+                            WHERE booking_id = :id AND state IN ('queued', 'retryable')
+                            """
+                        ),
+                        {"id": booking_id, "now": now},
+                    )
+                    self._insert_reminders(
+                        connection,
+                        booking_id=booking_id,
+                        starts_at=new_starts_at,
+                        ends_at=new_starts_at + duration,
+                    )
+                    self._audit(connection, row, "confirmed", actor_ref, "rescheduled")
+                    self._system_message(connection, booking_id, "Booking time was rescheduled.")
+                    return True
+
+                target, money_kind, amount, available_at = self._decision(
+                    connection,
+                    row=row,
+                    role=role,
+                    action=action,
+                    now=now,
+                )
+                money_state = row["money_state"]
+                if action == "dispute":
+                    money_state = "charged"
+                if money_kind is not None:
+                    money_state = f"{money_kind}_pending"
+                    self._queue_money(
+                        connection,
+                        row=row,
+                        kind=money_kind,
+                        amount_minor=amount,
+                        available_at=available_at,
+                    )
+                values = {
+                    "id": booking_id,
+                    "state": target,
+                    "money_state": money_state,
+                    "now": now,
+                    "completed_at": now if action == "complete" else row["completed_at"],
+                    "dispute_deadline": (
+                        now + timedelta(hours=row["dispute_window_hours"])
+                        if action == "complete"
+                        else row["dispute_deadline_at"]
+                    ),
+                    "cancelled_at": now if action == "cancel" else row["cancelled_at"],
+                    "cancelled_by": role if action == "cancel" else row["cancelled_by_role"],
+                    "no_show": (
+                        "learner"
+                        if action == "learner_no_show"
+                        else "tutor"
+                        if action == "tutor_no_show"
+                        else row["no_show_role"]
+                    ),
+                    "resolution": reason
+                    if action.startswith("resolve_")
+                    else row["resolution_reason"],
+                }
+                connection.execute(
+                    text(
+                        """
+                        UPDATE marketplace_booking
+                        SET state = :state, money_state = :money_state,
+                            completed_at = :completed_at,
+                            dispute_deadline_at = :dispute_deadline,
+                            cancelled_at = :cancelled_at,
+                            cancelled_by_role = :cancelled_by,
+                            no_show_role = :no_show,
+                            resolution_reason = :resolution,
+                            updated_at = :now
+                        WHERE booking_id = :id
+                        """
+                    ),
+                    values,
+                )
+                if action in {"cancel", "tutor_no_show"}:
+                    connection.execute(
+                        text(
+                            "UPDATE marketplace_booking_reminder_job SET state = 'cancelled', "
+                            "updated_at = :now WHERE booking_id = :id "
+                            "AND state IN ('queued', 'retryable')"
+                        ),
+                        {"id": booking_id, "now": now},
+                    )
+                self._audit(connection, row, target, actor_ref, action)
+                self._system_message(
+                    connection,
+                    booking_id,
+                    f"Booking status changed to {target.replace('_', ' ')}.",
+                )
+                return True
+        except TutorApplicationConflictError:
+            raise
+        except (IntegrityError, DBAPIError) as error:
+            raise TutorApplicationConflictError from error
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def claim_money_operation(
+        self, *, worker: str, now: datetime, lease_seconds: int
+    ) -> StoredMoneyOperation | None:
+        try:
+            with self._engine.begin() as connection:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE marketplace_money_operation
+                        SET state = 'retryable', lease_owner = NULL,
+                            lease_expires_at = NULL, available_at = :now,
+                            safe_failure_code = 'lease_expired', updated_at = :now
+                        WHERE state = 'leased' AND lease_expires_at <= :now
+                        """
+                    ),
+                    {"now": now},
+                )
+                operation_id = connection.execute(
+                    text(
+                        """
+                        SELECT operation_id FROM marketplace_money_operation
+                        WHERE state IN ('queued', 'retryable') AND available_at <= :now
+                        ORDER BY available_at, created_at, operation_id
+                        FOR UPDATE SKIP LOCKED LIMIT 1
+                        """
+                    ),
+                    {"now": now},
+                ).scalar_one_or_none()
+                if operation_id is None:
+                    return None
+                connection.execute(
+                    text(
+                        """
+                        UPDATE marketplace_money_operation
+                        SET state = 'leased', lease_owner = :worker,
+                            lease_expires_at = :expires, attempt = attempt + 1,
+                            updated_at = :now
+                        WHERE operation_id = :id
+                        """
+                    ),
+                    {
+                        "worker": worker,
+                        "expires": now + timedelta(seconds=lease_seconds),
+                        "now": now,
+                        "id": operation_id,
+                    },
+                )
+                return self._money_operation(connection, operation_id)
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def finish_money_operation(
+        self, *, operation: StoredMoneyOperation, result: StripeMoneyResult, worker: str
+    ) -> bool:
+        expected_live = operation.provider_environment == "PRODUCTION"
+        prefix = {"refund": "re_", "transfer": "tr_", "reversal": "trr_"}[operation.kind]
+        if (
+            result.livemode != expected_live
+            or result.amount_minor != operation.amount_minor
+            or result.currency != operation.currency
+            or not result.operation_id.startswith(prefix)
+        ):
+            return False
+        try:
+            with self._engine.begin() as connection:
+                current = connection.execute(
+                    text(
+                        "SELECT state FROM marketplace_money_operation "
+                        "WHERE operation_id = :id AND lease_owner = :worker FOR UPDATE"
+                    ),
+                    {"id": operation.operation_id, "worker": worker},
+                ).scalar_one_or_none()
+                if current != "leased":
+                    return False
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO marketplace_money_ledger
+                          (entry_id, booking_id, operation_id, kind, amount_minor, currency)
+                        VALUES (:entry_id, :booking_id, :operation_id, :kind, :amount, :currency)
+                        ON CONFLICT (operation_id) DO NOTHING
+                        """
+                    ),
+                    {
+                        "entry_id": uuid4(),
+                        "booking_id": operation.booking_id,
+                        "operation_id": operation.operation_id,
+                        "kind": operation.kind,
+                        "amount": operation.amount_minor,
+                        "currency": operation.currency,
+                    },
+                )
+                connection.execute(
+                    text(
+                        """
+                        UPDATE marketplace_money_operation
+                        SET state = 'completed', provider_operation_id = :provider_id,
+                            lease_owner = NULL, lease_expires_at = NULL,
+                            safe_failure_code = NULL, updated_at = now()
+                        WHERE operation_id = :id
+                        """
+                    ),
+                    {"provider_id": result.operation_id, "id": operation.operation_id},
+                )
+                next_state = {
+                    "refund": "refunded",
+                    "transfer": "transferred",
+                    "reversal": "reversed",
+                }[operation.kind]
+                connection.execute(
+                    text(
+                        "UPDATE marketplace_booking SET money_state = :state, updated_at = now() "
+                        "WHERE booking_id = :id"
+                    ),
+                    {"state": next_state, "id": operation.booking_id},
+                )
+                if operation.kind == "reversal":
+                    booking = (
+                        connection.execute(
+                            text("SELECT * FROM marketplace_booking WHERE booking_id = :id"),
+                            {"id": operation.booking_id},
+                        )
+                        .mappings()
+                        .one()
+                    )
+                    self._queue_money(
+                        connection,
+                        row=booking,
+                        kind="refund",
+                        amount_minor=booking["amount_minor"],
+                        available_at=datetime.now(UTC),
+                    )
+                    connection.execute(
+                        text(
+                            "UPDATE marketplace_booking SET money_state = 'refund_pending' "
+                            "WHERE booking_id = :id"
+                        ),
+                        {"id": operation.booking_id},
+                    )
+                return True
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def fail_money_operation(
+        self,
+        *,
+        operation_id: UUID,
+        worker: str,
+        code: str,
+        ambiguous: bool,
+        now: datetime,
+    ) -> None:
+        try:
+            with self._engine.begin() as connection:
+                row = (
+                    connection.execute(
+                        text(
+                            "SELECT kind, attempt, booking_id FROM marketplace_money_operation "
+                            "WHERE operation_id = :id AND state = 'leased' "
+                            "AND lease_owner = :worker FOR UPDATE"
+                        ),
+                        {"id": operation_id, "worker": worker},
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if row is None:
+                    return
+                state = "ambiguous" if ambiguous else "dead" if row["attempt"] >= 8 else "retryable"
+                connection.execute(
+                    text(
+                        """
+                        UPDATE marketplace_money_operation
+                        SET state = :state, safe_failure_code = :code,
+                            available_at = :available, lease_owner = NULL,
+                            lease_expires_at = NULL, updated_at = :now
+                        WHERE operation_id = :id
+                        """
+                    ),
+                    {
+                        "state": state,
+                        "code": code,
+                        "available": now + timedelta(minutes=2),
+                        "now": now,
+                        "id": operation_id,
+                    },
+                )
+                booking_state = (
+                    f"{row['kind']}_ambiguous"
+                    if state in {"ambiguous", "dead"}
+                    else f"{row['kind']}_pending"
+                )
+                connection.execute(
+                    text(
+                        "UPDATE marketplace_booking SET money_state = :state, updated_at = :now "
+                        "WHERE booking_id = :id"
+                    ),
+                    {"state": booking_state, "now": now, "id": row["booking_id"]},
+                )
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def recover_money_operation(
+        self, *, booking_id: UUID, operator_actor_ref: str, reason: str, now: datetime
+    ) -> bool:
+        try:
+            with self._engine.begin() as connection:
+                if not self._has_capability(connection, operator_actor_ref, "manage_bookings"):
+                    return False
+                row = (
+                    connection.execute(
+                        text(
+                            """
+                        WITH candidate AS (
+                            SELECT operation_id
+                            FROM marketplace_money_operation
+                            WHERE booking_id = :booking_id
+                              AND state IN ('ambiguous', 'dead')
+                            ORDER BY created_at, operation_id
+                            FOR UPDATE SKIP LOCKED
+                            LIMIT 1
+                        )
+                        UPDATE marketplace_money_operation AS operation
+                        SET state = 'retryable', available_at = :now,
+                            attempt = CASE WHEN operation.state = 'dead' THEN 0
+                                           ELSE operation.attempt END,
+                            safe_failure_code = 'operator_reconciled', updated_at = :now
+                        FROM candidate
+                        WHERE operation.operation_id = candidate.operation_id
+                        RETURNING operation.kind
+                        """
+                        ),
+                        {"booking_id": booking_id, "now": now},
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if row is None:
+                    return False
+                connection.execute(
+                    text(
+                        "UPDATE marketplace_booking SET money_state = :state, updated_at = :now "
+                        "WHERE booking_id = :id"
+                    ),
+                    {"state": f"{row['kind']}_pending", "now": now, "id": booking_id},
+                )
+                booking = (
+                    connection.execute(
+                        text("SELECT * FROM marketplace_booking WHERE booking_id = :id"),
+                        {"id": booking_id},
+                    )
+                    .mappings()
+                    .one()
+                )
+                self._audit(connection, booking, booking["state"], operator_actor_ref, reason)
+                return True
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def create_review(
+        self,
+        *,
+        review_id: UUID,
+        booking_id: UUID,
+        learner_actor_ref: str,
+        rating: int,
+        body: str | None,
+    ) -> ReviewView | None:
+        try:
+            with self._engine.begin() as connection:
+                row = (
+                    connection.execute(
+                        text(
+                            """
+                        INSERT INTO marketplace_booking_review
+                          (review_id, booking_id, learner_actor_ref, tutor_id, rating, body)
+                        SELECT :review_id, booking_id, :learner, tutor_id, :rating, :body
+                        FROM marketplace_booking
+                        WHERE booking_id = :booking_id AND learner_actor_ref = :learner
+                        ON CONFLICT (booking_id) DO UPDATE
+                        SET rating = marketplace_booking_review.rating
+                        RETURNING review_id, booking_id, tutor_id, rating, body,
+                                  moderation_state, created_at
+                        """
+                        ),
+                        {
+                            "review_id": review_id,
+                            "booking_id": booking_id,
+                            "learner": learner_actor_ref,
+                            "rating": rating,
+                            "body": body,
+                        },
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                return self._review(row) if row is not None else None
+        except (IntegrityError, DBAPIError) as error:
+            raise TutorApplicationConflictError from error
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def earnings(self, *, tutor_actor_ref: str) -> EarningsView:
+        try:
+            with self._engine.connect() as connection:
+                row = connection.execute(
+                    text(
+                        """
+                        SELECT coalesce(sum(tutor_amount_minor) FILTER (
+                                 WHERE money_state IN ('charged', 'transfer_pending',
+                                                       'transfer_ambiguous')), 0) AS pending,
+                               coalesce(sum(tutor_amount_minor) FILTER (
+                                 WHERE money_state = 'transferred'), 0) AS transferred
+                        FROM marketplace_booking WHERE tutor_actor_ref = :actor
+                        """
+                    ),
+                    {"actor": tutor_actor_ref},
+                ).one()
+                return EarningsView(pending_minor=row.pending, transferred_minor=row.transferred)
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    @staticmethod
+    def _decision(
+        connection: Connection,
+        *,
+        row: RowMapping,
+        role: str,
+        action: LifecycleAction,
+        now: datetime,
+    ) -> tuple[str, Literal["refund", "transfer", "reversal"] | None, int, datetime]:
+        state = row["state"]
+        if action == "cancel" and state == "confirmed" and role in {"learner", "tutor"}:
+            before_cutoff = row["starts_at"] - now >= timedelta(
+                hours=row["cancellation_cutoff_hours"]
+            )
+            if role == "tutor" or before_cutoff:
+                return "cancelled", "refund", row["amount_minor"], now
+            return "cancelled", "transfer", row["tutor_amount_minor"], now
+        if action == "complete" and state == "confirmed" and role in {"learner", "tutor"}:
+            if now < row["ends_at"]:
+                raise TutorApplicationConflictError
+            deadline = now + timedelta(hours=row["dispute_window_hours"])
+            return (
+                "completed",
+                "transfer",
+                row["tutor_amount_minor"],
+                next_weekly_payout_at(deadline),
+            )
+        if action == "learner_no_show" and state == "confirmed" and role == "tutor":
+            if now < row["ends_at"]:
+                raise TutorApplicationConflictError
+            return "learner_no_show", "transfer", row["tutor_amount_minor"], now
+        if action == "tutor_no_show" and state == "confirmed" and role == "learner":
+            if now < row["ends_at"]:
+                raise TutorApplicationConflictError
+            return "tutor_no_show", "refund", row["amount_minor"], now
+        if action == "dispute" and state == "completed" and role == "learner":
+            if row["dispute_deadline_at"] is None or now > row["dispute_deadline_at"]:
+                raise TutorApplicationConflictError
+            connection.execute(
+                text(
+                    "UPDATE marketplace_money_operation SET state = 'cancelled', updated_at = :now "
+                    "WHERE booking_id = :id AND kind = 'transfer' AND state = 'queued'"
+                ),
+                {"id": row["booking_id"], "now": now},
+            )
+            return "disputed", None, 0, now
+        if (
+            action in {"resolve_refund", "resolve_release"}
+            and state == "disputed"
+            and role == "operator"
+        ):
+            if action == "resolve_refund":
+                if row["money_state"] == "transferred":
+                    return "resolved_refund", "reversal", row["tutor_amount_minor"], now
+                return "resolved_refund", "refund", row["amount_minor"], now
+            return "resolved_release", "transfer", row["tutor_amount_minor"], now
+        raise TutorApplicationConflictError
+
+    @staticmethod
+    def _role(connection: Connection, *, row: RowMapping, actor_ref: str) -> str:
+        if actor_ref == row["learner_actor_ref"]:
+            return "learner"
+        if actor_ref == row["tutor_actor_ref"]:
+            return "tutor"
+        if PostgresLifecycleRepository._has_capability(connection, actor_ref, "manage_bookings"):
+            return "operator"
+        raise TutorApplicationNotFoundError
+
+    @staticmethod
+    def _has_capability(connection: Connection, actor_ref: str, capability: str) -> bool:
+        return (
+            connection.execute(
+                text(
+                    "SELECT 1 FROM marketplace_operator_capability "
+                    "WHERE actor_ref = :actor AND capability = :capability AND revoked_at IS NULL"
+                ),
+                {"actor": actor_ref, "capability": capability},
+            ).scalar_one_or_none()
+            is not None
+        )
+
+    @staticmethod
+    def _queue_money(
+        connection: Connection,
+        *,
+        row: RowMapping,
+        kind: Literal["refund", "transfer", "reversal"],
+        amount_minor: int,
+        available_at: datetime,
+    ) -> None:
+        connection.execute(
+            text(
+                """
+                INSERT INTO marketplace_money_operation
+                  (operation_id, booking_id, kind, amount_minor, currency,
+                   idempotency_key, available_at)
+                VALUES (:operation_id, :booking_id, :kind, :amount, :currency,
+                        :idempotency, :available_at)
+                ON CONFLICT (booking_id, kind) DO UPDATE
+                SET state = 'queued', available_at = excluded.available_at,
+                    safe_failure_code = NULL, updated_at = now()
+                WHERE marketplace_money_operation.state = 'cancelled'
+                """
+            ),
+            {
+                "operation_id": uuid4(),
+                "booking_id": row["booking_id"],
+                "kind": kind,
+                "amount": amount_minor,
+                "currency": row["currency"],
+                "idempotency": f"booking:{row['booking_id']}:{kind}",
+                "available_at": available_at,
+            },
+        )
+
+    @staticmethod
+    def _insert_reminders(
+        connection: Connection, *, booking_id: UUID, starts_at: datetime, ends_at: datetime
+    ) -> None:
+        for kind, available_at in (
+            ("lesson_reminder", starts_at - timedelta(hours=24)),
+            ("completion_prompt", ends_at),
+        ):
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO marketplace_booking_reminder_job
+                      (job_id, booking_id, kind, available_at)
+                    VALUES (:job_id, :booking_id, :kind, :available_at)
+                    ON CONFLICT (booking_id, kind) DO UPDATE
+                    SET state = 'queued', available_at = excluded.available_at,
+                        lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
+                    """
+                ),
+                {
+                    "job_id": uuid4(),
+                    "booking_id": booking_id,
+                    "kind": kind,
+                    "available_at": available_at,
+                },
+            )
+
+    @staticmethod
+    def _audit(
+        connection: Connection,
+        row: RowMapping,
+        target: str,
+        actor_ref: str,
+        reason: str,
+    ) -> None:
+        source = (
+            "learner"
+            if actor_ref == row["learner_actor_ref"]
+            else "tutor"
+            if actor_ref == row["tutor_actor_ref"]
+            else "operator"
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO marketplace_booking_transition_audit
+                  (audit_id, booking_id, from_state, to_state, source, reason_code, actor_ref)
+                VALUES (:audit_id, :booking_id, :old, :new, :source, :reason, :actor)
+                """
+            ),
+            {
+                "audit_id": uuid4(),
+                "booking_id": row["booking_id"],
+                "old": row["state"],
+                "new": target,
+                "source": source,
+                "reason": reason[:64].replace(" ", "_").lower(),
+                "actor": actor_ref,
+            },
+        )
+
+    @staticmethod
+    def _system_message(connection: Connection, booking_id: UUID, body: str) -> None:
+        conversation_id = connection.execute(
+            text("SELECT conversation_id FROM marketplace_conversation WHERE booking_id = :id"),
+            {"id": booking_id},
+        ).scalar_one_or_none()
+        if conversation_id is not None:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO marketplace_message
+                      (message_id, conversation_id, sender_actor_ref, kind, body)
+                    VALUES (:message_id, :conversation_id, NULL, 'system', :body)
+                    """
+                ),
+                {"message_id": uuid4(), "conversation_id": conversation_id, "body": body},
+            )
+
+    @staticmethod
+    def _money_operation(connection: Connection, operation_id: UUID) -> StoredMoneyOperation:
+        row = (
+            connection.execute(
+                text(
+                    """
+                SELECT operation.operation_id, operation.booking_id, operation.kind,
+                       operation.state, operation.amount_minor, operation.currency,
+                       operation.idempotency_key, booking.provider_environment,
+                       booking.provider_payment_intent_id,
+                       account.provider_account_id AS destination_account_id,
+                       prior.provider_operation_id AS prior_transfer_id
+                FROM marketplace_money_operation AS operation
+                JOIN marketplace_booking AS booking USING (booking_id)
+                JOIN marketplace_tutor_connect_account AS account
+                  ON account.tutor_id = booking.tutor_id
+                LEFT JOIN marketplace_money_operation AS prior
+                  ON prior.booking_id = booking.booking_id AND prior.kind = 'transfer'
+                WHERE operation.operation_id = :id
+                """
+                ),
+                {"id": operation_id},
+            )
+            .mappings()
+            .one()
+        )
+        return StoredMoneyOperation(**dict(row))
+
+    @staticmethod
+    def _review(row: RowMapping) -> ReviewView:
+        return ReviewView(**dict(row))
+
+
+class LifecycleService:
+    def __init__(
+        self,
+        *,
+        enabled: bool,
+        repository: PostgresLifecycleRepository,
+        booking_service: BookingService,
+        provider: StripeMarketplaceProvider | None,
+        pseudonym_key: bytes | None,
+        actor_allowlist: tuple[str, ...],
+    ) -> None:
+        self._enabled = enabled
+        self._repository = repository
+        self._booking_service = booking_service
+        self._provider = provider
+        self._pseudonym_key = pseudonym_key
+        self._actor_allowlist = frozenset(actor_allowlist)
+
+    async def transition(
+        self,
+        *,
+        principal: ClerkPrincipal,
+        booking_id: UUID,
+        action: LifecycleAction,
+        reason: str,
+        new_starts_at: datetime | None,
+    ) -> BookingView:
+        actor_ref = self._actor_ref(principal)
+        updated = await asyncio.to_thread(
+            self._repository.transition,
+            booking_id=booking_id,
+            actor_ref=actor_ref,
+            action=action,
+            reason=reason,
+            new_starts_at=new_starts_at,
+            now=datetime.now(UTC),
+        )
+        if not updated:
+            raise TutorApplicationNotFoundError
+        return await self._booking_service.get_booking(principal=principal, booking_id=booking_id)
+
+    async def create_review(
+        self,
+        *,
+        principal: ClerkPrincipal,
+        booking_id: UUID,
+        rating: int,
+        body: str | None,
+    ) -> ReviewView:
+        review = await asyncio.to_thread(
+            self._repository.create_review,
+            review_id=uuid4(),
+            booking_id=booking_id,
+            learner_actor_ref=self._actor_ref(principal),
+            rating=rating,
+            body=body,
+        )
+        if review is None:
+            raise TutorApplicationNotFoundError
+        return review
+
+    async def earnings(self, *, principal: ClerkPrincipal) -> EarningsView:
+        return await asyncio.to_thread(
+            self._repository.earnings,
+            tutor_actor_ref=self._actor_ref(principal),
+        )
+
+    async def run_one_money_job(self, *, worker: str) -> bool:
+        self._require_enabled()
+        operation = await asyncio.to_thread(
+            self._repository.claim_money_operation,
+            worker=worker,
+            now=datetime.now(UTC),
+            lease_seconds=60,
+        )
+        if operation is None:
+            return False
+        provider = self._provider
+        if provider is None:
+            raise HumanTutorMarketplaceUnavailableError
+        try:
+            if operation.kind == "refund":
+                if operation.provider_payment_intent_id is None:
+                    raise StripeOperationError(code="missing_payment", ambiguous=False)
+                result = await provider.create_refund(
+                    payment_intent_id=operation.provider_payment_intent_id,
+                    amount_minor=operation.amount_minor,
+                    idempotency_key=operation.idempotency_key,
+                )
+            elif operation.kind == "transfer":
+                result = await provider.create_transfer(
+                    destination_account_id=operation.destination_account_id,
+                    amount_minor=operation.amount_minor,
+                    currency=operation.currency,
+                    booking_id=operation.booking_id,
+                    idempotency_key=operation.idempotency_key,
+                )
+            else:
+                if operation.prior_transfer_id is None:
+                    raise StripeOperationError(code="missing_transfer", ambiguous=False)
+                result = await provider.create_reversal(
+                    transfer_id=operation.prior_transfer_id,
+                    amount_minor=operation.amount_minor,
+                    idempotency_key=operation.idempotency_key,
+                )
+        except StripeOperationError as error:
+            await asyncio.to_thread(
+                self._repository.fail_money_operation,
+                operation_id=operation.operation_id,
+                worker=worker,
+                code=error.code,
+                ambiguous=error.ambiguous,
+                now=datetime.now(UTC),
+            )
+            return True
+        if not await asyncio.to_thread(
+            self._repository.finish_money_operation,
+            operation=operation,
+            result=result,
+            worker=worker,
+        ):
+            await asyncio.to_thread(
+                self._repository.fail_money_operation,
+                operation_id=operation.operation_id,
+                worker=worker,
+                code="provider_mismatch",
+                ambiguous=True,
+                now=datetime.now(UTC),
+            )
+        return True
+
+    async def recover_money(
+        self, *, principal: ClerkPrincipal, booking_id: UUID, reason: str
+    ) -> BookingView:
+        if not await asyncio.to_thread(
+            self._repository.recover_money_operation,
+            booking_id=booking_id,
+            operator_actor_ref=self._actor_ref(principal),
+            reason=reason,
+            now=datetime.now(UTC),
+        ):
+            raise HumanTutorMarketplaceForbiddenError
+        return await self._booking_service.get_booking(principal=principal, booking_id=booking_id)
+
+    def _actor_ref(self, principal: ClerkPrincipal) -> str:
+        self._require_enabled()
+        if principal.user_id not in self._actor_allowlist or self._pseudonym_key is None:
+            raise HumanTutorMarketplaceForbiddenError
+        return derive_marketplace_actor_ref(
+            key=self._pseudonym_key,
+            clerk_user_id=principal.user_id,
+        )
+
+    def _require_enabled(self) -> None:
+        if not self._enabled:
+            raise HumanTutorMarketplaceUnavailableError

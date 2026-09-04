@@ -108,7 +108,8 @@ describe('booking response boundary', () => {
     ends_at: '2026-09-05T12:25:00Z', hold_expires_at: '2026-09-04T12:10:00Z',
     amount_minor: 2500, currency: 'USD', commission_amount_minor: 500,
     tutor_amount_minor: 0, checkout_url: 'https://checkout.stripe.com/c/pay/reviewed123',
-    meeting_url: null, ics: null,
+    meeting_url: null, ics: null, schedule_version: 1, money_state: null,
+    dispute_deadline_at: null,
   };
 
   test('accepts the participant projection without provider identifiers', () => {

@@ -176,9 +176,9 @@ export type TutorConnectStatus = {
 
 export type MarketplaceBooking = {
   bookingId: string;
-  role: 'learner' | 'tutor';
+  role: 'learner' | 'tutor' | 'operator';
   tutorId: string;
-  state: 'held' | 'payment_pending' | 'payment_ambiguous' | 'payment_failed' | 'confirmed' | 'cancelled' | 'expired';
+  state: 'held' | 'payment_pending' | 'payment_ambiguous' | 'payment_failed' | 'confirmed' | 'completed' | 'cancelled' | 'learner_no_show' | 'tutor_no_show' | 'disputed' | 'resolved_refund' | 'resolved_release' | 'expired';
   startsAt: string;
   endsAt: string;
   holdExpiresAt: string;
@@ -189,7 +189,12 @@ export type MarketplaceBooking = {
   checkoutUrl: string | null;
   meetingUrl: string | null;
   ics: string | null;
+  scheduleVersion: number;
+  moneyState: 'charged' | 'refund_pending' | 'refund_ambiguous' | 'refunded' | 'transfer_pending' | 'transfer_ambiguous' | 'transferred' | 'reversal_pending' | 'reversal_ambiguous' | 'reversed' | null;
+  disputeDeadlineAt: string | null;
 };
+
+export type TutorEarnings = { pendingMinor: number; transferredMinor: number; currency: 'USD' };
 
 export class TutorMarketplaceClientError extends Error {
   readonly kind: 'not-found' | 'forbidden' | 'conflict' | 'limited' | 'validation' | 'unavailable';
@@ -659,6 +664,52 @@ export async function reconcileMarketplaceBooking(bookingId: string): Promise<Ma
   });
 }
 
+export async function transitionMarketplaceBooking(
+  bookingId: string,
+  action: 'reschedule' | 'cancel' | 'complete' | 'learner_no_show' | 'tutor_no_show' | 'dispute' | 'resolve_refund' | 'resolve_release',
+  reason: string,
+  newStartsAt: string | null = null,
+): Promise<MarketplaceBooking> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { action, reason, new_starts_at: newStartsAt },
+      parse: parseMarketplaceBooking,
+      path: `/v1/bookings/${bookingId}/transition`,
+    });
+    return result.data;
+  });
+}
+
+export async function createMarketplaceBookingReview(
+  bookingId: string,
+  rating: number,
+  body: string | null,
+): Promise<void> {
+  await runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { rating, body },
+      parse: (value) => isRecord(value) && isUuid(value.review_id) &&
+        value.booking_id === bookingId && value.rating === rating ? true : null,
+      path: `/v1/bookings/${bookingId}/review`,
+    });
+    return result.data;
+  });
+}
+
+export async function getTutorEarnings(signal?: AbortSignal): Promise<TutorEarnings> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({
+      parse: (value) => isRecord(value) && isMinorAmountOrZero(value.pending_minor) &&
+        isMinorAmountOrZero(value.transferred_minor) && value.currency === 'USD'
+        ? { pendingMinor: value.pending_minor, transferredMinor: value.transferred_minor, currency: 'USD' as const }
+        : null,
+      path: '/v1/tutor-earnings',
+      signal,
+    });
+    return result.data;
+  });
+}
+
 export async function listMarketplaceConversations(
   signal?: AbortSignal,
 ): Promise<MarketplaceConversation[]> {
@@ -990,8 +1041,10 @@ export function parseTutorConnectStatus(value: unknown): TutorConnectStatus | nu
 
 export function parseMarketplaceBooking(value: unknown): MarketplaceBooking | null {
   if (!isRecord(value) || !isUuid(value.booking_id) || !isUuid(value.tutor_id) ||
-      (value.role !== 'learner' && value.role !== 'tutor') ||
-      !['held', 'payment_pending', 'payment_ambiguous', 'payment_failed', 'confirmed', 'cancelled', 'expired']
+      !['learner', 'tutor', 'operator'].includes(value.role as string) ||
+      !['held', 'payment_pending', 'payment_ambiguous', 'payment_failed', 'confirmed', 'completed',
+        'cancelled', 'learner_no_show', 'tutor_no_show', 'disputed', 'resolved_refund',
+        'resolved_release', 'expired']
         .includes(value.state as string) ||
       !isIsoTimestamp(value.starts_at) || !isIsoTimestamp(value.ends_at) ||
       !isIsoTimestamp(value.hold_expires_at) || Date.parse(value.starts_at) >= Date.parse(value.ends_at) ||
@@ -999,18 +1052,27 @@ export function parseMarketplaceBooking(value: unknown): MarketplaceBooking | nu
       !isMinorAmountOrZero(value.commission_amount_minor) || !isMinorAmountOrZero(value.tutor_amount_minor) ||
       !(value.checkout_url === null || isSafeStripeCheckoutUrl(value.checkout_url)) ||
       !(value.meeting_url === null || isSafeHttpsUrl(value.meeting_url, 1000)) ||
-      !(value.ics === null || (typeof value.ics === 'string' && value.ics.length <= 4000 && value.ics.startsWith('BEGIN:VCALENDAR')))) {
+      !(value.ics === null || (typeof value.ics === 'string' && value.ics.length <= 4000 && value.ics.startsWith('BEGIN:VCALENDAR'))) ||
+      !Number.isSafeInteger(value.schedule_version) || (value.schedule_version as number) < 1 ||
+      !(value.money_state === null || ['charged', 'refund_pending', 'refund_ambiguous', 'refunded',
+        'transfer_pending', 'transfer_ambiguous', 'transferred', 'reversal_pending',
+        'reversal_ambiguous', 'reversed'].includes(value.money_state as string)) ||
+      !isNullableIsoTimestamp(value.dispute_deadline_at)) {
     return null;
   }
-  if ((value.state === 'confirmed') !== (value.meeting_url !== null && value.ics !== null)) return null;
+  const protectedStates = ['confirmed', 'completed', 'learner_no_show', 'disputed', 'resolved_release'];
+  if (protectedStates.includes(value.state as string) !== (value.meeting_url !== null && value.ics !== null)) return null;
   return {
-    bookingId: value.booking_id, role: value.role, tutorId: value.tutor_id,
+    bookingId: value.booking_id, role: value.role as MarketplaceBooking['role'], tutorId: value.tutor_id,
     state: value.state as MarketplaceBooking['state'], startsAt: value.starts_at,
     endsAt: value.ends_at, holdExpiresAt: value.hold_expires_at,
     amountMinor: value.amount_minor as number, currency: value.currency,
     commissionAmountMinor: value.commission_amount_minor as number,
     tutorAmountMinor: value.tutor_amount_minor as number,
     checkoutUrl: value.checkout_url, meetingUrl: value.meeting_url, ics: value.ics,
+    scheduleVersion: value.schedule_version as number,
+    moneyState: value.money_state as MarketplaceBooking['moneyState'],
+    disputeDeadlineAt: value.dispute_deadline_at,
   };
 }
 

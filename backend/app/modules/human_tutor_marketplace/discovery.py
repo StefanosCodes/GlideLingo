@@ -5,7 +5,7 @@ import base64
 import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
-from typing import Protocol
+from typing import Literal, Protocol, cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import Engine, text
@@ -409,6 +409,7 @@ class PostgresDiscoveryRepository:
                                offering.offering_id, offering.title AS offering_title,
                                offering.duration_minutes, offering.amount_minor, offering.currency,
                                credential.title AS credential_title,
+                               review.rating, review.rating_count,
                                EXISTS (
                                  SELECT 1 FROM marketplace_tutor_favorite favorite
                                  WHERE favorite.learner_actor_ref = :learner_actor_ref
@@ -422,6 +423,13 @@ class PostgresDiscoveryRepository:
                         LEFT JOIN marketplace_tutor_credential AS credential
                           ON credential.tutor_id = profile.tutor_id
                          AND credential.verification_status = 'verified'
+                        LEFT JOIN LATERAL (
+                          SELECT avg(published.rating)::double precision AS rating,
+                                 count(*)::integer AS rating_count
+                          FROM marketplace_booking_review AS published
+                          WHERE published.tutor_id = profile.tutor_id
+                            AND published.moderation_state = 'published'
+                        ) AS review ON true
                         WHERE """
                             + " AND ".join(conditions)
                             + " ORDER BY lower(profile.headline), profile.tutor_id LIMIT 201"
@@ -449,6 +457,7 @@ class PostgresDiscoveryRepository:
                                offering.offering_id, offering.title AS offering_title,
                                offering.duration_minutes, offering.amount_minor, offering.currency,
                                credential.title AS credential_title,
+                               review.rating, review.rating_count,
                                EXISTS (
                                  SELECT 1 FROM marketplace_tutor_favorite favorite
                                  WHERE favorite.learner_actor_ref = :learner_actor_ref
@@ -462,6 +471,13 @@ class PostgresDiscoveryRepository:
                         LEFT JOIN marketplace_tutor_credential AS credential
                           ON credential.tutor_id = profile.tutor_id
                          AND credential.verification_status = 'verified'
+                        LEFT JOIN LATERAL (
+                          SELECT avg(published.rating)::double precision AS rating,
+                                 count(*)::integer AS rating_count
+                          FROM marketplace_booking_review AS published
+                          WHERE published.tutor_id = profile.tutor_id
+                            AND published.moderation_state = 'published'
+                        ) AS review ON true
                         WHERE profile.tutor_id = :tutor_id
                           AND application.status = 'approved'
                           AND profile.is_published AND profile.payout_ready
@@ -645,8 +661,8 @@ class PostgresDiscoveryRepository:
             duration_minutes=row["duration_minutes"],
             amount_minor=row["amount_minor"],
             currency=row["currency"],
-            rating=None,
-            rating_count=0,
+            rating=row["rating"],
+            rating_count=row["rating_count"],
             is_favorite=row["is_favorite"],
         )
 
@@ -835,7 +851,9 @@ class MarketplaceDiscoveryService:
                 tutor_id=tutor_id,
                 time_zone=schedule.time_zone,
                 source="manual+google",
-                freshness=calendar.freshness,
+                freshness=cast(
+                    Literal["current", "stale", "reconnect_required"], calendar.freshness
+                ),
                 slots=[],
             )
         slots = self._derive(
@@ -883,7 +901,9 @@ class MarketplaceDiscoveryService:
                 tutor_id=schedule.tutor_id,
                 time_zone=schedule.time_zone,
                 source="manual+google",
-                freshness=calendar.freshness,
+                freshness=cast(
+                    Literal["current", "stale", "reconnect_required"], calendar.freshness
+                ),
                 slots=[],
             )
         slots = self._derive(
@@ -934,7 +954,7 @@ class MarketplaceDiscoveryService:
                     local_date=exception.local_date,
                     start_local=exception.start_local,
                     end_local=exception.end_local,
-                    kind=exception.kind,
+                    kind=cast(Literal["available", "unavailable"], exception.kind),
                     time_zone=exception.time_zone,
                 )
                 for exception in schedule.exceptions
@@ -1007,7 +1027,7 @@ class MarketplaceDiscoveryService:
                     local_date=exception.local_date,
                     start_local=exception.start_local,
                     end_local=exception.end_local,
-                    kind=exception.kind,
+                    kind=cast(Literal["available", "unavailable"], exception.kind),
                     time_zone=exception.time_zone,
                 )
                 for exception in schedule.exceptions
@@ -1027,9 +1047,9 @@ class MarketplaceDiscoveryService:
             verified_credentials=list(tutor.verified_credentials),
             offering_id=tutor.offering_id,
             offering_title=tutor.offering_title,
-            duration_minutes=tutor.duration_minutes,
+            duration_minutes=cast(Literal[25, 50], tutor.duration_minutes),
             amount_minor=tutor.amount_minor,
-            currency=tutor.currency,
+            currency=cast(Literal["USD"], tutor.currency),
             rating=tutor.rating,
             rating_count=tutor.rating_count,
             is_favorite=tutor.is_favorite,

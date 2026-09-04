@@ -7,11 +7,11 @@ import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
-import { createTutorConnectOnboarding, getTutorConnectStatus, saveTutorMeetingUrl, type TutorConnectStatus } from '@/features/tutor-marketplace/api';
+import { createTutorConnectOnboarding, getTutorConnectStatus, getTutorEarnings, saveTutorMeetingUrl, type TutorConnectStatus, type TutorEarnings } from '@/features/tutor-marketplace/api';
 import { isHumanTutorCommerceEnabled } from '@/features/tutor-marketplace/config';
 import { useTheme } from '@/hooks/use-theme';
 
-type State = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; connect: TutorConnectStatus };
+type State = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; connect: TutorConnectStatus; earnings: TutorEarnings };
 
 export function TutorPayoutsScreen() {
   const enabled = isHumanTutorCommerceEnabled();
@@ -26,8 +26,8 @@ export function TutorPayoutsScreen() {
     if (!enabled) return;
     const controller = new AbortController();
     const current = ++sequence.current;
-    void getTutorConnectStatus(true, controller.signal).then((connect) => {
-      if (!controller.signal.aborted && current === sequence.current) setState({ kind: 'ready', connect });
+    void Promise.all([getTutorConnectStatus(true, controller.signal), getTutorEarnings(controller.signal)]).then(([connect, earnings]) => {
+      if (!controller.signal.aborted && current === sequence.current) setState({ kind: 'ready', connect, earnings });
     }).catch((error: unknown) => {
       if (controller.signal.aborted || current !== sequence.current) return;
       if (error instanceof ApiClientError && error.kind === 'cancelled') return;
@@ -61,6 +61,12 @@ export function TutorPayoutsScreen() {
         <ThemedText type="body" themeColor="textSecondary">GlideLingo stores only bounded readiness facts. Stripe hosts the sensitive onboarding form.</ThemedText>
         {state.connect.requirementsDue ? <ThemedText type="footnote">{state.connect.requirementsDue} onboarding requirement(s) remain.</ThemedText> : null}
         {state.connect.status !== 'ready' ? <GlideButton disabled={working !== null} label={working === 'connect' ? 'Opening…' : 'Continue Stripe onboarding'} onPress={() => void onboard()} /> : null}
+      </GlideSurface>
+      <GlideSurface padding="roomy" style={styles.card}>
+        <ThemedText type="title2">Tutor earnings</ThemedText>
+        <ThemedText type="body">${(state.earnings.pendingMinor / 100).toFixed(2)} pending</ThemedText>
+        <ThemedText type="body">${(state.earnings.transferredMinor / 100).toFixed(2)} transferred</ThemedText>
+        <ThemedText type="footnote" themeColor="textSecondary">Only tutor payout amounts appear here; learner payment details stay private.</ThemedText>
       </GlideSurface>
       <GlideSurface padding="roomy" style={styles.card}>
         <ThemedText type="title2">Approved external meeting link</ThemedText>

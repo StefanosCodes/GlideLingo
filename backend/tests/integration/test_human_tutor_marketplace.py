@@ -18,10 +18,15 @@ from app.modules.human_tutor_marketplace.booking import (
     PostgresBookingRepository,
     StripeCheckout,
     StripeConnectAccount,
+    StripeMoneyResult,
 )
 from app.modules.human_tutor_marketplace.calendar import PostgresCalendarRepository
 from app.modules.human_tutor_marketplace.discovery import PostgresDiscoveryRepository
 from app.modules.human_tutor_marketplace.identity import derive_marketplace_actor_ref
+from app.modules.human_tutor_marketplace.lifecycle import (
+    PostgresLifecycleRepository,
+    next_weekly_payout_at,
+)
 from app.modules.human_tutor_marketplace.messaging import PostgresMessagingRepository
 from app.modules.human_tutor_marketplace.repository import (
     PostgresTutorApplicationRepository,
@@ -52,6 +57,9 @@ MIGRATIONS = (
     Path(__file__).resolve().parents[2]
     / "migrations"
     / "011_human_tutor_marketplace_booking_checkout.sql",
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "012_human_tutor_marketplace_lifecycle_money_reviews.sql",
 )
 SAFE_SEARCH_PATH = "pg_catalog, public, pg_temp"
 TUTOR_ACTOR = derive_marketplace_actor_ref(
@@ -131,6 +139,7 @@ def marketplace_engine() -> Generator[Engine]:
                     (OPERATOR_ACTOR, "manage_tutor_status"),
                     (OPERATOR_ACTOR, "verify_tutor_credentials"),
                     (OPERATOR_ACTOR, "review_message_reports"),
+                    (OPERATOR_ACTOR, "manage_bookings"),
                 ],
             )
         finally:
@@ -1671,3 +1680,418 @@ def test_booking_holds_overlap_webhooks_money_and_participant_scope(
             {"booking_id": held.booking_id},
         ).scalar_one()
     assert system_messages == 1
+
+
+@pytest.mark.integration
+def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
+    marketplace_engine: Engine,
+) -> None:
+    _, booking, profile = create_bookable_tutor(marketplace_engine)
+    lifecycle = PostgresLifecycleRepository(engine=marketplace_engine)
+    now = datetime.now(UTC)
+
+    def confirmed(starts_at: datetime, learner: str = LEARNER_ACTOR) -> Any:
+        held = booking.create_hold(
+            learner_actor_ref=learner,
+            tutor_id=profile.tutor_id,
+            starts_at=starts_at,
+            idempotency_key=uuid4(),
+            now=now,
+            hold_seconds=600,
+            environment="SANDBOX",
+            platform_account_id="acct_reviewed123",
+        )
+        assert held is not None
+        suffix = held.booking_id.hex[:12]
+        pending = booking.attach_checkout(
+            booking_id=held.booking_id,
+            learner_actor_ref=learner,
+            checkout=StripeCheckout(
+                checkout_id=f"cs_test_{suffix}",
+                url="https://checkout.stripe.com/c/pay/reviewed123",
+                payment_intent_id=f"pi_{suffix}",
+                status="open",
+                payment_status="unpaid",
+                livemode=False,
+                booking_id=held.booking_id,
+                platform_account_id="acct_reviewed123",
+                created_at=now,
+            ),
+        )
+        assert pending is not None
+        outcome, value = booking.apply_checkout_observation(
+            checkout=StripeCheckout(
+                checkout_id=f"cs_test_{suffix}",
+                url=None,
+                payment_intent_id=f"pi_{suffix}",
+                status="complete",
+                payment_status="paid",
+                livemode=False,
+                booking_id=held.booking_id,
+                platform_account_id="acct_reviewed123",
+                created_at=now,
+            ),
+            payload_sha256=suffix.ljust(64, "a"),
+            event_id=f"evt_{suffix}",
+            event_type="checkout.session.completed",
+            source="provider_webhook",
+            environment="SANDBOX",
+            platform_account_id="acct_reviewed123",
+        )
+        assert outcome == "applied" and value is not None
+        return value
+
+    rescheduled = confirmed(now + timedelta(days=5))
+    new_start = now + timedelta(days=6)
+    assert lifecycle.transition(
+        booking_id=rescheduled.booking_id,
+        actor_ref=LEARNER_ACTOR,
+        action="reschedule",
+        reason="Learner and tutor agreed to a later lesson time.",
+        new_starts_at=new_start,
+        now=now,
+    )
+    with marketplace_engine.connect() as connection:
+        revision = connection.execute(
+            text(
+                "SELECT version, prior_starts_at, starts_at "
+                "FROM marketplace_booking_schedule_revision WHERE booking_id = :id"
+            ),
+            {"id": rescheduled.booking_id},
+        ).one()
+        reminders = connection.execute(
+            text(
+                "SELECT kind, state FROM marketplace_booking_reminder_job "
+                "WHERE booking_id = :id ORDER BY kind"
+            ),
+            {"id": rescheduled.booking_id},
+        ).all()
+    assert revision == (2, rescheduled.starts_at, new_start)
+    assert [tuple(row) for row in reminders] == [
+        ("completion_prompt", "queued"),
+        ("lesson_reminder", "queued"),
+    ]
+
+    refundable = confirmed(now + timedelta(hours=13))
+    assert lifecycle.transition(
+        booking_id=refundable.booking_id,
+        actor_ref=LEARNER_ACTOR,
+        action="cancel",
+        reason="Learner cancelled before cutoff.",
+        new_starts_at=None,
+        now=now,
+    )
+    refund = lifecycle.claim_money_operation(worker="money-worker", now=now, lease_seconds=60)
+    assert refund is not None and refund.kind == "refund" and refund.amount_minor == 2500
+    assert lifecycle.finish_money_operation(
+        operation=refund,
+        result=StripeMoneyResult("re_reviewed123", False, 2500, "USD"),
+        worker="money-worker",
+    )
+
+    late = confirmed(now + timedelta(hours=11))
+    assert lifecycle.transition(
+        booking_id=late.booking_id,
+        actor_ref=LEARNER_ACTOR,
+        action="cancel",
+        reason="Learner cancelled after cutoff.",
+        new_starts_at=None,
+        now=now,
+    )
+    transfer = lifecycle.claim_money_operation(worker="money-worker", now=now, lease_seconds=60)
+    assert transfer is not None and transfer.kind == "transfer" and transfer.amount_minor == 2000
+    lifecycle.fail_money_operation(
+        operation_id=transfer.operation_id,
+        worker="money-worker",
+        code="provider_timeout",
+        ambiguous=True,
+        now=now,
+    )
+    assert lifecycle.recover_money_operation(
+        booking_id=late.booking_id,
+        operator_actor_ref=OPERATOR_ACTOR,
+        reason="Provider dashboard and idempotency result reconciled.",
+        now=now,
+    )
+    retried = lifecycle.claim_money_operation(worker="money-worker-2", now=now, lease_seconds=60)
+    assert retried is not None and retried.idempotency_key == transfer.idempotency_key
+    assert lifecycle.finish_money_operation(
+        operation=retried,
+        result=StripeMoneyResult("tr_reviewed123", False, 2000, "USD"),
+        worker="money-worker-2",
+    )
+    assert lifecycle.earnings(tutor_actor_ref=TUTOR_ACTOR).transferred_minor == 2000
+
+    tutor_absent = confirmed(now - timedelta(days=5))
+    assert lifecycle.transition(
+        booking_id=tutor_absent.booking_id,
+        actor_ref=LEARNER_ACTOR,
+        action="tutor_no_show",
+        reason="Learner reported the tutor did not attend.",
+        new_starts_at=None,
+        now=now,
+    )
+    no_show_refund = lifecycle.claim_money_operation(
+        worker="money-worker-tutor-no-show", now=now, lease_seconds=60
+    )
+    assert no_show_refund is not None and no_show_refund.kind == "refund"
+    assert lifecycle.finish_money_operation(
+        operation=no_show_refund,
+        result=StripeMoneyResult("re_tutornoshow1", False, 2500, "USD"),
+        worker="money-worker-tutor-no-show",
+    )
+
+    learner_absent = confirmed(now - timedelta(days=6))
+    assert lifecycle.transition(
+        booking_id=learner_absent.booking_id,
+        actor_ref=TUTOR_ACTOR,
+        action="learner_no_show",
+        reason="Tutor reported the learner did not attend.",
+        new_starts_at=None,
+        now=now,
+    )
+    no_show_transfer = lifecycle.claim_money_operation(
+        worker="money-worker-learner-no-show", now=now, lease_seconds=60
+    )
+    assert no_show_transfer is not None and no_show_transfer.kind == "transfer"
+    assert lifecycle.finish_money_operation(
+        operation=no_show_transfer,
+        result=StripeMoneyResult("tr_learnernoshow1", False, 2000, "USD"),
+        worker="money-worker-learner-no-show",
+    )
+
+    leased = confirmed(now - timedelta(days=7))
+    assert lifecycle.transition(
+        booking_id=leased.booking_id,
+        actor_ref=TUTOR_ACTOR,
+        action="learner_no_show",
+        reason="Tutor reported a second learner no-show.",
+        new_starts_at=None,
+        now=now,
+    )
+    abandoned = lifecycle.claim_money_operation(
+        worker="crashed-worker", now=now, lease_seconds=60
+    )
+    assert abandoned is not None and abandoned.booking_id == leased.booking_id
+    reclaimed = lifecycle.claim_money_operation(
+        worker="restart-worker", now=now + timedelta(seconds=61), lease_seconds=60
+    )
+    assert reclaimed is not None
+    assert reclaimed.operation_id == abandoned.operation_id
+    assert reclaimed.idempotency_key == abandoned.idempotency_key
+    assert lifecycle.finish_money_operation(
+        operation=reclaimed,
+        result=StripeMoneyResult("tr_restartedjob1", False, 2000, "USD"),
+        worker="restart-worker",
+    )
+    assert not lifecycle.finish_money_operation(
+        operation=reclaimed,
+        result=StripeMoneyResult("tr_restartedjob1", False, 2000, "USD"),
+        worker="restart-worker",
+    )
+
+    exhausted = confirmed(now - timedelta(days=8))
+    assert lifecycle.transition(
+        booking_id=exhausted.booking_id,
+        actor_ref=TUTOR_ACTOR,
+        action="learner_no_show",
+        reason="Tutor reported a third learner no-show.",
+        new_starts_at=None,
+        now=now,
+    )
+    retry_at = now
+    exhausted_operation = None
+    for attempt in range(8):
+        exhausted_operation = lifecycle.claim_money_operation(
+            worker=f"failing-worker-{attempt}", now=retry_at, lease_seconds=60
+        )
+        assert exhausted_operation is not None
+        lifecycle.fail_money_operation(
+            operation_id=exhausted_operation.operation_id,
+            worker=f"failing-worker-{attempt}",
+            code="provider_declined_transfer",
+            ambiguous=False,
+            now=retry_at,
+        )
+        retry_at += timedelta(minutes=2)
+    assert exhausted_operation is not None
+    assert lifecycle.claim_money_operation(
+        worker="automatic-worker", now=retry_at, lease_seconds=60
+    ) is None
+    assert lifecycle.recover_money_operation(
+        booking_id=exhausted.booking_id,
+        operator_actor_ref=OPERATOR_ACTOR,
+        reason="Operator confirmed the provider account is ready for a bounded retry.",
+        now=retry_at,
+    )
+    recovered_dead = lifecycle.claim_money_operation(
+        worker="operator-recovery-worker", now=retry_at, lease_seconds=60
+    )
+    assert recovered_dead is not None
+    assert recovered_dead.idempotency_key == exhausted_operation.idempotency_key
+    assert lifecycle.finish_money_operation(
+        operation=recovered_dead,
+        result=StripeMoneyResult("tr_recovereddead1", False, 2000, "USD"),
+        worker="operator-recovery-worker",
+    )
+
+    disputed = confirmed(now - timedelta(days=1))
+    assert lifecycle.transition(
+        booking_id=disputed.booking_id,
+        actor_ref=LEARNER_ACTOR,
+        action="complete",
+        reason="Lesson completed as scheduled.",
+        new_starts_at=None,
+        now=now,
+    )
+    assert lifecycle.claim_money_operation(worker="too-early", now=now, lease_seconds=60) is None
+    assert lifecycle.transition(
+        booking_id=disputed.booking_id,
+        actor_ref=LEARNER_ACTOR,
+        action="dispute",
+        reason="Learner disputed within the review window.",
+        new_starts_at=None,
+        now=now,
+    )
+    assert lifecycle.transition(
+        booking_id=disputed.booking_id,
+        actor_ref=OPERATOR_ACTOR,
+        action="resolve_refund",
+        reason="Operator approved a full learner refund.",
+        new_starts_at=None,
+        now=now,
+    )
+    with pytest.raises(TutorApplicationConflictError):
+        lifecycle.create_review(
+            review_id=uuid4(),
+            booking_id=disputed.booking_id,
+            learner_actor_ref=LEARNER_ACTOR,
+            rating=5,
+            body="This disputed booking is not review eligible.",
+        )
+    dispute_refund = lifecycle.claim_money_operation(
+        worker="money-worker-dispute", now=now, lease_seconds=60
+    )
+    assert dispute_refund is not None and dispute_refund.booking_id == disputed.booking_id
+    assert lifecycle.finish_money_operation(
+        operation=dispute_refund,
+        result=StripeMoneyResult("re_reviewed456", False, 2500, "USD"),
+        worker="money-worker-dispute",
+    )
+
+    eligible = confirmed(now - timedelta(days=3))
+    completed_at = now - timedelta(hours=25)
+    assert lifecycle.transition(
+        booking_id=eligible.booking_id,
+        actor_ref=TUTOR_ACTOR,
+        action="complete",
+        reason="Tutor marked the finished lesson complete.",
+        new_starts_at=None,
+        now=completed_at,
+    )
+    eligible_transfer = lifecycle.claim_money_operation(
+        worker="money-worker-3",
+        now=next_weekly_payout_at(completed_at + timedelta(hours=24)),
+        lease_seconds=60,
+    )
+    assert eligible_transfer is not None and eligible_transfer.booking_id == eligible.booking_id
+    assert lifecycle.finish_money_operation(
+        operation=eligible_transfer,
+        result=StripeMoneyResult("tr_reviewed789", False, 2000, "USD"),
+        worker="money-worker-3",
+    )
+    review = lifecycle.create_review(
+        review_id=uuid4(),
+        booking_id=eligible.booking_id,
+        learner_actor_ref=LEARNER_ACTOR,
+        rating=5,
+        body="A calm and useful verified lesson review.",
+    )
+    assert review is not None and review.moderation_state == "published"
+
+    public_tutor = PostgresDiscoveryRepository(engine=marketplace_engine).get_public_tutor(
+        learner_actor_ref=LEARNER_ACTOR,
+        tutor_id=profile.tutor_id,
+    )
+    assert public_tutor is not None
+    assert public_tutor.rating == 5.0 and public_tutor.rating_count == 1
+
+    payout_window = next_weekly_payout_at(now + timedelta(days=15))
+    race_completed_at = payout_window - timedelta(hours=24)
+    reversal_booking = confirmed(race_completed_at - timedelta(hours=2))
+    assert lifecycle.transition(
+        booking_id=reversal_booking.booking_id,
+        actor_ref=TUTOR_ACTOR,
+        action="complete",
+        reason="Tutor marked the future-shaped fixture complete.",
+        new_starts_at=None,
+        now=race_completed_at,
+    )
+    raced_transfer = lifecycle.claim_money_operation(
+        worker="money-worker-race", now=payout_window, lease_seconds=60
+    )
+    assert raced_transfer is not None and raced_transfer.booking_id == reversal_booking.booking_id
+    assert lifecycle.transition(
+        booking_id=reversal_booking.booking_id,
+        actor_ref=LEARNER_ACTOR,
+        action="dispute",
+        reason="Learner disputed exactly at the documented deadline.",
+        new_starts_at=None,
+        now=payout_window,
+    )
+    assert lifecycle.finish_money_operation(
+        operation=raced_transfer,
+        result=StripeMoneyResult("tr_racedpayout1", False, 2000, "USD"),
+        worker="money-worker-race",
+    )
+    assert lifecycle.transition(
+        booking_id=reversal_booking.booking_id,
+        actor_ref=OPERATOR_ACTOR,
+        action="resolve_refund",
+        reason="Operator approved refund after an in-flight transfer completed.",
+        new_starts_at=None,
+        now=payout_window,
+    )
+    reversal = lifecycle.claim_money_operation(
+        worker="money-worker-reversal", now=payout_window, lease_seconds=60
+    )
+    assert reversal is not None and reversal.kind == "reversal"
+    assert lifecycle.finish_money_operation(
+        operation=reversal,
+        result=StripeMoneyResult("trr_racedpayout1", False, 2000, "USD"),
+        worker="money-worker-reversal",
+    )
+    final_refund = lifecycle.claim_money_operation(
+        worker="money-worker-after-reversal",
+        now=payout_window + timedelta(seconds=1),
+        lease_seconds=60,
+    )
+    assert final_refund is not None and final_refund.kind == "refund"
+    assert lifecycle.finish_money_operation(
+        operation=final_refund,
+        result=StripeMoneyResult("re_afterreversal1", False, 2500, "USD"),
+        worker="money-worker-after-reversal",
+    )
+
+    with marketplace_engine.connect() as connection:
+        ledger = connection.execute(
+            text(
+                "SELECT kind, amount_minor FROM marketplace_money_ledger "
+                "WHERE booking_id = :id ORDER BY created_at, entry_id"
+            ),
+            {"id": refundable.booking_id},
+        ).all()
+        reversal_ledger = connection.execute(
+            text(
+                "SELECT kind, amount_minor FROM marketplace_money_ledger "
+                "WHERE booking_id = :id ORDER BY created_at, entry_id"
+            ),
+            {"id": reversal_booking.booking_id},
+        ).all()
+    assert [tuple(row) for row in ledger] == [("charge", 2500), ("refund", 2500)]
+    assert [tuple(row) for row in reversal_ledger] == [
+        ("charge", 2500),
+        ("transfer", 2000),
+        ("reversal", 2000),
+        ("refund", 2500),
+    ]

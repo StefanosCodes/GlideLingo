@@ -1,6 +1,7 @@
 """Tutor application state machine and authorization boundary."""
 
 import asyncio
+from typing import Literal, cast
 from uuid import UUID, uuid4
 
 from app.auth.clerk import ClerkPrincipal
@@ -528,7 +529,7 @@ class HumanTutorMarketplaceService:
                     offering_id=offering.offering_id,
                     version=offering.version,
                     title=offering.title,
-                    duration_minutes=offering.duration_minutes,
+                    duration_minutes=cast(Literal[25, 50], offering.duration_minutes),
                     amount_minor=offering.amount_minor,
                     currency=offering.currency,
                     state=offering.state,

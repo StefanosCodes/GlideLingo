@@ -1,7 +1,7 @@
 """Authenticated tutor application and capability-scoped review endpoints."""
 
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -11,11 +11,14 @@ from app.core.errors import ErrorResponse
 from app.modules.human_tutor_marketplace.booking import BookingService
 from app.modules.human_tutor_marketplace.calendar import CalendarService
 from app.modules.human_tutor_marketplace.discovery import MarketplaceDiscoveryService
+from app.modules.human_tutor_marketplace.lifecycle import LifecycleService
 from app.modules.human_tutor_marketplace.messaging import MessagingService
 from app.modules.human_tutor_marketplace.schemas import (
     ApplicationVersionRequest,
     BookingListResponse,
     BookingResponse,
+    BookingReviewResponse,
+    BookingTransitionRequest,
     CalendarConnectionResponse,
     CalendarOAuthCallbackRequest,
     CalendarOAuthStartRequest,
@@ -24,6 +27,7 @@ from app.modules.human_tutor_marketplace.schemas import (
     ConversationListResponse,
     ConversationResponse,
     CreateBookingCheckoutRequest,
+    CreateBookingReviewRequest,
     CreateConversationRequest,
     CreateMessageReportRequest,
     CreateTutorApplicationRequest,
@@ -39,6 +43,7 @@ from app.modules.human_tutor_marketplace.schemas import (
     MessageReportResponse,
     MessageResponse,
     PublicTutorResponse,
+    RecoverMoneyOperationRequest,
     ReplaceManualAvailabilityRequest,
     ResolveMessageReportRequest,
     SaveTutorCredentialRequest,
@@ -51,6 +56,7 @@ from app.modules.human_tutor_marketplace.schemas import (
     TutorApplicationResponse,
     TutorConnectOnboardingResponse,
     TutorConnectStatusResponse,
+    TutorEarningsResponse,
     TutorProfileResponse,
     TutorSearchResponse,
     TutorSlotsResponse,
@@ -115,6 +121,16 @@ MarketplaceBookingServiceDependency = Annotated[
 ]
 
 
+def get_marketplace_lifecycle_service(request: Request) -> LifecycleService:
+    return cast(LifecycleService, request.app.state.marketplace_lifecycle_service)
+
+
+MarketplaceLifecycleServiceDependency = Annotated[
+    LifecycleService,
+    Depends(get_marketplace_lifecycle_service),
+]
+
+
 @router.get(
     "/tutor-connect",
     operation_id="get_tutor_connect_status",
@@ -136,7 +152,8 @@ async def get_tutor_connect_status(
         else "incomplete"
     )
     return TutorConnectStatusResponse(
-        status=status_value, requirements_due=account.requirements_due
+        status=cast(Literal["not_started", "incomplete", "ready", "restricted"], status_value),
+        requirements_due=account.requirements_due,
     )
 
 
@@ -218,6 +235,79 @@ async def reconcile_booking_payment(
     service: MarketplaceBookingServiceDependency,
 ) -> BookingResponse:
     booking = await service.reconcile(principal=principal, booking_id=booking_id)
+    return BookingResponse.model_validate(booking, from_attributes=True)
+
+
+@router.post(
+    "/bookings/{booking_id}/transition",
+    operation_id="transition_marketplace_booking",
+    response_model=BookingResponse,
+)
+async def transition_marketplace_booking(
+    booking_id: UUID,
+    request: BookingTransitionRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceLifecycleServiceDependency,
+) -> BookingResponse:
+    booking = await service.transition(
+        principal=principal,
+        booking_id=booking_id,
+        action=request.action,
+        reason=request.reason,
+        new_starts_at=request.new_starts_at,
+    )
+    return BookingResponse.model_validate(booking, from_attributes=True)
+
+
+@router.post(
+    "/bookings/{booking_id}/review",
+    operation_id="create_marketplace_booking_review",
+    response_model=BookingReviewResponse,
+)
+async def create_marketplace_booking_review(
+    booking_id: UUID,
+    request: CreateBookingReviewRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceLifecycleServiceDependency,
+) -> BookingReviewResponse:
+    review = await service.create_review(
+        principal=principal,
+        booking_id=booking_id,
+        rating=request.rating,
+        body=request.body,
+    )
+    return BookingReviewResponse.model_validate(review, from_attributes=True)
+
+
+@router.get(
+    "/tutor-earnings",
+    operation_id="get_marketplace_tutor_earnings",
+    response_model=TutorEarningsResponse,
+)
+async def get_marketplace_tutor_earnings(
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceLifecycleServiceDependency,
+) -> TutorEarningsResponse:
+    earnings = await service.earnings(principal=principal)
+    return TutorEarningsResponse.model_validate(earnings, from_attributes=True)
+
+
+@router.post(
+    "/marketplace-operations/bookings/{booking_id}/money-recovery",
+    operation_id="recover_marketplace_money_operation",
+    response_model=BookingResponse,
+)
+async def recover_marketplace_money_operation(
+    booking_id: UUID,
+    request: RecoverMoneyOperationRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceLifecycleServiceDependency,
+) -> BookingResponse:
+    booking = await service.recover_money(
+        principal=principal,
+        booking_id=booking_id,
+        reason=request.reason,
+    )
     return BookingResponse.model_validate(booking, from_attributes=True)
 
 

@@ -549,7 +549,7 @@ class BookingResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     booking_id: UUID
-    role: Literal["learner", "tutor"]
+    role: Literal["learner", "tutor", "operator"]
     tutor_id: UUID
     state: Literal[
         "held",
@@ -557,7 +557,13 @@ class BookingResponse(BaseModel):
         "payment_ambiguous",
         "payment_failed",
         "confirmed",
+        "completed",
         "cancelled",
+        "learner_no_show",
+        "tutor_no_show",
+        "disputed",
+        "resolved_refund",
+        "resolved_release",
         "expired",
     ]
     starts_at: datetime
@@ -570,6 +576,23 @@ class BookingResponse(BaseModel):
     checkout_url: str | None
     meeting_url: str | None
     ics: str | None
+    schedule_version: int = Field(ge=1)
+    money_state: (
+        Literal[
+            "charged",
+            "refund_pending",
+            "refund_ambiguous",
+            "refunded",
+            "transfer_pending",
+            "transfer_ambiguous",
+            "transferred",
+            "reversal_pending",
+            "reversal_ambiguous",
+            "reversed",
+        ]
+        | None
+    )
+    dispute_deadline_at: datetime | None
 
 
 class BookingListResponse(BaseModel):
@@ -582,6 +605,62 @@ class MarketplaceStripeWebhookResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["applied", "duplicate", "out_of_order", "ignored"]
+
+
+class BookingTransitionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal[
+        "reschedule",
+        "cancel",
+        "complete",
+        "learner_no_show",
+        "tutor_no_show",
+        "dispute",
+        "resolve_refund",
+        "resolve_release",
+    ]
+    reason: str = Field(min_length=8, max_length=500)
+    new_starts_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_reschedule_time(self) -> Self:
+        if (self.action == "reschedule") != (self.new_starts_at is not None):
+            raise ValueError("new_starts_at is required only for reschedule")
+        return self
+
+
+class CreateBookingReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rating: int = Field(ge=1, le=5)
+    body: str | None = Field(default=None, min_length=8, max_length=1000)
+
+
+class BookingReviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    review_id: UUID
+    booking_id: UUID
+    tutor_id: UUID
+    rating: int = Field(ge=1, le=5)
+    body: str | None
+    moderation_state: Literal["published", "hidden"]
+    created_at: datetime
+
+
+class TutorEarningsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pending_minor: int = Field(ge=0)
+    transferred_minor: int = Field(ge=0)
+    currency: Literal["USD"]
+
+
+class RecoverMoneyOperationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=8, max_length=1000)
 
 
 class PublicTutorResponse(BaseModel):

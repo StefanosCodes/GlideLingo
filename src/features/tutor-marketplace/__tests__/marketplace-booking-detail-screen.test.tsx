@@ -29,6 +29,7 @@ const ambiguous: MarketplaceBooking = {
   startsAt: '2026-09-05T12:00:00Z', endsAt: '2026-09-05T12:25:00Z',
   holdExpiresAt: '2026-09-04T12:10:00Z', amountMinor: 2500, currency: 'USD',
   commissionAmountMinor: 500, tutorAmountMinor: 0, checkoutUrl: null, meetingUrl: null, ics: null,
+  scheduleVersion: 1, moneyState: null, disputeDeadlineAt: null,
 };
 
 beforeEach(() => { process.env.EXPO_PUBLIC_HUMAN_TUTOR_COMMERCE_ENABLED = 'true'; mockGet.mockReset(); mockReconcile.mockReset(); });

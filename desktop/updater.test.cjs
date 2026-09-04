@@ -3,20 +3,29 @@ const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
 const {
-  hasValidMacSignature,
-  installMacUpdater,
-  resolveMacAppBundle,
+  OFFICIAL_DOWNLOAD_PAGE_URL,
+  POLICY_TIMEOUT_MS,
+  UPDATE_CHANNELS,
+  compareNumericSemVer,
+  configureUpdaterPrivacy,
+  createMacUpdateCoordinator,
+  fetchMinimumSupportedVersion,
+  isAllowedUpdateSender,
+  parseNumericSemVer,
+  registerDesktopUpdateIpc,
+  removeLegacyUpdaterId,
+  shouldQuitForRequiredUpdate,
   shouldStartMacUpdater,
+  SHARED_STAGING_USER_ID,
   startMacUpdater,
+  SUPPORTED_ELECTRON_UPDATER_VERSION,
 } = require('./updater.cjs');
 
 function createUpdater() {
   const updater = new EventEmitter();
   updater.checks = 0;
-  updater.downloads = 0;
   updater.installs = 0;
   updater.checkForUpdates = async () => { updater.checks += 1; };
-  updater.downloadUpdate = async () => { updater.downloads += 1; };
   updater.quitAndInstall = (silent, forceRunAfter) => {
     updater.installs += 1;
     updater.installArguments = [silent, forceRunAfter];
@@ -28,236 +37,318 @@ function flushEvents() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-test('update checks are restricted to packaged, signed macOS app bundles', () => {
-  const executablePath = '/Applications/GlideLingo.app/Contents/MacOS/GlideLingo';
-  const eligible = {
-    isPackaged: true,
-    platform: 'darwin',
-    developmentUrl: null,
-    executablePath,
-    verifySignature: () => true,
-  };
+test('numeric SemVer parsing and comparison reject every non-numeric form', () => {
+  assert.deepEqual(parseNumericSemVer('1.20.3'), [1n, 20n, 3n]);
+  assert.equal(compareNumericSemVer('1.9.9', '1.10.0'), -1);
+  assert.equal(compareNumericSemVer('2.0.0', '1.999.999'), 1);
+  assert.equal(compareNumericSemVer('1.0.0', '1.0.0'), 0);
 
+  for (const value of ['', '1.2', 'v1.2.3', '01.2.3', '1.2.3-beta', '1.2.3+build', ' 1.2.3']) {
+    assert.equal(parseNumericSemVer(value), null);
+  }
+});
+
+test('updater eligibility is packaged macOS only and performs no runtime signature subprocess', () => {
+  const eligible = { isPackaged: true, platform: 'darwin', developmentUrl: null };
   assert.equal(shouldStartMacUpdater(eligible), true);
   assert.equal(shouldStartMacUpdater({ ...eligible, isPackaged: false }), false);
-  assert.equal(shouldStartMacUpdater({ ...eligible, platform: 'win32' }), false);
-  assert.equal(
-    shouldStartMacUpdater({ ...eligible, developmentUrl: 'http://127.0.0.1:8081/' }),
-    false,
-  );
-  assert.equal(shouldStartMacUpdater({ ...eligible, verifySignature: () => false }), false);
-  assert.equal(resolveMacAppBundle(executablePath), '/Applications/GlideLingo.app');
-  assert.equal(resolveMacAppBundle('/tmp/GlideLingo'), null);
+  assert.equal(shouldStartMacUpdater({ ...eligible, platform: 'linux' }), false);
+  assert.equal(shouldStartMacUpdater({ ...eligible, developmentUrl: 'http://localhost:8081' }), false);
 });
 
-test('macOS signature verification uses the fixed codesign binary and exact app bundle', () => {
-  const calls = [];
-  const valid = hasValidMacSignature(
-    '/Applications/GlideLingo.app/Contents/MacOS/GlideLingo',
-    (command, args, options) => {
-      calls.push([command, args, options]);
-      if (args[0] === '--display') {
-        return {
-          status: 0,
-          stderr: 'Authority=Developer ID Application: Stefanos Sophocleous (TEAM123456)\nTeamIdentifier=TEAM123456\n',
-        };
-      }
-      return { status: 0 };
+test('updater privacy prevents per-install ID access and uses one non-identifying shared value', async () => {
+  let defaultIdAccesses = 0;
+  const createPrivacyTestUpdater = () => ({
+    logger: console,
+    stagingUserIdPromise: {
+      get value() {
+        defaultIdAccesses += 1;
+        return Promise.resolve('unique-persistent-id');
+      },
     },
-  );
-
-  assert.equal(valid, true);
-  assert.deepEqual(calls, [
-    [
-      '/usr/bin/codesign',
-      ['--verify', '--deep', '--strict', '/Applications/GlideLingo.app'],
-      { stdio: 'ignore' },
-    ],
-    [
-      '/usr/bin/codesign',
-      ['--display', '--verbose=4', '/Applications/GlideLingo.app'],
-      { encoding: 'utf8' },
-    ],
-  ]);
-  assert.equal(
-    hasValidMacSignature(
-      '/Applications/GlideLingo.app/Contents/MacOS/GlideLingo',
-      (_command, args) =>
-        args[0] === '--display'
-          ? { status: 0, stderr: 'Signature=adhoc\nTeamIdentifier=not set\n' }
-          : { status: 0 },
-    ),
-    false,
-  );
-});
-
-test('the updater never loads or checks in development, unsigned packages, or non-macOS builds', () => {
-  let loads = 0;
-  const common = {
-    app: { isPackaged: true },
-    dialog: {},
-    parentWindow: null,
-    executablePath: '/Applications/GlideLingo.app/Contents/MacOS/GlideLingo',
-    loadUpdater: () => { loads += 1; return createUpdater(); },
-    logger: { error() {} },
-  };
-
-  assert.equal(startMacUpdater({ ...common, platform: 'linux', verifySignature: () => true }), false);
-  assert.equal(startMacUpdater({ ...common, platform: 'darwin', verifySignature: () => false }), false);
-  assert.equal(
-    startMacUpdater({
-      ...common,
-      platform: 'darwin',
-      verifySignature: () => { throw new Error('codesign unavailable'); },
-    }),
-    false,
-  );
-  assert.equal(
-    startMacUpdater({
-      ...common,
-      platform: 'darwin',
-      developmentUrl: 'http://127.0.0.1:8081/',
-      verifySignature: () => true,
-    }),
-    false,
-  );
-  assert.equal(loads, 0);
-});
-
-test('available updates require explicit download and install confirmation', async () => {
-  const updater = createUpdater();
-  const responses = [1, 0, 1, 0];
-  const prompts = [];
-  const dialog = {
-    async showMessageBox(...args) {
-      const options = args.at(-1);
-      prompts.push(options);
-      return { response: responses.shift() };
-    },
-  };
-
-  installMacUpdater({
-    updater,
-    dialog,
-    parentWindow: { isDestroyed: () => false },
-    logger: { error() {} },
   });
-  await flushEvents();
+  const first = createPrivacyTestUpdater();
+  const second = createPrivacyTestUpdater();
 
-  assert.equal(updater.autoDownload, false);
+  configureUpdaterPrivacy(first, SUPPORTED_ELECTRON_UPDATER_VERSION);
+  configureUpdaterPrivacy(second, SUPPORTED_ELECTRON_UPDATER_VERSION);
+
+  assert.equal(defaultIdAccesses, 0);
+  assert.equal(await first.stagingUserIdPromise.value, SHARED_STAGING_USER_ID);
+  assert.equal(await second.stagingUserIdPromise.value, SHARED_STAGING_USER_ID);
+  assert.equal(first.stagingUserIdPromise, first.stagingUserIdPromise);
+  assert.notEqual(first.stagingUserIdPromise, second.stagingUserIdPromise);
+  assert.equal(typeof first.logger.error, 'function');
+  assert.throws(
+    () => configureUpdaterPrivacy(createPrivacyTestUpdater(), '6.9.0'),
+    /Unsupported electron-updater version/,
+  );
+});
+
+test('legacy updater ID cleanup targets only the exact known file and contains failures', async () => {
+  const removed = [];
+  assert.equal(await removeLegacyUpdaterId({
+    userDataPath: '/Users/example/Library/Application Support/GlideLingo',
+    unlinkImpl: async (target) => { removed.push(target); },
+  }), true);
+  assert.deepEqual(removed, [
+    '/Users/example/Library/Application Support/GlideLingo/.updaterId',
+  ]);
+  assert.equal(await removeLegacyUpdaterId({
+    userDataPath: 'relative/path',
+    unlinkImpl: async () => { throw new Error('must not run'); },
+  }), false);
+  assert.equal(await removeLegacyUpdaterId({
+    userDataPath: '/Users/example/Library/Application Support/GlideLingo',
+    unlinkImpl: async () => { throw new Error('missing or protected'); },
+  }), false);
+});
+
+test('closing a required-update window requests a real app quit', () => {
+  assert.equal(shouldQuitForRequiredUpdate({ getSnapshot: () => ({ required: true }) }), true);
+  assert.equal(shouldQuitForRequiredUpdate({ getSnapshot: () => ({ required: false }) }), false);
+  assert.equal(shouldQuitForRequiredUpdate(null), false);
+});
+
+test('policy fetch uses the strict public contract and a two-second timeout', async () => {
+  let requestedUrl;
+  let requestedOptions;
+  let timeoutDelay;
+  let cleared;
+  const minimum = await fetchMinimumSupportedVersion({
+    apiOrigin: 'https://api.example.test',
+    currentVersion: '1.2.3',
+    fetchImpl: async (url, options) => {
+      requestedUrl = url;
+      requestedOptions = options;
+      return { ok: true, json: async () => ({ minimum_supported_version: '1.1.0' }) };
+    },
+    setTimeoutImpl: (_callback, delay) => { timeoutDelay = delay; return 42; },
+    clearTimeoutImpl: (timer) => { cleared = timer; },
+  });
+
+  assert.equal(minimum, '1.1.0');
+  assert.equal(requestedUrl, 'https://api.example.test/v1/desktop/update-policy?current_version=1.2.3');
+  assert.deepEqual(requestedOptions.headers, { Accept: 'application/json' });
+  assert.equal(requestedOptions.method, 'GET');
+  assert.equal(requestedOptions.redirect, 'error');
+  assert.equal(timeoutDelay, POLICY_TIMEOUT_MS);
+  assert.equal(cleared, 42);
+});
+
+test('policy outage, timeout, and malformed responses fail open', async () => {
+  const outage = await fetchMinimumSupportedVersion({
+    apiOrigin: 'https://api.example.test',
+    currentVersion: '1.0.0',
+    fetchImpl: async () => { throw new Error('token=private'); },
+  });
+  assert.equal(outage, null);
+
+  const malformed = await fetchMinimumSupportedVersion({
+    apiOrigin: 'https://api.example.test',
+    currentVersion: '1.0.0',
+    fetchImpl: async () => ({ ok: true, json: async () => ({ minimum_supported_version: 'v2' }) }),
+  });
+  assert.equal(malformed, null);
+
+  let abort;
+  class FakeAbortController {
+    constructor() {
+      this.signal = {};
+      abort = () => this.reject?.(new Error('aborted private URL'));
+    }
+    abort() { abort(); }
+  }
+  let fireTimeout;
+  const timedOut = fetchMinimumSupportedVersion({
+    apiOrigin: 'https://api.example.test',
+    currentVersion: '1.0.0',
+    fetchImpl: (_url, options) => new Promise((_resolve, reject) => {
+      assert.ok(options.signal);
+      abort = () => reject(new Error('aborted private URL'));
+    }),
+    AbortControllerImpl: FakeAbortController,
+    setTimeoutImpl: (callback, delay) => { assert.equal(delay, 2_000); fireTimeout = callback; return 1; },
+    clearTimeoutImpl() {},
+  });
+  fireTimeout();
+  assert.equal(await timedOut, null);
+});
+
+test('coordinator publishes checking, download progress, ready, and sanitized snapshots', async () => {
+  const updater = createUpdater();
+  const logs = [];
+  const coordinator = createMacUpdateCoordinator({
+    updater,
+    currentVersion: '1.0.0',
+    getMinimumSupportedVersion: async () => '0.9.0',
+    logger: { info: (message) => logs.push(message) },
+  });
+  const snapshots = [];
+  coordinator.subscribe((snapshot) => snapshots.push(snapshot));
+
+  await coordinator.start();
+  updater.emit('update-available', { version: '1.1.0', releaseNotes: 'private' });
+  updater.emit('download-progress', { percent: 37.777, transferred: 123, bytesPerSecond: 456 });
+  updater.emit('update-downloaded', { version: '1.1.0', downloadedFile: '/private/path' });
+
+  assert.equal(updater.autoDownload, true);
   assert.equal(updater.autoInstallOnAppQuit, false);
-  assert.equal(updater.logger, null);
+  assert.equal(typeof updater.logger.error, 'function');
   assert.equal(updater.checks, 1);
+  assert.deepEqual(coordinator.getSnapshot(), {
+    phase: 'ready', required: false, currentVersion: '1.0.0', targetVersion: '1.1.0', percent: 100,
+  });
+  assert.ok(snapshots.some((snapshot) => snapshot.phase === 'checking'));
+  assert.ok(snapshots.some((snapshot) => snapshot.phase === 'downloading' && snapshot.percent === 37.8));
+  assert.deepEqual(logs, ['[desktop-update] currentVersion=1.0.0 required=false']);
+  assert.doesNotMatch(JSON.stringify(snapshots), /private|releaseNotes|downloadedFile|transferred/);
+});
 
-  updater.emit('update-available');
-  await flushEvents();
-  assert.equal(updater.downloads, 0);
+test('required policy blocks no-update and rejects a target below the minimum', async () => {
+  const updater = createUpdater();
+  let policyAvailable = true;
+  const coordinator = createMacUpdateCoordinator({
+    updater,
+    currentVersion: '1.0.0',
+    getMinimumSupportedVersion: async () => policyAvailable ? '2.0.0' : null,
+    logger: { info() {} },
+  });
 
-  updater.emit('update-available');
-  await flushEvents();
-  assert.equal(updater.downloads, 1);
+  await coordinator.start();
+  assert.equal(coordinator.getSnapshot().required, true);
+  updater.emit('update-not-available', { version: '1.0.0' });
+  assert.equal(coordinator.getSnapshot().phase, 'error');
 
-  updater.emit('update-downloaded');
-  await flushEvents();
-  assert.equal(updater.installs, 0);
+  policyAvailable = false;
+  const retrying = coordinator.retry();
+  assert.deepEqual(coordinator.getSnapshot(), {
+    phase: 'checking', required: true, currentVersion: '1.0.0', targetVersion: null, percent: 0,
+  });
+  await retrying;
+  updater.emit('update-available', { version: '1.5.0' });
+  assert.deepEqual(coordinator.getSnapshot(), {
+    phase: 'error', required: true, currentVersion: '1.0.0', targetVersion: null, percent: 0,
+  });
+  assert.equal(updater.checks, 2);
+});
 
-  updater.emit('update-downloaded');
-  await flushEvents();
+test('policy failures still run the optional updater check and raw errors are redacted', async () => {
+  const updater = createUpdater();
+  const logs = [];
+  const coordinator = createMacUpdateCoordinator({
+    updater,
+    currentVersion: '1.0.0',
+    getMinimumSupportedVersion: async () => { throw new Error('https://token@example.test/private'); },
+    logger: { info: (message) => logs.push(message) },
+  });
+
+  await coordinator.start();
+  updater.emit('error', new Error('feed=https://secret.example.test'));
+  assert.equal(updater.checks, 1);
+  assert.deepEqual(coordinator.getSnapshot(), {
+    phase: 'error', required: false, currentVersion: '1.0.0', targetVersion: null, percent: 0,
+  });
+  assert.deepEqual(logs, ['[desktop-update] currentVersion=1.0.0 required=false']);
+});
+
+test('retry is error-only and install is ready-only and idempotent', async () => {
+  const updater = createUpdater();
+  const coordinator = createMacUpdateCoordinator({
+    updater,
+    currentVersion: '1.0.0',
+    getMinimumSupportedVersion: async () => '0.0.0',
+    logger: { info() {} },
+  });
+
+  await coordinator.start();
+  assert.equal(await coordinator.retry(), false);
+  assert.equal(coordinator.restartAndInstall(), false);
+  updater.emit('error', new Error('private'));
+  assert.equal(await coordinator.retry(), true);
+  updater.emit('update-available', { version: '1.1.0' });
+  updater.emit('update-downloaded', { version: '1.1.0' });
+  assert.equal(coordinator.restartAndInstall(), true);
+  assert.equal(coordinator.restartAndInstall(), false);
   assert.equal(updater.installs, 1);
   assert.deepEqual(updater.installArguments, [false, true]);
-  assert.deepEqual(prompts.map((prompt) => prompt.cancelId), [1, 1, 1, 1]);
 });
 
-test('updater failures are contained and logged without remote error details', async () => {
+test('start performs one automatic check and never loads updater outside packaged macOS', async () => {
   const updater = createUpdater();
-  updater.checkForUpdates = async () => { throw new Error('https://token@example.test/secret'); };
-  const messages = [];
-
-  installMacUpdater({
-    updater,
-    dialog: {},
-    parentWindow: null,
-    logger: { error(message) { messages.push(message); } },
-  });
-  await flushEvents();
-  updater.emit('error', new Error('private updater response'));
-
-  assert.equal(messages.length, 2);
-  assert.ok(messages.every((message) => !/token|secret|private updater response/.test(message)));
-});
-
-test('user-confirmed download and install failures show a safe recovery message', async () => {
-  const updater = createUpdater();
-  updater.downloadUpdate = async () => { throw new Error('private download details'); };
-  updater.quitAndInstall = () => { throw new Error('private install details'); };
-  const prompts = [];
-  const messages = [];
-  const dialog = {
-    async showMessageBox(...args) {
-      const options = args.at(-1);
-      prompts.push(options);
-      return { response: 0 };
+  let loads = 0;
+  const common = {
+    app: { isPackaged: true, getPath: () => '/tmp/GlideLingo', getVersion: () => '1.0.0' },
+    apiOrigin: 'https://api.example.test',
+    fetchImpl: async () => ({ ok: true, json: async () => ({ minimum_supported_version: '0.0.0' }) }),
+    loadUpdater: () => { loads += 1; return updater; },
+    logger: { info() {}, error() {} },
+    removeLegacyUpdaterIdImpl: async ({ userDataPath }) => {
+      assert.equal(userDataPath, '/tmp/GlideLingo');
+      return true;
     },
   };
 
-  installMacUpdater({
-    updater,
-    dialog,
-    parentWindow: { isDestroyed: () => false },
-    logger: { error(message) { messages.push(message); } },
-  });
+  assert.equal(startMacUpdater({ ...common, platform: 'linux' }), null);
+  assert.equal(startMacUpdater({ ...common, developmentUrl: 'http://localhost:8081', platform: 'darwin' }), null);
+  const coordinator = startMacUpdater({ ...common, platform: 'darwin' });
+  assert.ok(coordinator);
   await flushEvents();
-
-  updater.emit('update-available');
-  await flushEvents();
-  await flushEvents();
-  updater.emit('update-downloaded');
-  await flushEvents();
-  await flushEvents();
-
-  const failurePrompts = prompts.filter(
-    (prompt) => prompt.title === 'GlideLingo update unavailable',
-  );
-  assert.equal(failurePrompts.length, 2);
-  assert.ok(failurePrompts.every((prompt) => /current version is unchanged/i.test(prompt.detail)));
-  assert.ok(messages.every((message) => !/private|details/.test(message)));
+  assert.equal(loads, 1);
+  assert.equal(updater.checks, 1);
 });
 
-test('an asynchronous native install error shows exactly one safe recovery message', async () => {
-  const updater = createUpdater();
-  const prompts = [];
-  const messages = [];
-  const dialog = {
-    async showMessageBox(...args) {
-      const options = args.at(-1);
-      prompts.push(options);
-      return { response: 0 };
-    },
+test('IPC rejects every non-exact sender and opens only the fixed official URL', async () => {
+  const handlers = new Map();
+  const sent = [];
+  const opened = [];
+  let openFails = false;
+  const webContents = { send: (...args) => sent.push(args) };
+  const window = { isDestroyed: () => false, webContents };
+  let subscriber;
+  const coordinator = {
+    getSnapshot: () => ({ phase: 'idle' }),
+    retry: () => 'retried',
+    restartAndInstall: () => 'installed',
+    subscribe: (listener) => { subscriber = listener; return () => { subscriber = null; }; },
   };
-
-  installMacUpdater({
-    updater,
-    dialog,
-    parentWindow: { isDestroyed: () => false },
-    logger: { error(message) { messages.push(message); } },
+  const ipcMain = {
+    handle: (channel, handler) => handlers.set(channel, handler),
+    removeHandler: (channel) => handlers.delete(channel),
+  };
+  const exact = (url) => {
+    try { return new URL(url).origin === 'https://desktop.glidelingo.com' && new URL(url).username === ''; }
+    catch { return false; }
+  };
+  const cleanup = registerDesktopUpdateIpc({
+    coordinator,
+    getWindow: () => window,
+    ipcMain,
+    isExactPackagedRendererUrl: exact,
+    shell: { openExternal: (url) => {
+      if (openFails) throw new Error('private OS path and token');
+      opened.push(url);
+    } },
   });
-  await flushEvents();
+  const validEvent = { sender: webContents, senderFrame: { url: 'https://desktop.glidelingo.com/quests' } };
 
-  updater.emit('update-downloaded');
-  await flushEvents();
-  assert.equal(updater.installs, 1);
+  assert.deepEqual(await handlers.get(UPDATE_CHANNELS.getSnapshot)(validEvent), { phase: 'idle' });
+  await handlers.get(UPDATE_CHANNELS.openOfficialDownloadPage)(validEvent);
+  assert.deepEqual(opened, [OFFICIAL_DOWNLOAD_PAGE_URL]);
+  openFails = true;
+  assert.equal(await handlers.get(UPDATE_CHANNELS.openOfficialDownloadPage)(validEvent), false);
+  await assert.rejects(() => handlers.get(UPDATE_CHANNELS.retry)(
+    { sender: webContents, senderFrame: { url: 'https://desktop.glidelingo.com.attacker.test/' } },
+  ), /denied/);
+  await assert.rejects(() => handlers.get(UPDATE_CHANNELS.retry)(validEvent, 'unexpected'), /denied/);
+  await assert.rejects(() => handlers.get(UPDATE_CHANNELS.retry)(
+    { sender: {}, senderFrame: { url: 'https://desktop.glidelingo.com/' } },
+  ), /denied/);
+  assert.equal(isAllowedUpdateSender(validEvent, () => window, exact), true);
 
-  updater.emit('error', new Error('private native install details'));
-  await flushEvents();
-  await flushEvents();
-  updater.emit('error', new Error('duplicate private native install details'));
-  await flushEvents();
-
-  const failurePrompts = prompts.filter(
-    (prompt) => prompt.title === 'GlideLingo update unavailable',
-  );
-  assert.equal(failurePrompts.length, 1);
-  assert.match(failurePrompts[0].detail, /current version is unchanged/i);
-  assert.equal(messages.length, 1);
-  assert.doesNotMatch(messages[0], /private|details/);
+  subscriber({ phase: 'ready', required: false });
+  assert.deepEqual(sent, [[UPDATE_CHANNELS.snapshot, { phase: 'ready', required: false }]]);
+  cleanup();
+  assert.equal(handlers.size, 0);
+  assert.equal(subscriber, null);
 });

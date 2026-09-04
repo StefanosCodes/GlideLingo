@@ -71,9 +71,9 @@ export function selectHomeNextAction({
 
   return {
     kind: 'complete',
-    eyebrow: 'PUBLISHED COURSE COMPLETE',
+    eyebrow: 'AVAILABLE LESSONS COMPLETE',
     title: 'See what you can now do',
-    outcome: 'Review your course completion and the evidence collected from your attempts.',
+    outcome: 'Review the evidence collected from your attempts while more lessons are authored.',
     durationLabel: `${Math.round(courseProgress * 100)}%`,
     progress: courseProgress,
     cta: 'View progress',

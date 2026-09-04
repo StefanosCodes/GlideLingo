@@ -3,7 +3,7 @@ import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { GlideSurface } from '@/components/ui/glide-surface';
-import { moduleStatus, type ModuleStatus } from '@/constants/catalog';
+import { isLessonAvailable, moduleStatus, type ModuleStatus } from '@/constants/catalog';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useLearning } from '@/providers/learning-provider';
@@ -128,8 +128,15 @@ export function ModuleTree({
           ? module.lessons.map((lesson, lessonIndex) => {
               const isLessonActive = activeLesson === lesson.id;
               const lessonDone = completedLessonIds.includes(lesson.id);
-              const lessonLocked = !lessonDone && nextLesson?.lesson.id !== lesson.id;
-              const lessonMeta = lessonDone ? 'Done' : lessonLocked ? 'Locked' : `${lesson.durationMin} min`;
+              const lessonAvailable = isLessonAvailable(lesson);
+              const lessonLocked = !lessonAvailable || (!lessonDone && nextLesson?.lesson.id !== lesson.id);
+              const lessonMeta = !lessonAvailable
+                ? 'Not available'
+                : lessonDone
+                  ? 'Done'
+                  : lessonLocked
+                    ? 'Locked'
+                    : `${lesson.durationMin} min`;
               return rail ? (
                 <Pressable
                   key={lesson.id}

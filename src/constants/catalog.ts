@@ -51,6 +51,7 @@ export type Lesson = {
   id: string;
   title: string;
   durationMin: number;
+  contentStatus?: 'authored' | 'placeholder';
   blocks?: LessonBlock[];
   beats?: SittingBeat[];
   reviewBeats?: SittingBeat[];
@@ -256,8 +257,13 @@ export function isLessonComplete(lessonId: string, completedLessonIds: string[])
   return completedLessonIds.includes(lessonId);
 }
 
+export function isLessonAvailable(lesson: Lesson) {
+  return lesson.contentStatus !== 'placeholder';
+}
+
 export function isModuleComplete(module: CourseModule, completedLessonIds: string[]) {
-  return module.lessons.length > 0 && module.lessons.every((lesson) => completedLessonIds.includes(lesson.id));
+  const availableLessons = module.lessons.filter(isLessonAvailable);
+  return availableLessons.length > 0 && availableLessons.every((lesson) => completedLessonIds.includes(lesson.id));
 }
 
 export function completedModuleIdsFor(course: Course, completedLessonIds: string[]) {
@@ -265,22 +271,31 @@ export function completedModuleIdsFor(course: Course, completedLessonIds: string
 }
 
 export function courseProgress(course: Course, completedLessonIds: string[]) {
-  const total = course.modules.reduce((count, module) => count + module.lessons.length, 0);
+  const total = course.modules.reduce(
+    (count, module) => count + module.lessons.filter(isLessonAvailable).length,
+    0,
+  );
   if (total === 0) return 0;
   const done = course.modules.reduce(
-    (count, module) => count + module.lessons.filter((lesson) => completedLessonIds.includes(lesson.id)).length,
+    (count, module) => count + module.lessons.filter(
+      (lesson) => isLessonAvailable(lesson) && completedLessonIds.includes(lesson.id),
+    ).length,
     0,
   );
   return done / total;
 }
 
 export function currentModule(course: Course, completedLessonIds: string[]) {
-  return course.modules.find((module) => !isModuleComplete(module, completedLessonIds)) ?? null;
+  return course.modules.find(
+    (module) => module.lessons.some(isLessonAvailable) && !isModuleComplete(module, completedLessonIds),
+  ) ?? null;
 }
 
 export function nextLesson(course: Course, completedLessonIds: string[]) {
   for (const module of course.modules) {
-    const lesson = module.lessons.find((item) => !completedLessonIds.includes(item.id));
+    const lesson = module.lessons.find(
+      (item) => isLessonAvailable(item) && !completedLessonIds.includes(item.id),
+    );
     if (lesson) return { module, lesson };
   }
   return null;

@@ -134,7 +134,7 @@ export default function HomeScreen() {
             ? 'Bring one useful pattern back.'
             : nextAction.kind === 'lesson'
               ? 'Keep your course moving.'
-              : 'Your published course is complete.'}
+              : 'You completed every lesson currently available.'}
         </ThemedText>
         <ThemedText type="body" themeColor="textSecondary" style={styles.introCopy}>
           One next action, chosen from your current course and review evidence.

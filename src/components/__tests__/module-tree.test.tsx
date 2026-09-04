@@ -29,6 +29,12 @@ jest.mock('@/providers/learning-provider', () => ({
           canDo: 'I can continue.',
           lessons: [{ id: 'lesson-two', title: 'Locked lesson', durationMin: 8 }],
         },
+        {
+          id: 'unit-three',
+          title: 'Unauthored unit',
+          canDo: 'I can continue later.',
+          lessons: [{ id: 'lesson-three', title: 'Placeholder lesson', durationMin: 8, contentStatus: 'placeholder' }],
+        },
       ],
     },
     nextLesson: { lesson: { id: 'lesson-one' }, module: { id: 'unit-one' } },
@@ -44,5 +50,17 @@ test('marks future lessons locked and prevents opening them', async () => {
 
   expect(locked.props.accessibilityState).toMatchObject({ disabled: true });
   await fireEvent.press(locked);
+  expect(mockSelectLesson).not.toHaveBeenCalled();
+});
+
+test('marks placeholder lessons unavailable and prevents opening them', async () => {
+  mockSelectLesson.mockClear();
+  const screen = await render(<ModuleTree density="page" onSelectLesson={mockSelectLesson} />);
+
+  await fireEvent.press(screen.getByLabelText('Unauthored unit. Upcoming'));
+  const unavailable = screen.getByLabelText('Placeholder lesson. Not available');
+
+  expect(unavailable.props.accessibilityState).toMatchObject({ disabled: true });
+  await fireEvent.press(unavailable);
   expect(mockSelectLesson).not.toHaveBeenCalled();
 });

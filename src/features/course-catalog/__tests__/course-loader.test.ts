@@ -1,6 +1,14 @@
 import { expect, test } from '@jest/globals';
 
-import { courses, findLesson } from '@/constants/catalog';
+import {
+  courseProgress,
+  courses,
+  currentModule,
+  findLesson,
+  isLessonAvailable,
+  moduleStatus,
+  nextLesson,
+} from '@/constants/catalog';
 import { phrasesForCourse } from '@/constants/reference-content';
 import {
   CoursePackageLoadError,
@@ -98,6 +106,22 @@ test('the compatibility catalog renders the current Greek lesson from package ac
     canDo: 'I can recognize α, ε, and ι in a new Greek syllable.',
     mode: 'reading',
   });
+});
+
+test('draft placeholder metadata never becomes the next lesson or inflates available progress', () => {
+  const course = courses[0];
+  const authoredLesson = findLesson('el-letters-1')?.lesson;
+  const placeholderLesson = findLesson('el-letters-2')?.lesson;
+
+  expect(authoredLesson && isLessonAvailable(authoredLesson)).toBe(true);
+  expect(placeholderLesson && isLessonAvailable(placeholderLesson)).toBe(false);
+  expect(nextLesson(course, [])?.lesson.id).toBe('el-letters-1');
+
+  const afterAuthoredLesson = ['el-letters-1'];
+  expect(nextLesson(course, afterAuthoredLesson)).toBeNull();
+  expect(currentModule(course, afterAuthoredLesson)).toBeNull();
+  expect(courseProgress(course, afterAuthoredLesson)).toBe(1);
+  expect(moduleStatus(course, 'el-introduce', afterAuthoredLesson)).toBe('upcoming');
 });
 
 test('legacy catalog metadata and phrase extraction remain compatible', () => {

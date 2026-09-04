@@ -19,7 +19,9 @@ import {
   currentModule,
   getCourse,
   getCoursesForLanguage,
+  getLesson,
   getLanguage,
+  isLessonAvailable,
   languages,
   nextLesson,
 } from '@/constants/catalog';
@@ -340,11 +342,12 @@ export function LearningProvider({
 
   const openLesson = useCallback(
     (lessonId: string | null, mode: LessonMode = 'learn') => {
-      setActiveLessonId(lessonId);
-      setActiveLessonMode(lessonId ? mode : 'learn');
-      if (lessonId && enrolledCourse) {
-        const found = enrolledCourse.modules.find((module) => module.lessons.some((lesson) => lesson.id === lessonId));
-        if (found) setFocusedModuleId(found.id);
+      const found = lessonId && enrolledCourse ? getLesson(enrolledCourse, lessonId) : null;
+      const availableLessonId = found && isLessonAvailable(found.lesson) ? lessonId : null;
+      setActiveLessonId(availableLessonId);
+      setActiveLessonMode(availableLessonId ? mode : 'learn');
+      if (availableLessonId && found) {
+        setFocusedModuleId(found.module.id);
       }
     },
     [enrolledCourse],

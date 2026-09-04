@@ -92,6 +92,7 @@ function adaptLesson(
       id: found.lesson.id,
       title: found.lesson.title,
       durationMin: found.lesson.durationMinutes,
+      contentStatus: 'authored',
       blocks: presentation.blocks,
       beats: found.lesson.activities.filter((activity) => activity.phase !== 'revisit').map(asSittingBeat),
       reviewBeats: found.lesson.activities.filter((activity) => activity.phase === 'revisit').map(asSittingBeat),
@@ -113,11 +114,12 @@ export function bridgeCoursePackageLesson(
     return {
       ...course,
       modules: course.modules.map((module) => {
-        if (module.id !== adapted.moduleId) return module;
         return {
           ...module,
           lessons: module.lessons.map((lesson) => {
-            if (lesson.id !== adapted.lesson.id) return lesson;
+            if (module.id !== adapted.moduleId || lesson.id !== adapted.lesson.id) {
+              return { ...lesson, contentStatus: 'placeholder' as const };
+            }
             replaced = true;
             return adapted.lesson;
           }),

@@ -5,7 +5,7 @@ import { ScreenFrame } from '@/components/screen-frame';
 import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
-import { getCourse } from '@/constants/catalog';
+import { getCourse, isLessonAvailable } from '@/constants/catalog';
 import { Spacing } from '@/constants/theme';
 import { useLearning } from '@/providers/learning-provider';
 
@@ -38,6 +38,10 @@ export default function CoursePreviewScreen() {
 
   const live = language.available && course.languageId === language.id;
   const enrolled = enrolledCourse?.id === course.id;
+  const availableLessonCount = course.modules.reduce(
+    (sum, module) => sum + module.lessons.filter(isLessonAvailable).length,
+    0,
+  );
 
   return (
     <ScreenFrame>
@@ -73,12 +77,11 @@ export default function CoursePreviewScreen() {
           STRUCTURE
         </ThemedText>
         <ThemedText type="title3">
-          {course.modules.length} quests · {course.modules.reduce((sum, module) => sum + module.lessons.length, 0)}{' '}
-          lessons
+          {course.modules.length} units · {availableLessonCount} available {availableLessonCount === 1 ? 'lesson' : 'lessons'}
         </ThemedText>
         <ThemedText type="footnote" themeColor="textSecondary">
-          Each quest is a real-world job. Lessons inside it stay 8–15 minutes. The path is authored, not generated
-          when you start.
+          Each unit builds toward a real-world ability. Future lesson outlines remain unavailable until their
+          learning content is authored and reviewed.
         </ThemedText>
       </GlideSurface>
 

@@ -83,6 +83,44 @@ function Probe() {
   );
 }
 
+function LessonAccessProbe() {
+  const { activeLessonId, openLesson } = useLearning();
+  return (
+    <>
+      <Text testID="active-lesson">{activeLessonId ?? 'none'}</Text>
+      <Pressable accessibilityLabel="Open authored lesson" onPress={() => openLesson('el-letters-1')} />
+      <Pressable accessibilityLabel="Open placeholder lesson" onPress={() => openLesson('el-letters-2')} />
+    </>
+  );
+}
+
+test('provider refuses to activate a placeholder lesson', async () => {
+  storage.set(
+    learningStorageKey('user-a'),
+    JSON.stringify({
+      version: 2,
+      languageId: 'el',
+      enrolledByLanguage: { el: 'el-from-zero' },
+      completedLessonIds: [],
+      lessonEvidence: [],
+      practiceDayKeys: [],
+      weeklyGoalChanges: [],
+      fieldWrites: {},
+    }),
+  );
+  const screen = await render(
+    <LearningProvider storageScope="user-a">
+      <LessonAccessProbe />
+    </LearningProvider>,
+  );
+
+  await fireEvent.press(screen.getByLabelText('Open authored lesson'));
+  expect(screen.getByTestId('active-lesson').props.children).toBe('el-letters-1');
+
+  await fireEvent.press(screen.getByLabelText('Open placeholder lesson'));
+  expect(screen.getByTestId('active-lesson').props.children).toBe('none');
+});
+
 test('provider records at most one meaningful day per local date in the scoped V2 store', async () => {
   const screen = await render(
     <LearningProvider storageScope="user-a">

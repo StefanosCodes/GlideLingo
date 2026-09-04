@@ -110,11 +110,11 @@ export default function CourseScreen() {
       ) : (
         <GlideSurface padding="roomy" style={styles.currentUnit} variant="success">
           <ThemedText type="eyebrow" themeColor="textSecondary">
-            PUBLISHED COURSE COMPLETE
+            AVAILABLE LESSONS COMPLETE
           </ThemedText>
-          <ThemedText type="title2">Every published unit is behind you.</ThemedText>
+          <ThemedText type="title2">You have completed everything available today.</ThemedText>
           <ThemedText type="callout" themeColor="textSecondary">
-            Progress shows what your attempts demonstrated. Completion alone is not presented as mastery.
+            More lessons are still being authored. Progress shows only what your attempts demonstrated.
           </ThemedText>
         </GlideSurface>
       )}

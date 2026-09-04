@@ -54,12 +54,12 @@ export type PhraseReference = {
   audioId?: AudioClipId;
   lessonId: string;
   lessonTitle: string;
-  questTitle: string;
+  unitTitle: string;
 };
 
 export function phrasesForCourse(course: Course): PhraseReference[] {
-  return course.modules.flatMap((quest) =>
-    quest.lessons.flatMap((lesson) =>
+  return course.modules.flatMap((unit) =>
+    unit.lessons.flatMap((lesson) =>
       (lesson.blocks ?? []).flatMap((block, index) => {
         if (block.type !== 'example' || block.greek.includes('·')) return [];
         return [{
@@ -69,7 +69,7 @@ export function phrasesForCourse(course: Course): PhraseReference[] {
           audioId: block.audioId,
           lessonId: lesson.id,
           lessonTitle: lesson.title,
-          questTitle: quest.title,
+          unitTitle: unit.title,
         }];
       }),
     ),

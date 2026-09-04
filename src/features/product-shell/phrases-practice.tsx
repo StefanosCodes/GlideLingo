@@ -110,7 +110,7 @@ function PhraseCard({
   return (
     <GlideSurface padding="roomy" style={styles.phraseCard}>
       <ThemedText type="eyebrow" themeColor="textSecondary">
-        {phrase.questTitle.toUpperCase()}
+        {phrase.unitTitle.toUpperCase()}
       </ThemedText>
       <View style={styles.phraseCopy}>
         <ThemedText type="title">{phrase.greek}</ThemedText>

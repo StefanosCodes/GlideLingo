@@ -138,6 +138,18 @@ test.each(['close', 'error'] as const)(
     ]);
     transport.setMuted(false);
     expect(fake.track.enabled).toBe(true);
+    transport.setMuted(false);
+    transport.setMuted(true);
+    transport.setMuted(true);
+    transport.setMuted(false);
+    transport.setMuted(true, false);
+    expect(fake.track.enabled).toBe(false);
+    expect(fake.channel.send.mock.calls.map(([value]) => JSON.parse(value as string).type)).toEqual([
+      'response.cancel',
+      'output_audio_buffer.clear',
+      'input_audio_buffer.commit',
+      'response.create',
+    ]);
 
     fake.channel.emit('message', { data: JSON.stringify({ type: 'response.done' }) });
     expect(onEvent).toHaveBeenCalledWith({ type: 'response.done' });

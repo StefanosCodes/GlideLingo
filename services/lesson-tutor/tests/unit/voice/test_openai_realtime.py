@@ -92,7 +92,8 @@ def test_creates_audio_only_call_and_retains_cleanup_reference() -> None:
         audio = session["audio"]
         assert isinstance(audio, dict)
         assert audio["input"] == {
-            "transcription": {"model": "gpt-4o-mini-transcribe", "language": "el"}
+            "transcription": {"model": "gpt-4o-mini-transcribe", "language": "el"},
+            "turn_detection": None,
         }
         assert "mastery" in str(session["instructions"])
 
@@ -239,7 +240,10 @@ def test_disabled_captions_omit_input_transcription() -> None:
         assert client.calls.create_kwargs is not None
         session = client.calls.create_kwargs["session"]
         assert isinstance(session, dict)
-        assert session["audio"] == {"output": {"voice": "configured-voice"}}
+        assert session["audio"] == {
+            "input": {"turn_detection": None},
+            "output": {"voice": "configured-voice"},
+        }
 
     asyncio.run(run())
 

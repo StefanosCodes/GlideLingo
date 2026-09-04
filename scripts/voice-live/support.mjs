@@ -390,6 +390,12 @@ export function safeFailureEvidence(value) {
     responseCompletedCount: boundedCount(evidence.responseCompletedCount),
     receivedEventCount: boundedCount(evidence.receivedEventCount),
     sessionCreatedObserved: evidence.sessionCreatedObserved === true,
+    sessionModelMatches: evidence.sessionModelMatches === true,
+    sessionVoiceMatches: evidence.sessionVoiceMatches === true,
+    transcriptionModelMatches: evidence.transcriptionModelMatches === true,
+    toolsDisabled: evidence.toolsDisabled === true,
+    toolChoiceNone: evidence.toolChoiceNone === true,
+    turnDetectionDisabled: evidence.turnDetectionDisabled === true,
     outboundAudioBytes: boundedCount(evidence.outboundAudioBytes, 100_000_000),
     outboundAudioEnergyObserved: evidence.outboundAudioEnergyObserved === true,
   };

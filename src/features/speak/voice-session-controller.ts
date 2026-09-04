@@ -254,7 +254,7 @@ export class VoiceSessionController {
           ++this.generation;
           const disconnected = this.transport;
           this.transport = null;
-          disconnected?.setMuted(true);
+          disconnected?.setMuted(true, false);
           disconnected?.close();
           this.dispatch({ type: 'connection-lost' });
         }
@@ -263,7 +263,7 @@ export class VoiceSessionController {
         if (this.generation !== generation) return;
         if (this.sequence >= MAX_PROVIDER_EVENT_SEQUENCE) {
           ++this.generation;
-          this.transport?.setMuted(true);
+          this.transport?.setMuted(true, false);
           this.transport?.close();
           this.transport = null;
           this.dispatch({ type: 'failed', code: 'provider_event_limit' });
@@ -279,7 +279,7 @@ export class VoiceSessionController {
         this.dispatch({ type: 'provider-event', event });
         if (event.type === 'session.failed') {
           ++this.generation;
-          this.transport?.setMuted(true);
+          this.transport?.setMuted(true, false);
           this.transport?.close();
           this.transport = null;
           void this.stopAdmission(admission, 'failed');

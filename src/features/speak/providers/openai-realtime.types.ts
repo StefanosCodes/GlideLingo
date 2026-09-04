@@ -6,7 +6,7 @@ export type RealtimeTransport = {
   admission: VoiceSessionAdmission;
   close: () => void;
   interrupt: () => boolean;
-  setMuted: (muted: boolean) => void;
+  setMuted: (muted: boolean, submitTurn?: boolean) => void;
 };
 
 export type PreparedRealtimeConnection = {

@@ -255,7 +255,7 @@ test('connection loss mutes immediately and reconnect failure closes both transp
   await controller.start({ ...REQUEST, client_capabilities: [...REQUEST.client_capabilities] });
   controller.setMuted(false);
   connectionLost?.();
-  expect(oldSetMuted).toHaveBeenLastCalledWith(true);
+  expect(oldSetMuted).toHaveBeenLastCalledWith(true, false);
   expect(oldClose).toHaveBeenCalledTimes(1);
   expect(controller.snapshot).toMatchObject({ lifecycle: 'reconnecting', muted: true });
 
@@ -388,7 +388,7 @@ test('a terminal provider error closes media and requests server cleanup', async
   rawEvent?.({ type: 'error', event_id: 'evt_provider_error', error: { code: 'server_error' } });
   await Promise.resolve();
 
-  expect(setMuted).toHaveBeenCalledWith(true);
+  expect(setMuted).toHaveBeenCalledWith(true, false);
   expect(close).toHaveBeenCalledTimes(1);
   expect(end).toHaveBeenCalledTimes(1);
   expect(controller.snapshot).toMatchObject({ lifecycle: 'failed', failureCode: 'provider_failed' });
@@ -533,7 +533,7 @@ test('untrusted provider event volume cannot exceed the server sequence bound or
     failureCode: 'provider_event_limit',
   });
   expect(close).toHaveBeenCalledTimes(1);
-  expect(setMuted).toHaveBeenCalledWith(true);
+  expect(setMuted).toHaveBeenCalledWith(true, false);
   expect(end).toHaveBeenCalledTimes(1);
   const sent = end.mock.calls[0]?.[1].events ?? [];
   expect(Math.max(...sent.map((event) => event.sequence))).toBe(10_000);

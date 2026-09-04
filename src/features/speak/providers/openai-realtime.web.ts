@@ -21,6 +21,7 @@ export async function connectOpenAIRealtime({
   const { dataChannel, microphoneStream, peer } = prepared;
   let closed = false;
   let connectionLost = false;
+  let inputMuted = true;
   const remoteAudio = document.createElement('audio');
   remoteAudio.autoplay = true;
   remoteAudio.setAttribute('aria-hidden', 'true');
@@ -85,10 +86,16 @@ export async function connectOpenAIRealtime({
       dataChannel.send(JSON.stringify({ type: 'output_audio_buffer.clear' }));
       return true;
     },
-    setMuted(muted: boolean) {
+    setMuted(muted: boolean, submitTurn = true) {
+      const finishedTurn = !inputMuted && muted && submitTurn;
+      inputMuted = muted;
       microphoneStream.getAudioTracks().forEach((track) => {
         track.enabled = !muted;
       });
+      if (finishedTurn && !closed && dataChannel.readyState === 'open') {
+        dataChannel.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+        dataChannel.send(JSON.stringify({ type: 'response.create' }));
+      }
     },
   };
 }

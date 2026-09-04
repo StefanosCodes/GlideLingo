@@ -43,13 +43,14 @@ class OpenAIRealtimeVoiceAdapter:
     ) -> tuple[str, str, VoiceSessionSpec]:
         if _ACTOR_REF.fullmatch(actor_ref) is None:
             raise ValueError("actor_ref must be a voice-scoped pseudonym")
-        audio: RealtimeAudioConfigParam = {"output": {"voice": spec.voice_id}}
+        audio: RealtimeAudioConfigParam = {
+            "input": {"turn_detection": None},
+            "output": {"voice": spec.voice_id},
+        }
         if captions_enabled:
-            audio["input"] = {
-                "transcription": {
-                    "model": "gpt-4o-mini-transcribe",
-                    "language": spec.target_locale.partition("-")[0],
-                }
+            audio["input"]["transcription"] = {
+                "model": "gpt-4o-mini-transcribe",
+                "language": spec.target_locale.partition("-")[0],
             }
         session: RealtimeSessionCreateRequestParam = {
             "type": "realtime",

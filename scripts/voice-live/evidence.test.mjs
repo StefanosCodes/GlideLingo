@@ -9,7 +9,10 @@ const sessionCreated = {
     model: 'gpt-realtime-2.1',
     audio: {
       output: { voice: 'marin' },
-      input: { transcription: { model: 'gpt-4o-mini-transcribe' } },
+      input: {
+        transcription: { model: 'gpt-4o-mini-transcribe' },
+        turn_detection: null,
+      },
     },
     tools: [],
     tool_choice: 'none',
@@ -37,6 +40,7 @@ test('evidence waits for asynchronous transcript and audio signals in any order'
   tracker.observeEvent({ type: 'response.output_audio_transcript.done', transcript: 'Try alpha.' });
   await tracker.complete;
   assert.equal(tracker.snapshot().learnerTranscriptFinalCount, 1);
+  assert.equal(tracker.diagnostics().turnDetectionDisabled, true);
   assert.equal(JSON.stringify(tracker.diagnostics()).includes('άλφα'), false);
 });
 

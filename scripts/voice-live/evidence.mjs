@@ -13,6 +13,12 @@ export function createEvidenceTracker({ model, voice }) {
     responseCompletedCount: 0,
     receivedEventCount: 0,
     sessionCreatedObserved: false,
+    sessionModelMatches: false,
+    sessionVoiceMatches: false,
+    transcriptionModelMatches: false,
+    toolsDisabled: false,
+    toolChoiceNone: false,
+    turnDetectionDisabled: false,
   };
   let resolveComplete;
   let rejectComplete;
@@ -74,12 +80,20 @@ export function createEvidenceTracker({ model, voice }) {
       if (event.type === 'session.created') {
         state.sessionCreatedObserved = true;
         const session = event.session;
+        state.sessionModelMatches = session?.model === model;
+        state.sessionVoiceMatches = session?.audio?.output?.voice === voice;
+        state.transcriptionModelMatches =
+          session?.audio?.input?.transcription?.model === 'gpt-4o-mini-transcribe';
+        state.toolsDisabled = Array.isArray(session?.tools) && session.tools.length === 0;
+        state.toolChoiceNone = session?.tool_choice === 'none';
+        state.turnDetectionDisabled = session?.audio?.input?.turn_detection === null;
         state.providerConfigurationObserved =
-          session?.model === model &&
-          session?.audio?.output?.voice === voice &&
-          session?.audio?.input?.transcription?.model === 'gpt-4o-mini-transcribe' &&
-          Array.isArray(session?.tools) && session.tools.length === 0 &&
-          session?.tool_choice === 'none';
+          state.sessionModelMatches &&
+          state.sessionVoiceMatches &&
+          state.transcriptionModelMatches &&
+          state.toolsDisabled &&
+          state.toolChoiceNone &&
+          state.turnDetectionDisabled;
         maybeComplete();
       }
       if (event.type === 'conversation.item.input_audio_transcription.completed') {
@@ -131,6 +145,12 @@ export function createEvidenceTracker({ model, voice }) {
         responseCompletedCount: state.responseCompletedCount,
         receivedEventCount: state.receivedEventCount,
         sessionCreatedObserved: state.sessionCreatedObserved,
+        sessionModelMatches: state.sessionModelMatches,
+        sessionVoiceMatches: state.sessionVoiceMatches,
+        transcriptionModelMatches: state.transcriptionModelMatches,
+        toolsDisabled: state.toolsDisabled,
+        toolChoiceNone: state.toolChoiceNone,
+        turnDetectionDisabled: state.turnDetectionDisabled,
       };
     },
   };

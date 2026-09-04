@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "GlideLingo FastAPI service"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+  "cryptography>=50,<51",
   "fastapi[standard-no-fastapi-cloud-cli]>=0.116,<1",
   "pydantic-settings>=2.10,<3",
   "psycopg[binary]>=3.2,<4",

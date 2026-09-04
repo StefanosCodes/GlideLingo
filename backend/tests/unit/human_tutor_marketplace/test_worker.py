@@ -1,0 +1,175 @@
+import asyncio
+from typing import Any, cast
+
+import pytest
+
+from app.modules.human_tutor_marketplace.booking import BookingService
+from app.modules.human_tutor_marketplace.calendar import CalendarService
+from app.modules.human_tutor_marketplace.lifecycle import LifecycleService
+from app.modules.human_tutor_marketplace.messaging import MessagingService
+from app.workers.marketplace import MarketplaceJobProcessor, _arguments, run_worker
+
+
+class Runner:
+    def __init__(self, outcomes: list[bool]) -> None:
+        self.outcomes = outcomes
+        self.workers: list[str] = []
+
+    async def run_one_job(self, *, worker: str) -> bool:
+        self.workers.append(worker)
+        return self.outcomes.pop(0)
+
+
+class JobComponents:
+    def __init__(self, completed: str | None) -> None:
+        self.completed = completed
+        self.calls: list[str] = []
+
+    async def expire_holds(self, **kwargs: Any) -> int:
+        self.calls.append("expiry")
+        return int(self.completed == "expiry")
+
+    async def run_one_reconciliation_job(self, **kwargs: Any) -> bool:
+        self.calls.append("reconciliation")
+        return self.completed == "reconciliation"
+
+    async def run_one_connect_refresh_job(self, **kwargs: Any) -> bool:
+        self.calls.append("connect_refresh")
+        return self.completed == "connect_refresh"
+
+    async def run_one_money_job(self, **kwargs: Any) -> bool:
+        self.calls.append("money")
+        return self.completed == "money"
+
+    async def run_one_reminder_job(self, **kwargs: Any) -> bool:
+        self.calls.append("reminder")
+        return self.completed == "reminder"
+
+    async def run_one_notification_job(self, **kwargs: Any) -> bool:
+        self.calls.append("notification")
+        return self.completed == "notification"
+
+    async def run_one_refresh_job(self, **kwargs: Any) -> bool:
+        self.calls.append("calendar")
+        return self.completed == "calendar"
+
+    async def run_retention_batch(self, **kwargs: Any) -> bool:
+        self.calls.append("retention")
+        return self.completed == "retention"
+
+    async def run_provider_retention_batch(self, **kwargs: Any) -> bool:
+        self.calls.append("provider_retention")
+        return self.completed == "provider_retention"
+
+
+def processor(
+    components: JobComponents, *, commerce_enabled: bool = True
+) -> MarketplaceJobProcessor:
+    return MarketplaceJobProcessor(
+        booking=cast(BookingService, components),
+        lifecycle=cast(LifecycleService, components),
+        messaging=cast(MessagingService, components),
+        calendar=cast(CalendarService, components),
+        commerce_enabled=commerce_enabled,
+    )
+
+
+def test_one_shot_worker_processes_at_most_one_claim() -> None:
+    runner = Runner([True, True])
+
+    asyncio.run(
+        run_worker(
+            runner,
+            worker="test-worker",
+            once=True,
+            poll_seconds=0.01,
+            stop=asyncio.Event(),
+        )
+    )
+
+    assert runner.outcomes == [True]
+    assert runner.workers == ["test-worker"]
+
+
+def test_worker_honors_shutdown_while_idle() -> None:
+    runner = Runner([False])
+    stop = asyncio.Event()
+
+    async def exercise() -> None:
+        task = asyncio.create_task(
+            run_worker(
+                runner,
+                worker="test-worker",
+                once=False,
+                poll_seconds=30,
+                stop=stop,
+            )
+        )
+        await asyncio.sleep(0)
+        stop.set()
+        await asyncio.wait_for(task, timeout=1)
+
+    asyncio.run(exercise())
+    assert runner.workers == ["test-worker"]
+
+
+def test_worker_arguments_bound_poll_interval() -> None:
+    assert _arguments(["--once", "--poll-seconds", "0.5"]).once is True
+    with pytest.raises(SystemExit):
+        _arguments(["--poll-seconds", "61"])
+
+
+def test_processor_services_every_durable_queue_in_each_bounded_poll() -> None:
+    components = JobComponents("reminder")
+
+    assert asyncio.run(processor(components).run_one_job(worker="worker-a")) is True
+    assert components.calls == [
+        "connect_refresh",
+        "reconciliation",
+        "expiry",
+        "money",
+        "reminder",
+        "notification",
+        "calendar",
+        "provider_retention",
+        "retention",
+    ]
+
+
+def test_processor_reaches_calendar_and_retention_when_earlier_queues_are_idle() -> None:
+    components = JobComponents(None)
+
+    assert asyncio.run(processor(components).run_one_job(worker="worker-a")) is False
+    assert components.calls == [
+        "connect_refresh",
+        "reconciliation",
+        "expiry",
+        "money",
+        "reminder",
+        "notification",
+        "calendar",
+        "provider_retention",
+        "retention",
+    ]
+
+
+def test_processor_skips_commerce_queues_during_staged_activation() -> None:
+    components = JobComponents("calendar")
+
+    assert (
+        asyncio.run(processor(components, commerce_enabled=False).run_one_job(worker="worker-a"))
+        is True
+    )
+    assert components.calls == ["notification", "calendar", "provider_retention", "retention"]
+
+
+def test_processor_does_not_starve_lower_queues_behind_reconciliation_work() -> None:
+    components = JobComponents("reconciliation")
+
+    assert asyncio.run(processor(components).run_one_job(worker="worker-a")) is True
+    assert components.calls[-4:] == [
+        "notification",
+        "calendar",
+        "provider_retention",
+        "retention",
+    ]

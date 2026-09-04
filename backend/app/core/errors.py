@@ -22,6 +22,11 @@ type ErrorCode = Literal[
     "lesson_tutor_limited",
     "pro_required",
     "billing_unavailable",
+    "human_tutor_marketplace_unavailable",
+    "human_tutor_marketplace_forbidden",
+    "tutor_application_not_found",
+    "tutor_application_conflict",
+    "marketplace_message_limited",
 ]
 
 
@@ -73,6 +78,26 @@ class ProRequiredError(Exception):
 
 class BillingUnavailableError(Exception):
     """Billing cannot currently establish a fresh authorization decision."""
+
+
+class HumanTutorMarketplaceUnavailableError(Exception):
+    """The human tutor marketplace is disabled or unavailable."""
+
+
+class HumanTutorMarketplaceForbiddenError(Exception):
+    """The verified principal lacks access to the requested marketplace action."""
+
+
+class TutorApplicationNotFoundError(Exception):
+    """The scoped tutor application does not exist."""
+
+
+class TutorApplicationConflictError(Exception):
+    """The tutor application cannot make the requested state transition."""
+
+
+class MarketplaceMessageLimitedError(Exception):
+    """A bounded marketplace messaging rate limit rejected the request."""
 
 
 def error_response(
@@ -163,6 +188,55 @@ async def billing_unavailable_handler(request: Request, _error: Exception) -> JS
         status_code=503,
         code="billing_unavailable",
         message="Billing authorization is unavailable.",
+        request_id=request.state.request_id,
+    )
+
+
+async def human_tutor_marketplace_unavailable_handler(
+    request: Request, _error: Exception
+) -> JSONResponse:
+    return error_response(
+        status_code=503,
+        code="human_tutor_marketplace_unavailable",
+        message="The human tutor marketplace is unavailable.",
+        request_id=request.state.request_id,
+    )
+
+
+async def human_tutor_marketplace_forbidden_handler(
+    request: Request, _error: Exception
+) -> JSONResponse:
+    return error_response(
+        status_code=403,
+        code="human_tutor_marketplace_forbidden",
+        message="This marketplace action is not available for this account.",
+        request_id=request.state.request_id,
+    )
+
+
+async def tutor_application_not_found_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=404,
+        code="tutor_application_not_found",
+        message="The tutor application could not be found.",
+        request_id=request.state.request_id,
+    )
+
+
+async def tutor_application_conflict_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=409,
+        code="tutor_application_conflict",
+        message="The tutor application changed or cannot make this transition.",
+        request_id=request.state.request_id,
+    )
+
+
+async def marketplace_message_limited_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=429,
+        code="marketplace_message_limited",
+        message="The messaging limit has been reached. Try again later.",
         request_id=request.state.request_id,
     )
 

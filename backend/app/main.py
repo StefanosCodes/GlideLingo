@@ -15,22 +15,32 @@ from app.core.errors import (
     AuthenticationUnavailableError,
     BillingUnavailableError,
     DependencyUnavailableError,
+    HumanTutorMarketplaceForbiddenError,
+    HumanTutorMarketplaceUnavailableError,
     InternalErrorMiddleware,
     LessonContextNotFoundError,
     LessonTutorConflictError,
     LessonTutorLimitedError,
     LessonTutorTimeoutError,
     LessonTutorUnavailableError,
+    MarketplaceMessageLimitedError,
     ProRequiredError,
+    TutorApplicationConflictError,
+    TutorApplicationNotFoundError,
     authentication_unavailable_handler,
     billing_unavailable_handler,
     dependency_unavailable_handler,
+    human_tutor_marketplace_forbidden_handler,
+    human_tutor_marketplace_unavailable_handler,
     lesson_context_not_found_handler,
     lesson_tutor_conflict_handler,
     lesson_tutor_limited_handler,
     lesson_tutor_timeout_handler,
     lesson_tutor_unavailable_handler,
+    marketplace_message_limited_handler,
     pro_required_handler,
+    tutor_application_conflict_handler,
+    tutor_application_not_found_handler,
 )
 from app.core.logging import configure_logging
 from app.core.request_id import REQUEST_ID_HEADER, RequestIdMiddleware
@@ -40,6 +50,43 @@ from app.integrations.revenuecat.client import RevenueCatHttpClient
 from app.modules.billing.repository import PostgresEntitlementRepository
 from app.modules.billing.router import router as billing_router
 from app.modules.billing.service import BillingService
+from app.modules.human_tutor_marketplace.booking import (
+    BookingService,
+    PostgresBookingRepository,
+    StripeHttpMarketplaceProvider,
+)
+from app.modules.human_tutor_marketplace.calendar import (
+    CalendarService,
+    CalendarTokenCipher,
+    GoogleCalendarHttpAdapter,
+    PostgresCalendarRepository,
+    decode_calendar_encryption_key,
+)
+from app.modules.human_tutor_marketplace.discovery import (
+    MarketplaceDiscoveryService,
+    PostgresDiscoveryRepository,
+)
+from app.modules.human_tutor_marketplace.learning_bridge import (
+    LearningBridgeService,
+    PostgresLearningBridgeRepository,
+)
+from app.modules.human_tutor_marketplace.lifecycle import (
+    LifecycleService,
+    PostgresLifecycleRepository,
+)
+from app.modules.human_tutor_marketplace.messaging import (
+    MessagingService,
+    PostgresMessagingRepository,
+)
+from app.modules.human_tutor_marketplace.repository import (
+    PostgresTutorApplicationRepository,
+)
+from app.modules.human_tutor_marketplace.router import (
+    router as human_tutor_marketplace_router,
+)
+from app.modules.human_tutor_marketplace.service import (
+    HumanTutorMarketplaceService,
+)
 from app.modules.lesson_tutor.guard import GuardLimits, PostgresLessonTutorGuard
 from app.modules.lesson_tutor.router import router as lesson_tutor_router
 from app.modules.lesson_tutor.service import LessonTutorService
@@ -50,10 +97,26 @@ def create_app(
     *,
     lesson_tutor_service: LessonTutorService | None = None,
     billing_service: BillingService | None = None,
+    human_tutor_marketplace_service: HumanTutorMarketplaceService | None = None,
+    marketplace_discovery_service: MarketplaceDiscoveryService | None = None,
+    marketplace_calendar_service: CalendarService | None = None,
+    marketplace_messaging_service: MessagingService | None = None,
+    marketplace_booking_service: BookingService | None = None,
+    marketplace_lifecycle_service: LifecycleService | None = None,
+    marketplace_learning_bridge_service: LearningBridgeService | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings.log_level)
     database_engine = create_database_engine(settings)
+    payment_database_engine = (
+        create_database_engine(
+            settings,
+            database_url=settings.human_tutor_payment_database_url.get_secret_value(),
+        )
+        if settings.human_tutor_commerce_enabled
+        and settings.human_tutor_payment_database_url is not None
+        else None
+    )
     lesson_tutor_gateway = (
         LessonTutorHttpClient(
             base_url=settings.lesson_tutor_service_url,
@@ -79,6 +142,159 @@ def create_app(
         and settings.revenuecat_api_key is not None
         else None
     )
+    marketplace_service = human_tutor_marketplace_service
+    if marketplace_service is None and settings.human_tutor_marketplace_enabled:
+        marketplace_service = HumanTutorMarketplaceService(
+            enabled=True,
+            repository=PostgresTutorApplicationRepository(engine=database_engine),
+            pseudonym_key=(
+                settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
+                if settings.human_tutor_marketplace_pseudonym_key is not None
+                else None
+            ),
+            actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+        )
+    calendar_repository = PostgresCalendarRepository(engine=database_engine)
+    calendar_provider = (
+        GoogleCalendarHttpAdapter(
+            client_id=settings.human_tutor_google_calendar_client_id,
+            client_secret=settings.human_tutor_google_calendar_client_secret.get_secret_value(),
+            timeout_seconds=settings.human_tutor_google_calendar_timeout_seconds,
+        )
+        if marketplace_calendar_service is None
+        and settings.human_tutor_google_calendar_enabled
+        and settings.human_tutor_google_calendar_client_id is not None
+        and settings.human_tutor_google_calendar_client_secret is not None
+        else None
+    )
+    calendar_runtime = marketplace_calendar_service or CalendarService(
+        enabled=settings.human_tutor_google_calendar_enabled,
+        repository=calendar_repository,
+        provider=calendar_provider,
+        cipher=(
+            CalendarTokenCipher(
+                key=decode_calendar_encryption_key(
+                    settings.human_tutor_google_calendar_token_key.get_secret_value()
+                )
+            )
+            if settings.human_tutor_google_calendar_enabled
+            and settings.human_tutor_google_calendar_token_key is not None
+            else None
+        ),
+        state_key=(
+            settings.human_tutor_google_calendar_state_key.get_secret_value().encode()
+            if settings.human_tutor_google_calendar_state_key is not None
+            else None
+        ),
+        pseudonym_key=(
+            settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
+            if settings.human_tutor_marketplace_pseudonym_key is not None
+            else None
+        ),
+        actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+        redirect_allowlist=settings.human_tutor_google_calendar_redirect_allowlist,
+    )
+    messaging_runtime = marketplace_messaging_service or MessagingService(
+        enabled=settings.human_tutor_messaging_enabled,
+        repository=PostgresMessagingRepository(engine=database_engine),
+        pseudonym_key=(
+            settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
+            if settings.human_tutor_marketplace_pseudonym_key is not None
+            else None
+        ),
+        actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+        retention_days=settings.human_tutor_message_retention_days,
+        accepting_new_conversations=settings.human_tutor_marketplace_acquisition_enabled,
+        system_notifications_enabled=settings.human_tutor_google_calendar_enabled,
+        provider_retention_enabled=settings.human_tutor_marketplace_enabled,
+    )
+    discovery_service = marketplace_discovery_service
+    if discovery_service is None and settings.human_tutor_marketplace_enabled:
+        discovery_repository = PostgresDiscoveryRepository(engine=database_engine)
+        discovery_service = MarketplaceDiscoveryService(
+            repository=discovery_repository,
+            calendar_busy_reader=(
+                calendar_repository if settings.human_tutor_google_calendar_enabled else None
+            ),
+            booking_busy_reader=(
+                discovery_repository if settings.human_tutor_commerce_enabled else None
+            ),
+            pseudonym_key=(
+                settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
+                if settings.human_tutor_marketplace_pseudonym_key is not None
+                else None
+            ),
+            actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+            acquisition_enabled=settings.human_tutor_marketplace_acquisition_enabled,
+        )
+    stripe_marketplace_provider = (
+        StripeHttpMarketplaceProvider(
+            secret_key=settings.human_tutor_stripe_secret_key.get_secret_value(),
+            api_version=settings.human_tutor_stripe_api_version,
+            timeout_seconds=settings.human_tutor_stripe_timeout_seconds,
+        )
+        if marketplace_booking_service is None
+        and settings.human_tutor_commerce_enabled
+        and settings.human_tutor_stripe_secret_key is not None
+        else None
+    )
+    assert discovery_service is not None or not settings.human_tutor_marketplace_enabled
+    booking_runtime = marketplace_booking_service or BookingService(
+        enabled=settings.human_tutor_commerce_enabled,
+        repository=PostgresBookingRepository(
+            engine=database_engine,
+            payment_engine=payment_database_engine,
+        ),
+        provider=stripe_marketplace_provider,
+        discovery=discovery_service
+        or MarketplaceDiscoveryService(
+            repository=PostgresDiscoveryRepository(engine=database_engine),
+            pseudonym_key=None,
+            actor_allowlist=(),
+        ),
+        pseudonym_key=(
+            settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
+            if settings.human_tutor_marketplace_pseudonym_key is not None
+            else None
+        ),
+        actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+        environment=settings.human_tutor_stripe_environment,
+        platform_account_id=settings.human_tutor_stripe_platform_account_id,
+        connect_refresh_url=settings.human_tutor_stripe_connect_refresh_url,
+        connect_return_url=settings.human_tutor_stripe_connect_return_url,
+        checkout_success_url=settings.human_tutor_checkout_success_url,
+        checkout_cancel_url=settings.human_tutor_checkout_cancel_url,
+        meeting_hosts=settings.human_tutor_approved_meeting_hosts,
+        hold_seconds=settings.human_tutor_booking_hold_seconds,
+        accepting_new_bookings=settings.human_tutor_marketplace_acquisition_enabled,
+    )
+    lifecycle_runtime = marketplace_lifecycle_service or LifecycleService(
+        enabled=settings.human_tutor_commerce_enabled,
+        repository=PostgresLifecycleRepository(
+            engine=database_engine,
+            payment_engine=payment_database_engine,
+        ),
+        booking_service=booking_runtime,
+        provider=stripe_marketplace_provider,
+        pseudonym_key=(
+            settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
+            if settings.human_tutor_marketplace_pseudonym_key is not None
+            else None
+        ),
+        actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+        payout_execution_enabled=settings.human_tutor_payout_execution_enabled,
+        platform_account_id=settings.human_tutor_stripe_platform_account_id,
+    )
+    learning_bridge_runtime = marketplace_learning_bridge_service or LearningBridgeService(
+        enabled=settings.human_tutor_learning_bridge_enabled,
+        repository=PostgresLearningBridgeRepository(engine=database_engine),
+        pseudonym_key=(
+            settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
+            if settings.human_tutor_marketplace_pseudonym_key is not None
+            else None
+        ),
+        actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -93,14 +309,27 @@ def create_app(
                     if revenuecat_provider is not None:
                         await revenuecat_provider.close()
                 finally:
-                    database_engine.dispose()
+                    try:
+                        if calendar_provider is not None:
+                            await calendar_provider.close()
+                    finally:
+                        try:
+                            if stripe_marketplace_provider is not None:
+                                await stripe_marketplace_provider.close()
+                        finally:
+                            if payment_database_engine is not None:
+                                payment_database_engine.dispose()
+                            database_engine.dispose()
 
     application = FastAPI(
         title="GlideLingo API",
         version="0.1.0",
         lifespan=lifespan,
     )
-    application.state.database_probe = create_database_probe(database_engine)
+    application.state.database_probe = create_database_probe(
+        database_engine,
+        payment_engine=payment_database_engine,
+    )
     application.state.desktop_minimum_supported_version = settings.desktop_minimum_supported_version
     application.state.revenuecat_webhook_max_body_bytes = settings.revenuecat_webhook_max_body_bytes
     application.state.billing_service = billing_service or BillingService(
@@ -158,6 +387,27 @@ def create_app(
         if clerk_configuration is not None
         else None
     )
+    if marketplace_service is not None:
+        application.state.human_tutor_marketplace_service = marketplace_service
+    if discovery_service is not None:
+        application.state.marketplace_discovery_service = discovery_service
+    if marketplace_service is not None:
+        application.state.marketplace_calendar_service = calendar_runtime
+    application.state.marketplace_messaging_service = messaging_runtime
+    application.state.marketplace_booking_service = booking_runtime
+    application.state.marketplace_lifecycle_service = lifecycle_runtime
+    application.state.marketplace_learning_bridge_service = learning_bridge_runtime
+    application.state.marketplace_stripe_webhook_max_body_bytes = (
+        settings.human_tutor_stripe_webhook_max_body_bytes
+    )
+    application.state.marketplace_stripe_webhook_secret = (
+        settings.human_tutor_stripe_webhook_secret.get_secret_value().encode()
+        if settings.human_tutor_stripe_webhook_secret is not None
+        else None
+    )
+    application.state.marketplace_stripe_signature_tolerance_seconds = (
+        settings.human_tutor_stripe_signature_tolerance_seconds
+    )
     application.add_exception_handler(
         DependencyUnavailableError,
         dependency_unavailable_handler,
@@ -180,8 +430,27 @@ def create_app(
     )
     application.add_exception_handler(LessonTutorConflictError, lesson_tutor_conflict_handler)
     application.add_exception_handler(LessonTutorLimitedError, lesson_tutor_limited_handler)
+    application.add_exception_handler(
+        MarketplaceMessageLimitedError, marketplace_message_limited_handler
+    )
     application.add_exception_handler(ProRequiredError, pro_required_handler)
     application.add_exception_handler(BillingUnavailableError, billing_unavailable_handler)
+    application.add_exception_handler(
+        HumanTutorMarketplaceUnavailableError,
+        human_tutor_marketplace_unavailable_handler,
+    )
+    application.add_exception_handler(
+        HumanTutorMarketplaceForbiddenError,
+        human_tutor_marketplace_forbidden_handler,
+    )
+    application.add_exception_handler(
+        TutorApplicationNotFoundError,
+        tutor_application_not_found_handler,
+    )
+    application.add_exception_handler(
+        TutorApplicationConflictError,
+        tutor_application_conflict_handler,
+    )
     application.add_middleware(InternalErrorMiddleware)
     application.add_middleware(
         CORSMiddleware,
@@ -197,6 +466,8 @@ def create_app(
     application.include_router(lesson_tutor_router)
     application.include_router(billing_router)
     application.include_router(auth_router)
+    if marketplace_service is not None:
+        application.include_router(human_tutor_marketplace_router)
     return application
 
 

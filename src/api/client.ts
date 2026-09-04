@@ -56,6 +56,7 @@ export type ApiJsonResponse<T> = {
 type GetJsonOptions<T> = {
   parse: (value: unknown) => T | null;
   path: `/${string}`;
+  query?: Readonly<Record<string, boolean | number | string | undefined>>;
   signal?: AbortSignal;
   timeoutMs?: number;
 };
@@ -80,10 +81,11 @@ export function getApiClientRuntimeDetails(): ApiClientRuntimeDetails {
 export async function getJson<T>({
   parse,
   path,
+  query,
   signal,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }: GetJsonOptions<T>): Promise<ApiJsonResponse<T>> {
-  return requestJson({ method: 'GET', parse, path, signal, timeoutMs });
+  return requestJson({ method: 'GET', parse, path, query, signal, timeoutMs });
 }
 
 export async function postJson<T>({
@@ -91,10 +93,11 @@ export async function postJson<T>({
   idempotencyKey,
   parse,
   path,
+  query,
   signal,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }: PostJsonOptions<T>): Promise<ApiJsonResponse<T>> {
-  return requestJson({ body, idempotencyKey, method: 'POST', parse, path, signal, timeoutMs });
+  return requestJson({ body, idempotencyKey, method: 'POST', parse, path, query, signal, timeoutMs });
 }
 
 type RequestJsonOptions<T> = GetJsonOptions<T> & {
@@ -109,12 +112,13 @@ async function requestJson<T>({
   method,
   parse,
   path,
+  query,
   signal,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }: RequestJsonOptions<T>): Promise<ApiJsonResponse<T>> {
   const configuration = resolveConfigurationForRequest();
   const runtime: ApiClientRuntimeDetails = configuration;
-  const requestUrl = composeRequestUrl(configuration.origin, path, runtime);
+  const requestUrl = composeRequestUrl(configuration.origin, path, query, runtime);
   const controller = new AbortController();
   let cancelledExternally = signal?.aborted ?? false;
   let timedOut = false;
@@ -226,7 +230,12 @@ function resolveConfigurationForRequest(): ApiRuntimeConfiguration {
   }
 }
 
-function composeRequestUrl(origin: string, path: `/${string}`, runtime: ApiClientRuntimeDetails): string {
+function composeRequestUrl(
+  origin: string,
+  path: `/${string}`,
+  query: Readonly<Record<string, boolean | number | string | undefined>> | undefined,
+  runtime: ApiClientRuntimeDetails,
+): string {
   const unsafePath =
     !path.startsWith('/') ||
     path.startsWith('//') ||
@@ -244,6 +253,10 @@ function composeRequestUrl(origin: string, path: `/${string}`, runtime: ApiClien
 
   if (requestUrl.origin !== baseUrl.origin) {
     throw new ApiClientError('configuration', 'The API request path is not valid.', { runtime });
+  }
+
+  for (const [key, value] of Object.entries(query ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
+    if (value !== undefined) requestUrl.searchParams.append(key, String(value));
   }
 
   return requestUrl.toString();

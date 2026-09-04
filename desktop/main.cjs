@@ -28,6 +28,7 @@ const {
   validateProductionClerkOrigin,
 } = require('./runtime.cjs');
 const {
+  createDisabledDesktopUpdateCoordinator,
   registerDesktopUpdateIpc,
   shouldQuitForRequiredUpdate,
   startMacUpdater,
@@ -494,7 +495,8 @@ app.whenReady().then(async () => {
     developmentUrl: DEVELOPMENT_URL,
     fetchImpl: (...args) => net.fetch(...args),
   });
-  if (desktopUpdateCoordinator) {
+  if (!DEVELOPMENT_URL) {
+    desktopUpdateCoordinator ??= createDisabledDesktopUpdateCoordinator(app.getVersion());
     disposeDesktopUpdateIpc = registerDesktopUpdateIpc({
       coordinator: desktopUpdateCoordinator,
       getWindow: () => mainWindow,

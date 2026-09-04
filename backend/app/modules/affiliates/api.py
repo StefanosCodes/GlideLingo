@@ -1,13 +1,13 @@
 """FastAPI contracts for the disabled affiliate foundation."""
 
-from datetime import datetime
 from typing import Annotated, Any, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.auth.clerk import CurrentClerkPrincipal
 from app.core.errors import ErrorResponse
+from app.modules.affiliates.commission_domain import InvalidCommissionCursorError
 from app.modules.affiliates.schemas import (
     BindAttributionRequest,
     BindAttributionResponse,
@@ -101,17 +101,21 @@ def list_creator_commissions(
     creator_id: UUID,
     principal: CurrentClerkPrincipal,
     service: AffiliateServiceDependency,
-    before: Annotated[datetime | None, Query()] = None,
+    cursor: Annotated[str | None, Query(min_length=32, max_length=32)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> CreatorCommissionLedgerResponse:
-    entries = service.list_creator_commissions(
-        principal=principal,
-        creator_id=creator_id,
-        before=before,
-        limit=limit,
-    )
+    try:
+        page = service.list_creator_commissions(
+            principal=principal,
+            creator_id=creator_id,
+            cursor=cursor,
+            limit=limit,
+        )
+    except InvalidCommissionCursorError as error:
+        raise HTTPException(status_code=422, detail="Invalid commission cursor") from error
     return CreatorCommissionLedgerResponse(
         creator_id=creator_id,
+        next_cursor=page.next_cursor,
         entries=[
             CommissionLedgerEntryResponse(
                 entry_id=entry.entry_id,
@@ -121,7 +125,7 @@ def list_creator_commissions(
                 commission_amount_minor=entry.commission_amount_minor,
                 occurred_at=entry.occurred_at,
             )
-            for entry in entries
+            for entry in page.entries
         ],
     )
 

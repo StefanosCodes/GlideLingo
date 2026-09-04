@@ -176,13 +176,16 @@ events but leaves deliveries pending.
 `007_affiliate_commission_ledger.sql` intentionally leaves migration number `006` available for the
 Tutor lane. It must be inserted into the canonical production runner only after migration `006` is
 merged, so production still applies the complete numeric sequence. The migration is additive, creates
-no policy defaults, and grants the runtime only read access to policy/rule rows plus append-only access
-to commission entries.
+no policy defaults, and grants the runtime only append access to minimized financial facts and
+commission entries plus the reads needed to verify those immutable inputs.
 
 Before `GLIDELINGO_AFFILIATE_COMMISSIONS_ENABLED=true`, an operator must create a draft policy and its
-explicit product rules, review the currency, minor-unit basis amount, rate in basis points, half-up
-rounding rule, and effective interval, then activate that immutable version. The flag also requires the
-affiliate master flag, durable billing intake, exact Clerk configuration, and both pseudonym keys.
-Purchase events lock existing attribution before accruing; refunds and refund reversals append exact
-negations of their source entries. This slice does not create checkout, provider pricing, commission
-policy values, balances, transfer instructions, payouts, or provider mutations.
+explicit product rules, review each rate in basis points, the half-up rounding rule, and effective
+interval, then activate that immutable version. A future authenticated and reconciled Stripe boundary
+must supply the actual settled currency and minor-unit amount; RevenueCat lifecycle events remain on
+the no-side-effect reconciliation placeholder and cannot create ledger entries. Purchase facts lock
+existing attribution before accruing; refund and refund-reversal facts append exact, chronological
+negations of their named source entries. Contradictory event, transaction, amount, sequence, and
+chronology facts fail for manual review instead of being treated as duplicate success. This slice does
+not create Stripe networking, checkout, static provider pricing, commission policy values, balances,
+transfer instructions, payouts, or provider mutations.

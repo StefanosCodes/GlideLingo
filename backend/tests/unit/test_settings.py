@@ -174,15 +174,9 @@ def test_affiliate_commissions_require_every_disabled_foundation_gate() -> None:
         affiliate_principal_pseudonym_key="a" * 32,
         clerk_issuer="https://clerk.glidelingo.test",
         clerk_jwks_url="https://clerk.glidelingo.test/.well-known/jwks.json",
-        revenuecat_enabled=True,
-        revenuecat_api_key="rcb_public-web-key",
-        revenuecat_pseudonym_key="r" * 32,
-        revenuecat_webhook_app_id="app_test",
-        revenuecat_webhook_authorization="Bearer webhook-secret-value",
-        revenuecat_webhook_signing_secret="s" * 32,
-        billing_event_intake_enabled=True,
     )
     assert settings.affiliate_commissions_enabled is True
+    assert settings.billing_event_intake_enabled is False
 
 
 def test_enabled_revenuecat_rejects_overprivileged_project_secret_key() -> None:

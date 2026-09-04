@@ -136,3 +136,4 @@ class CommissionLedgerEntryResponse(BaseModel):
 class CreatorCommissionLedgerResponse(BaseModel):
     creator_id: UUID
     entries: list[CommissionLedgerEntryResponse]
+    next_cursor: str | None

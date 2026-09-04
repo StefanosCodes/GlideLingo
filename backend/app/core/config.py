@@ -255,8 +255,6 @@ class Settings(BaseSettings):
                 "Clerk authentication must be configured when authenticated affiliate routes "
                 "are enabled"
             )
-        if self.affiliate_commissions_enabled and not self.billing_event_intake_enabled:
-            raise ValueError("Affiliate commissions require durable billing event intake")
         return self
 
     @property

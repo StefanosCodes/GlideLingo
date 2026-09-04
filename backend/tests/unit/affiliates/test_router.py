@@ -10,6 +10,7 @@ from app.main import create_app
 from app.modules.affiliates.commission_domain import (
     CommissionEntryKind,
     CommissionLedgerEntry,
+    CommissionLedgerPage,
 )
 from app.modules.affiliates.commission_repository import AffiliateCommissionRepository
 from app.modules.affiliates.domain import BindStatus
@@ -29,18 +30,21 @@ class MemoryCommissionRepository:
     def __init__(self) -> None:
         self.listed: dict[str, Any] | None = None
 
-    def list_creator_entries(self, **kwargs: Any) -> list[CommissionLedgerEntry]:
+    def list_creator_entries(self, **kwargs: Any) -> CommissionLedgerPage:
         self.listed = kwargs
-        return [
-            CommissionLedgerEntry(
-                entry_id=UUID("00000000-0000-0000-0000-000000000001"),
-                kind=CommissionEntryKind.ACCRUAL,
-                currency_code="USD",
-                basis_amount_minor=1999,
-                commission_amount_minor=250,
-                occurred_at=NOW,
-            )
-        ]
+        return CommissionLedgerPage(
+            entries=(
+                CommissionLedgerEntry(
+                    entry_id=UUID("00000000-0000-0000-0000-000000000001"),
+                    kind=CommissionEntryKind.ACCRUAL,
+                    currency_code="USD",
+                    basis_amount_minor=1999,
+                    commission_amount_minor=250,
+                    occurred_at=NOW,
+                ),
+            ),
+            next_cursor="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        )
 
 
 def make_client(
@@ -190,10 +194,11 @@ def test_creator_commission_projection_is_role_scoped_and_minimized() -> None:
                 "occurred_at": "2026-09-02T12:00:00Z",
             }
         ],
+        "next_cursor": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     }
     assert commission_repository.listed == {
         "creator_id": creator_id,
-        "before": None,
+        "cursor": None,
         "limit": 10,
     }
     assert "transaction" not in response.text
@@ -210,4 +215,18 @@ def test_creator_commission_projection_fails_before_read_without_role() -> None:
         )
 
     assert response.status_code == 403
+    assert commission_repository.listed is None
+
+
+def test_creator_commission_projection_rejects_invalid_opaque_cursor() -> None:
+    repository = MemoryAffiliateRepository()
+    repository.creator_allowed = True
+    commission_repository = MemoryCommissionRepository()
+    with make_client(repository, commission_repository=commission_repository) as client:
+        response = client.get(
+            f"/v1/affiliates/creators/{uuid4()}/commissions?cursor={'!' * 32}",
+            headers={"Authorization": "Bearer valid-affiliate-token"},
+        )
+
+    assert response.status_code == 422
     assert commission_repository.listed is None

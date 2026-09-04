@@ -1,7 +1,7 @@
 """Flag-gated affiliate identity, authorization, and attribution operations."""
 
 import secrets
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -13,7 +13,7 @@ from app.core.errors import (
     AffiliateResourceNotFoundError,
     AffiliateUnavailableError,
 )
-from app.modules.affiliates.commission_domain import CommissionLedgerEntry
+from app.modules.affiliates.commission_domain import CommissionLedgerPage, decode_commission_cursor
 from app.modules.affiliates.commission_repository import AffiliateCommissionRepository
 from app.modules.affiliates.domain import (
     AffiliateRepositoryConflictError,
@@ -122,9 +122,9 @@ class AffiliateService:
         *,
         principal: ClerkPrincipal,
         creator_id: UUID,
-        before: datetime | None,
+        cursor: str | None,
         limit: int,
-    ) -> Sequence[CommissionLedgerEntry]:
+    ) -> CommissionLedgerPage:
         if (
             not self._affiliates_enabled
             or not self._commissions_enabled
@@ -138,7 +138,7 @@ class AffiliateService:
         )
         return self._commission_repository.list_creator_entries(
             creator_id=creator_id,
-            before=before,
+            cursor=decode_commission_cursor(cursor) if cursor is not None else None,
             limit=limit,
         )
 

@@ -1,6 +1,14 @@
+from datetime import UTC, datetime
+from uuid import UUID
+
 import pytest
 
-from app.modules.affiliates.commission_domain import commission_amount_minor
+from app.modules.affiliates.commission_domain import (
+    CommissionCursor,
+    commission_amount_minor,
+    decode_commission_cursor,
+    encode_commission_cursor,
+)
 
 
 @pytest.mark.parametrize(
@@ -37,3 +45,21 @@ def test_commission_rejects_invalid_or_zero_minor_results(
             basis_amount_minor=basis_minor,
             rate_basis_points=rate_basis_points,
         )
+
+
+def test_commission_cursor_round_trips_timestamp_and_tie_breaker() -> None:
+    cursor = CommissionCursor(
+        occurred_at=datetime(2026, 9, 2, 12, 0, 1, 234567, tzinfo=UTC),
+        entry_id=UUID("00000000-0000-0000-0000-000000000123"),
+    )
+
+    encoded = encode_commission_cursor(cursor)
+
+    assert len(encoded) == 32
+    assert decode_commission_cursor(encoded) == cursor
+
+
+@pytest.mark.parametrize("value", ["", "not-a-cursor", "!" * 32, "A" * 31])
+def test_commission_cursor_rejects_malformed_values(value: str) -> None:
+    with pytest.raises(ValueError, match="Invalid commission cursor"):
+        decode_commission_cursor(value)

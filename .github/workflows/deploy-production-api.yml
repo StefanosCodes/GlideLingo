@@ -115,7 +115,11 @@ jobs:
             exit 1
           fi
           initial_json="$(gcloud run services describe "${GCP_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format=json)"
-          initial_state="$(./infra/gcp/scripts/read-production-deploy-state.sh <<< "${initial_json}")"
+          # The first deployment after introducing the updater policy may be
+          # reading a legacy service that has no explicit minimum yet. Only
+          # that absent value resolves to the application default; the staged
+          # candidate and every promotion read remain strict.
+          initial_state="$(./infra/gcp/scripts/read-production-deploy-state.sh "" allow-missing-default <<< "${initial_json}")"
           initial_generation="$(jq -r .generation <<< "${initial_state}")"
           previous_revision="$(jq -r .live_revision <<< "${initial_state}")"
           service_url="$(jq -r .service_url <<< "${initial_state}")"
@@ -135,6 +139,7 @@ jobs:
             --project="${GCP_PROJECT_ID}" \
             --region="${GCP_REGION}" \
             --image="${{ steps.image.outputs.uri }}" \
+            --update-env-vars="GLIDELINGO_DESKTOP_MINIMUM_SUPPORTED_VERSION=${desktop_minimum_supported_version}" \
             --no-traffic \
             --tag="${candidate_tag}" \
             --quiet

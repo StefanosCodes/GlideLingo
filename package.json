@@ -93,6 +93,8 @@
     "desktop:package:dry-run": "npm run desktop:export && electron-builder --projectDir desktop --config electron-builder.dry-run.yml --mac --universal --dir --publish never",
     "desktop:dist": "npm run desktop:export && electron-builder --projectDir desktop",
     "desktop:release": "node desktop/release.cjs",
+    "desktop:release:preflight": "node desktop/release-preflight.cjs",
+    "desktop:release:accept-draft": "node desktop/release-acceptance.cjs",
     "audio:estimate": "node --env-file-if-exists=.env scripts/course-audio/cli.mjs estimate",
     "audio:generate": "node --env-file-if-exists=.env scripts/course-audio/cli.mjs generate",
     "audio:validate": "node --env-file-if-exists=.env scripts/course-audio/cli.mjs validate",

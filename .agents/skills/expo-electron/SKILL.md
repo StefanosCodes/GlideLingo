@@ -51,7 +51,10 @@ Always execute from the project root (where `package.json` lives):
 | **Doctor** | `npm run doctor` | Run Expo dependency/config compatibility checks |
 | **Desktop Tests** | `npm run test:desktop` | Execute Node test runner against `desktop/*.test.cjs` |
 | **Package Local** | `npm run desktop:package` | Export web and package unpacked macOS app into `release/mac-arm64/` |
+| **Package Layout Diagnostic** | `npm run desktop:package:dry-run` | Build an unsigned universal app layout in ignored `release-dry-run/` |
 | **Package Dist** | `npm run desktop:dist` | Export web and build distributable DMG and ZIP in `release/` |
+| **Release Preflight** | `npm run desktop:release:preflight` | Run the complete local gate and validate unsigned release-shaped DMG/ZIP assets before the version PR |
+| **Accept Signed Draft** | `npm run desktop:release:accept-draft -- desktop-v<version>` | Download and verify the exact private GitHub draft from the tagged release checkout |
 
 ## Design System & Component Guidelines
 
@@ -89,8 +92,18 @@ Before considering changes complete:
 
 For a desktop release, treat each published format as a separate consumer boundary:
 
+- Use `desktop/package.json` as the desktop version source; keep both lockfile version fields equal,
+  and reserve exactly `desktop-v<version>`. Never reuse or move a release version/tag.
+- Run `desktop:release:preflight` on macOS before merging the version PR. Its unsigned development
+  artifacts prove dependency, build, metadata, and architecture contracts only; never distribute them
+  or claim they prove Apple signing or updates.
 - Prefer electron-builder's supported signing, notarization, and target configuration over recursive post-processing of a signed `.app`.
 - Verify both the DMG installer and ZIP updater payload; success of one does not prove the other.
-- After upload, download the exact immutable artifacts through the consumer path, verify their published digests, extract or install them normally, and re-run signature, notarization, architecture, launch, and update checks.
+- After the GitHub workflow stages the private draft, run `desktop:release:accept-draft` from the exact
+  tagged checkout. Then install the retained DMG normally and complete the user-flow checklist.
 - Keep the release private until the downloaded artifacts pass. Revoke temporary privileges in guaranteed cleanup even when a build fails; retain source credentials until the release is independently verified.
 - Reject macOS release apps containing `com.apple.cs.*` extended-attribute signatures because ZIP transport does not preserve them reliably.
+- Drafts are invisible to installed updaters. Only a signed, published `N → N+1` exercise proves the
+  real update path; do not add an unsigned-updater bypass or local update service as a substitute.
+- Changes limited to `website/` do not enter the Electron package. Expo `src/`, `desktop/`, and
+  packaged-asset changes require a new desktop version when they should reach installed users.

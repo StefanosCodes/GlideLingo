@@ -25,7 +25,14 @@ from app.core.errors import (
 from app.modules.human_tutor_marketplace.identity import derive_marketplace_actor_ref
 
 MESSAGE_RATE_LIMIT = 10
+MESSAGE_TARGET_RATE_LIMIT = 30
 MESSAGE_RATE_WINDOW = timedelta(minutes=1)
+CONVERSATION_ACTOR_RATE_LIMIT = 5
+CONVERSATION_TUTOR_RATE_LIMIT = 20
+CONVERSATION_RATE_WINDOW = timedelta(hours=1)
+REPORT_ACTOR_RATE_LIMIT = 10
+REPORT_SUBJECT_RATE_LIMIT = 50
+REPORT_RATE_WINDOW = timedelta(days=1)
 CONTACT_PATTERN = re.compile(
     r"(?i)(?:https?://|www\.|(?:[a-z0-9._%+-]+)@(?:[a-z0-9.-]+\.[a-z]{2,})|"
     r"(?:\+?\d[\s().-]*){7,}|(?:whatsapp|telegram|signal|discord|instagram)\s*[:@])"
@@ -82,6 +89,7 @@ class StoredNotificationJob:
     attempt: int
     lease_owner: str
     lease_expires_at: datetime
+    template: Literal["new_message", "calendar_conflict"]
 
 
 NotificationOutcome = Literal["completed", "retryable", "rejected"]
@@ -92,7 +100,9 @@ class MarketplaceNotificationProvider(Protocol):
         self,
         *,
         recipient_actor_ref: str,
-        template: Literal["new_message", "lesson_reminder", "completion_prompt"],
+        template: Literal[
+            "new_message", "calendar_conflict", "lesson_reminder", "completion_prompt"
+        ],
         idempotency_key: str,
     ) -> NotificationOutcome: ...
 
@@ -139,7 +149,14 @@ class MessagingRepository(Protocol):
         self, *, learner_actor_ref: str, tutor_id: UUID
     ) -> StoredConversation | None: ...
 
-    def list_conversations(self, *, actor_ref: str) -> tuple[StoredConversation, ...]: ...
+    def list_conversations(
+        self,
+        *,
+        actor_ref: str,
+        before_created_at: datetime | None,
+        before_conversation_id: UUID | None,
+        limit: int,
+    ) -> tuple[tuple[StoredConversation, ...], bool]: ...
 
     def get_conversation(
         self, *, conversation_id: UUID, actor_ref: str
@@ -176,11 +193,12 @@ class MessagingRepository(Protocol):
         reporter_actor_ref: str,
         reason: ReportReason,
         details: str | None,
+        now: datetime,
     ) -> StoredReport | None: ...
 
     def list_reports_for_operator(
         self, *, operator_actor_ref: str, offset: int, limit: int
-    ) -> tuple[StoredReport, ...] | None: ...
+    ) -> tuple[tuple[StoredReport, ...], bool] | None: ...
 
     def get_report_for_operator(
         self, *, operator_actor_ref: str, report_id: UUID
@@ -191,6 +209,8 @@ class MessagingRepository(Protocol):
     ) -> StoredReport | None: ...
 
     def purge_expired_messages(self, *, cutoff: datetime, limit: int) -> int: ...
+
+    def purge_bounded_events(self, *, limit: int) -> int: ...
 
     def get_notification_preference(self, *, actor_ref: str) -> bool: ...
 
@@ -209,6 +229,15 @@ class MessagingRepository(Protocol):
         outcome: Literal["completed", "retryable", "rejected"],
     ) -> bool: ...
 
+    def recover_notifications(
+        self,
+        *,
+        conversation_id: UUID,
+        operator_actor_ref: str,
+        reason: str,
+        now: datetime,
+    ) -> bool: ...
+
 
 class PostgresMessagingRepository:
     def __init__(self, *, engine: Engine) -> None:
@@ -220,6 +249,46 @@ class PostgresMessagingRepository:
         conversation_id = uuid4()
         try:
             with self._engine.begin() as connection:
+                connection.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 4101))"),
+                    {"key": f"actor:{learner_actor_ref}"},
+                )
+                connection.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 4101))"),
+                    {"key": f"tutor:{tutor_id}"},
+                )
+                existing = (
+                    connection.execute(
+                        text(
+                            "SELECT * FROM marketplace_conversation "
+                            "WHERE learner_actor_ref = :learner_actor_ref "
+                            "AND tutor_id = :tutor_id AND booking_id IS NULL"
+                        ),
+                        {"learner_actor_ref": learner_actor_ref, "tutor_id": tutor_id},
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if existing is not None:
+                    return self._conversation(existing)
+                cutoff = datetime.now(UTC) - CONVERSATION_RATE_WINDOW
+                actor_count, tutor_count = connection.execute(
+                    text(
+                        "SELECT count(*) FILTER (WHERE learner_actor_ref = :learner_actor_ref), "
+                        "count(*) FILTER (WHERE tutor_id = :tutor_id) "
+                        "FROM marketplace_conversation_rate_event WHERE occurred_at >= :cutoff"
+                    ),
+                    {
+                        "learner_actor_ref": learner_actor_ref,
+                        "tutor_id": tutor_id,
+                        "cutoff": cutoff,
+                    },
+                ).one()
+                if (
+                    actor_count >= CONVERSATION_ACTOR_RATE_LIMIT
+                    or tutor_count >= CONVERSATION_TUTOR_RATE_LIMIT
+                ):
+                    raise MarketplaceMessageLimitedError
                 row = (
                     connection.execute(
                         text(
@@ -229,12 +298,14 @@ class PostgresMessagingRepository:
                               FROM marketplace_tutor_profile AS profile
                               JOIN marketplace_tutor_application AS application
                                 ON application.application_id = profile.application_id
-                              JOIN marketplace_tutor_offering AS offering
-                                ON offering.tutor_id = profile.tutor_id
                               WHERE profile.tutor_id = :tutor_id
                                 AND application.status = 'approved'
                                 AND profile.is_published AND profile.payout_ready
-                                AND offering.state = 'active'
+                                AND EXISTS (
+                                  SELECT 1 FROM marketplace_tutor_offering AS offering
+                                  WHERE offering.tutor_id = profile.tutor_id
+                                    AND offering.state = 'active'
+                                )
                                 AND profile.actor_ref <> :learner_actor_ref
                             ), inserted AS (
                               INSERT INTO marketplace_conversation
@@ -270,6 +341,18 @@ class PostgresMessagingRepository:
                 if row["was_created"]:
                     connection.execute(
                         text(
+                            "INSERT INTO marketplace_conversation_rate_event "
+                            "(event_id, learner_actor_ref, tutor_id) "
+                            "VALUES (:event_id, :learner_actor_ref, :tutor_id)"
+                        ),
+                        {
+                            "event_id": uuid4(),
+                            "learner_actor_ref": learner_actor_ref,
+                            "tutor_id": tutor_id,
+                        },
+                    )
+                    connection.execute(
+                        text(
                             """
                             INSERT INTO marketplace_message
                               (message_id, conversation_id, kind, body, client_message_id)
@@ -290,22 +373,44 @@ class PostgresMessagingRepository:
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
-    def list_conversations(self, *, actor_ref: str) -> tuple[StoredConversation, ...]:
+    def list_conversations(
+        self,
+        *,
+        actor_ref: str,
+        before_created_at: datetime | None,
+        before_conversation_id: UUID | None,
+        limit: int,
+    ) -> tuple[tuple[StoredConversation, ...], bool]:
+        cursor_clause = ""
+        if before_created_at is not None and before_conversation_id is not None:
+            cursor_clause = (
+                "AND (created_at, conversation_id) < (:before_created_at, :before_conversation_id)"
+            )
         try:
             with self._engine.connect() as connection:
-                rows = connection.execute(
-                    text(
-                        """
+                rows = (
+                    connection.execute(
+                        text(
+                            """
                         SELECT conversation_id, learner_actor_ref, tutor_id, tutor_actor_ref,
                                booking_id, state, created_at, updated_at
                         FROM marketplace_conversation
-                        WHERE learner_actor_ref = :actor_ref OR tutor_actor_ref = :actor_ref
-                        ORDER BY updated_at DESC, conversation_id DESC LIMIT 100
+                        WHERE (learner_actor_ref = :actor_ref OR tutor_actor_ref = :actor_ref)
                         """
-                    ),
-                    {"actor_ref": actor_ref},
-                ).mappings()
-                return tuple(self._conversation(row) for row in rows)
+                            + cursor_clause
+                            + " ORDER BY created_at DESC, conversation_id DESC LIMIT :limit"
+                        ),
+                        {
+                            "actor_ref": actor_ref,
+                            "before_created_at": before_created_at,
+                            "before_conversation_id": before_conversation_id,
+                            "limit": limit + 1,
+                        },
+                    )
+                    .mappings()
+                    .all()
+                )
+                return tuple(self._conversation(row) for row in rows[:limit]), len(rows) > limit
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
@@ -398,10 +503,6 @@ class PostgresMessagingRepository:
     ) -> tuple[SendResult, StoredMessage | None]:
         try:
             with self._engine.begin() as connection:
-                connection.execute(
-                    text("SELECT pg_advisory_xact_lock(hashtextextended(:actor_ref, 0))"),
-                    {"actor_ref": actor_ref},
-                )
                 conversation = (
                     connection.execute(
                         text(
@@ -425,18 +526,11 @@ class PostgresMessagingRepository:
                     if conversation["learner_actor_ref"] == actor_ref
                     else conversation["learner_actor_ref"]
                 )
-                blocked = connection.execute(
-                    text(
-                        """
-                        SELECT 1 FROM marketplace_actor_block
-                        WHERE (blocker_actor_ref = :actor_ref AND blocked_actor_ref = :other)
-                           OR (blocker_actor_ref = :other AND blocked_actor_ref = :actor_ref)
-                        """
-                    ),
-                    {"actor_ref": actor_ref, "other": other},
-                ).scalar_one_or_none()
-                if blocked is not None:
-                    return "blocked", None
+                for lock_ref in sorted((actor_ref, other)):
+                    connection.execute(
+                        text("SELECT pg_advisory_xact_lock(hashtextextended(:actor_ref, 0))"),
+                        {"actor_ref": lock_ref},
+                    )
                 duplicate = (
                     connection.execute(
                         text(
@@ -462,23 +556,36 @@ class PostgresMessagingRepository:
                     if duplicate["body"] != body:
                         return "missing", None
                     return "duplicate", self._message(duplicate)
-                cutoff = now - MESSAGE_RATE_WINDOW
-                recent = connection.execute(
+                blocked = connection.execute(
                     text(
-                        "SELECT count(*) FROM marketplace_message_rate_event "
-                        "WHERE actor_ref = :actor_ref AND occurred_at >= :cutoff"
+                        """
+                        SELECT 1 FROM marketplace_actor_block
+                        WHERE (blocker_actor_ref = :actor_ref AND blocked_actor_ref = :other)
+                           OR (blocker_actor_ref = :other AND blocked_actor_ref = :actor_ref)
+                        """
                     ),
-                    {"actor_ref": actor_ref, "cutoff": cutoff},
-                ).scalar_one()
-                if recent >= MESSAGE_RATE_LIMIT:
+                    {"actor_ref": actor_ref, "other": other},
+                ).scalar_one_or_none()
+                if blocked is not None:
+                    return "blocked", None
+                cutoff = now - MESSAGE_RATE_WINDOW
+                recent, target_recent = connection.execute(
+                    text(
+                        "SELECT count(*) FILTER (WHERE actor_ref = :actor_ref), "
+                        "count(*) FILTER (WHERE target_actor_ref = :other) "
+                        "FROM marketplace_message_rate_event WHERE occurred_at >= :cutoff"
+                    ),
+                    {"actor_ref": actor_ref, "other": other, "cutoff": cutoff},
+                ).one()
+                if recent >= MESSAGE_RATE_LIMIT or target_recent >= MESSAGE_TARGET_RATE_LIMIT:
                     return "limited", None
                 connection.execute(
                     text(
                         "INSERT INTO marketplace_message_rate_event "
-                        "(event_id, actor_ref, occurred_at) "
-                        "VALUES (:event_id, :actor_ref, :now)"
+                        "(event_id, actor_ref, target_actor_ref, occurred_at) "
+                        "VALUES (:event_id, :actor_ref, :other, :now)"
                     ),
-                    {"event_id": uuid4(), "actor_ref": actor_ref, "now": now},
+                    {"event_id": uuid4(), "actor_ref": actor_ref, "other": other, "now": now},
                 )
                 row = (
                     connection.execute(
@@ -583,6 +690,7 @@ class PostgresMessagingRepository:
         reporter_actor_ref: str,
         reason: ReportReason,
         details: str | None,
+        now: datetime,
     ) -> StoredReport | None:
         try:
             with self._engine.begin() as connection:
@@ -608,6 +716,14 @@ class PostgresMessagingRepository:
                     if conversation["learner_actor_ref"] == reporter_actor_ref
                     else conversation["learner_actor_ref"]
                 )
+                for lock_ref in sorted((reporter_actor_ref, subject)):
+                    connection.execute(
+                        text(
+                            "SELECT pg_advisory_xact_lock("
+                            "hashtextextended('marketplace-report:' || :actor_ref, 0))"
+                        ),
+                        {"actor_ref": lock_ref},
+                    )
                 if message_id is not None:
                     valid_message = connection.execute(
                         text(
@@ -625,6 +741,53 @@ class PostgresMessagingRepository:
                     ).scalar_one_or_none()
                     if valid_message is None:
                         return None
+                existing = (
+                    connection.execute(
+                        text(
+                            "SELECT * FROM marketplace_message_report "
+                            "WHERE conversation_id = :conversation_id "
+                            "AND reporter_actor_ref = :reporter "
+                            "AND message_id IS NOT DISTINCT FROM CAST(:message_id AS uuid)"
+                        ),
+                        {
+                            "conversation_id": conversation_id,
+                            "reporter": reporter_actor_ref,
+                            "message_id": message_id,
+                        },
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if existing is not None:
+                    return self._report(existing)
+                cutoff = now - REPORT_RATE_WINDOW
+                reporter_recent, subject_recent = connection.execute(
+                    text(
+                        "SELECT count(*) FILTER (WHERE reporter_actor_ref = :reporter), "
+                        "count(*) FILTER (WHERE subject_actor_ref = :subject) "
+                        "FROM marketplace_message_report_rate_event "
+                        "WHERE occurred_at >= :cutoff"
+                    ),
+                    {"reporter": reporter_actor_ref, "subject": subject, "cutoff": cutoff},
+                ).one()
+                if (
+                    reporter_recent >= REPORT_ACTOR_RATE_LIMIT
+                    or subject_recent >= REPORT_SUBJECT_RATE_LIMIT
+                ):
+                    raise MarketplaceMessageLimitedError
+                connection.execute(
+                    text(
+                        "INSERT INTO marketplace_message_report_rate_event "
+                        "(event_id, reporter_actor_ref, subject_actor_ref, occurred_at) "
+                        "VALUES (:event_id, :reporter, :subject, :now)"
+                    ),
+                    {
+                        "event_id": uuid4(),
+                        "reporter": reporter_actor_ref,
+                        "subject": subject,
+                        "now": now,
+                    },
+                )
                 row = (
                     connection.execute(
                         text(
@@ -634,7 +797,7 @@ class PostgresMessagingRepository:
                                subject_actor_ref, reason, details)
                             VALUES (:report_id, :conversation_id, :message_id, :reporter,
                                     :subject, :reason, :details)
-                            ON CONFLICT (conversation_id, message_id, reporter_actor_ref) DO NOTHING
+                            ON CONFLICT DO NOTHING
                             RETURNING *
                             """
                         ),
@@ -651,28 +814,53 @@ class PostgresMessagingRepository:
                     .mappings()
                     .one_or_none()
                 )
-                return self._report(row) if row is not None else None
+                if row is not None:
+                    return self._report(row)
+                converged = (
+                    connection.execute(
+                        text(
+                            "SELECT * FROM marketplace_message_report "
+                            "WHERE conversation_id = :conversation_id "
+                            "AND reporter_actor_ref = :reporter "
+                            "AND message_id IS NOT DISTINCT FROM CAST(:message_id AS uuid)"
+                        ),
+                        {
+                            "conversation_id": conversation_id,
+                            "reporter": reporter_actor_ref,
+                            "message_id": message_id,
+                        },
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                return self._report(converged) if converged is not None else None
+        except TutorApplicationConflictError:
+            raise
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
     def list_reports_for_operator(
         self, *, operator_actor_ref: str, offset: int, limit: int
-    ) -> tuple[StoredReport, ...] | None:
+    ) -> tuple[tuple[StoredReport, ...], bool] | None:
         try:
             with self._engine.connect() as connection:
                 if not self._has_report_capability(connection, operator_actor_ref):
                     return None
-                rows = connection.execute(
-                    text(
-                        """
+                rows = (
+                    connection.execute(
+                        text(
+                            """
                         SELECT * FROM marketplace_message_report
-                        WHERE status = 'open' ORDER BY created_at, report_id
+                        ORDER BY created_at, report_id
                         OFFSET :offset LIMIT :limit
                         """
-                    ),
-                    {"offset": offset, "limit": limit},
-                ).mappings()
-                return tuple(self._report(row) for row in rows)
+                        ),
+                        {"offset": offset, "limit": limit + 1},
+                    )
+                    .mappings()
+                    .all()
+                )
+                return tuple(self._report(row) for row in rows[:limit]), len(rows) > limit
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
@@ -707,10 +895,25 @@ class PostgresMessagingRepository:
                     self._message(row)
                     for row in connection.execute(
                         text(
-                            "SELECT * FROM marketplace_message WHERE conversation_id = :id "
-                            "ORDER BY created_at, message_id LIMIT 201"
+                            """
+                            WITH recent AS (
+                              SELECT * FROM marketplace_message
+                              WHERE conversation_id = :id
+                              ORDER BY created_at DESC, message_id DESC LIMIT 200
+                            ), evidence AS (
+                              SELECT * FROM recent
+                              UNION
+                              SELECT * FROM marketplace_message
+                              WHERE conversation_id = :id
+                                AND message_id = CAST(:message_id AS uuid)
+                            )
+                            SELECT * FROM evidence ORDER BY created_at, message_id
+                            """
                         ),
-                        {"id": report["conversation_id"]},
+                        {
+                            "id": report["conversation_id"],
+                            "message_id": report["message_id"],
+                        },
                     ).mappings()
                 )
                 connection.execute(
@@ -734,6 +937,26 @@ class PostgresMessagingRepository:
             with self._engine.begin() as connection:
                 if not self._has_report_capability(connection, operator_actor_ref):
                     return None
+                prior = (
+                    connection.execute(
+                        text(
+                            "SELECT * FROM marketplace_message_report "
+                            "WHERE report_id = :report_id FOR UPDATE"
+                        ),
+                        {"report_id": report_id},
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if prior is None:
+                    return None
+                if prior["status"] == "resolved":
+                    if (
+                        prior["resolved_by_actor_ref"] == operator_actor_ref
+                        and prior["resolution_reason"] == reason
+                    ):
+                        return self._report(prior)
+                    raise TutorApplicationConflictError
                 row = (
                     connection.execute(
                         text(
@@ -773,6 +996,8 @@ class PostgresMessagingRepository:
                     },
                 )
                 return self._report(row)
+        except TutorApplicationConflictError:
+            raise
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
@@ -799,6 +1024,18 @@ class PostgresMessagingRepository:
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
+    def purge_bounded_events(self, *, limit: int) -> int:
+        try:
+            with self._engine.begin() as connection:
+                return int(
+                    connection.execute(
+                        text("SELECT marketplace_purge_bounded_events(:limit)"),
+                        {"limit": limit},
+                    ).scalar_one()
+                )
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
     def get_notification_preference(self, *, actor_ref: str) -> bool:
         try:
             with self._engine.connect() as connection:
@@ -816,7 +1053,7 @@ class PostgresMessagingRepository:
     def set_notification_preference(self, *, actor_ref: str, email_enabled: bool) -> bool:
         try:
             with self._engine.begin() as connection:
-                return bool(
+                result = bool(
                     connection.execute(
                         text(
                             """
@@ -831,6 +1068,18 @@ class PostgresMessagingRepository:
                         {"actor_ref": actor_ref, "email_enabled": email_enabled},
                     ).scalar_one()
                 )
+                if not email_enabled:
+                    connection.execute(
+                        text(
+                            "UPDATE marketplace_message_notification_job SET status = 'dead', "
+                            "lease_owner = NULL, lease_expires_at = NULL, "
+                            "safe_failure_code = 'rejected', updated_at = now() "
+                            "WHERE recipient_actor_ref = :actor_ref AND template = 'new_message' "
+                            "AND status IN ('queued', 'retryable')"
+                        ),
+                        {"actor_ref": actor_ref},
+                    )
+                return result
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
@@ -839,6 +1088,18 @@ class PostgresMessagingRepository:
     ) -> StoredNotificationJob | None:
         try:
             with self._engine.begin() as connection:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE marketplace_message_notification_job
+                        SET status = 'dead', lease_owner = NULL, lease_expires_at = NULL,
+                            safe_failure_code = 'unavailable', updated_at = :now
+                        WHERE status = 'leased' AND attempt >= 8
+                          AND lease_expires_at <= :now
+                        """
+                    ),
+                    {"now": now},
+                )
                 row = (
                     connection.execute(
                         text(
@@ -857,7 +1118,8 @@ class PostgresMessagingRepository:
                                 lease_expires_at = :lease_expires_at, updated_at = :now
                             FROM claimable WHERE job.job_id = claimable.job_id
                             RETURNING job.job_id, job.message_id, job.recipient_actor_ref,
-                                      job.attempt, job.lease_owner, job.lease_expires_at
+                                      job.attempt, job.lease_owner, job.lease_expires_at,
+                                      job.template
                             """
                         ),
                         {
@@ -922,6 +1184,66 @@ class PostgresMessagingRepository:
                     ).scalar_one_or_none()
                     is not None
                 )
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def recover_notifications(
+        self,
+        *,
+        conversation_id: UUID,
+        operator_actor_ref: str,
+        reason: str,
+        now: datetime,
+    ) -> bool:
+        try:
+            with self._engine.begin() as connection:
+                if not self._has_report_capability(connection, operator_actor_ref):
+                    return False
+                recovered = connection.execute(
+                    text(
+                        "UPDATE marketplace_message_notification_job AS job "
+                        "SET status = 'queued', attempt = 0, available_at = :now, "
+                        "lease_owner = NULL, lease_expires_at = NULL, "
+                        "safe_failure_code = NULL, updated_at = :now "
+                        "FROM marketplace_message AS message "
+                        "WHERE job.message_id = message.message_id "
+                        "AND message.conversation_id = :conversation_id "
+                        "AND job.status = 'dead'"
+                    ),
+                    {"conversation_id": conversation_id, "now": now},
+                ).rowcount
+                if recovered == 0:
+                    return bool(
+                        connection.execute(
+                            text(
+                                "SELECT 1 FROM marketplace_notification_recovery_audit "
+                                "WHERE conversation_id = :conversation_id "
+                                "AND operator_actor_ref = :actor AND reason = :reason"
+                            ),
+                            {
+                                "conversation_id": conversation_id,
+                                "actor": operator_actor_ref,
+                                "reason": reason,
+                            },
+                        ).scalar_one_or_none()
+                    )
+                connection.execute(
+                    text(
+                        "INSERT INTO marketplace_notification_recovery_audit "
+                        "(audit_id, conversation_id, operator_actor_ref, reason, "
+                        "jobs_requeued, occurred_at) VALUES (:audit_id, :conversation_id, "
+                        ":actor, :reason, :jobs, :now)"
+                    ),
+                    {
+                        "audit_id": uuid4(),
+                        "conversation_id": conversation_id,
+                        "actor": operator_actor_ref,
+                        "reason": reason,
+                        "jobs": recovered,
+                        "now": now,
+                    },
+                )
+                return True
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
@@ -1006,6 +1328,8 @@ class MessagingService:
         retention_days: int | None,
         accepting_new_conversations: bool = True,
         notification_provider: MarketplaceNotificationProvider | None = None,
+        system_notifications_enabled: bool = False,
+        provider_retention_enabled: bool = False,
     ) -> None:
         self._enabled = enabled
         self._repository = repository
@@ -1014,6 +1338,8 @@ class MessagingService:
         self._retention_days = retention_days
         self._accepting_new_conversations = accepting_new_conversations
         self._notification_provider = notification_provider
+        self._system_notifications_enabled = system_notifications_enabled
+        self._provider_retention_enabled = provider_retention_enabled
 
     async def create_conversation(
         self, *, principal: ClerkPrincipal, tutor_id: UUID
@@ -1031,13 +1357,23 @@ class MessagingService:
         return self._conversation_view(conversation, actor_ref)
 
     async def list_conversations(
-        self, *, principal: ClerkPrincipal
-    ) -> tuple[ConversationView, ...]:
+        self, *, principal: ClerkPrincipal, cursor: str | None, limit: int
+    ) -> tuple[tuple[ConversationView, ...], str | None]:
         actor_ref = self._actor_ref(principal)
-        conversations = await asyncio.to_thread(
-            self._repository.list_conversations, actor_ref=actor_ref
+        before_created_at, before_conversation_id = self._decode_conversation_cursor(cursor)
+        conversations, has_more = await asyncio.to_thread(
+            self._repository.list_conversations,
+            actor_ref=actor_ref,
+            before_created_at=before_created_at,
+            before_conversation_id=before_conversation_id,
+            limit=limit,
         )
-        return tuple(self._conversation_view(value, actor_ref) for value in conversations)
+        return (
+            tuple(self._conversation_view(value, actor_ref) for value in conversations),
+            self._encode_conversation_cursor(conversations[-1])
+            if has_more and conversations
+            else None,
+        )
 
     async def list_messages(
         self,
@@ -1130,6 +1466,7 @@ class MessagingService:
             reporter_actor_ref=actor_ref,
             reason=reason,
             details=details.strip() if details is not None else None,
+            now=datetime.now(UTC),
         )
         if report is None:
             raise TutorApplicationConflictError
@@ -1137,16 +1474,20 @@ class MessagingService:
 
     async def list_reports(
         self, *, principal: ClerkPrincipal, offset: int, limit: int
-    ) -> tuple[ReportView, ...]:
-        reports = await asyncio.to_thread(
+    ) -> tuple[tuple[ReportView, ...], int | None]:
+        result = await asyncio.to_thread(
             self._repository.list_reports_for_operator,
             operator_actor_ref=self._actor_ref(principal),
             offset=offset,
             limit=limit,
         )
-        if reports is None:
+        if result is None:
             raise HumanTutorMarketplaceForbiddenError
-        return tuple(self._report_view(report) for report in reports)
+        reports, has_more = result
+        return (
+            tuple(self._report_view(report) for report in reports),
+            offset + limit if has_more else None,
+        )
 
     async def get_report(self, *, principal: ClerkPrincipal, report_id: UUID) -> ReportView:
         result = await asyncio.to_thread(
@@ -1184,6 +1525,19 @@ class MessagingService:
             raise HumanTutorMarketplaceForbiddenError
         return self._report_view(report)
 
+    async def recover_notifications(
+        self, *, principal: ClerkPrincipal, conversation_id: UUID, reason: str
+    ) -> None:
+        self._require_enabled()
+        if not await asyncio.to_thread(
+            self._repository.recover_notifications,
+            conversation_id=conversation_id,
+            operator_actor_ref=self._actor_ref(principal),
+            reason=reason,
+            now=datetime.now(UTC),
+        ):
+            raise HumanTutorMarketplaceForbiddenError
+
     async def purge_expired(self, *, now: datetime, limit: int = 1000) -> int:
         self._require_enabled()
         if self._retention_days is None:
@@ -1195,7 +1549,10 @@ class MessagingService:
         )
 
     async def run_one_notification_job(self, *, worker: str) -> bool:
-        if not self._enabled or self._retention_days is None or self._notification_provider is None:
+        if (
+            not (self._enabled or self._system_notifications_enabled)
+            or self._notification_provider is None
+        ):
             return False
         now = datetime.now(UTC)
         job = await asyncio.to_thread(
@@ -1206,9 +1563,21 @@ class MessagingService:
         )
         if job is None:
             return False
+        if job.template == "new_message" and not await asyncio.to_thread(
+            self._repository.get_notification_preference,
+            actor_ref=job.recipient_actor_ref,
+        ):
+            await asyncio.to_thread(
+                self._repository.finish_notification,
+                job_id=job.job_id,
+                lease_owner=worker,
+                now=datetime.now(UTC),
+                outcome="rejected",
+            )
+            return True
         outcome = await self._notification_provider.deliver(
             recipient_actor_ref=job.recipient_actor_ref,
-            template="new_message",
+            template=job.template,
             idempotency_key=f"marketplace-message:{job.job_id}",
         )
         await asyncio.to_thread(
@@ -1230,6 +1599,11 @@ class MessagingService:
                 limit=limit,
             )
         )
+
+    async def run_provider_retention_batch(self, *, limit: int = 1000) -> bool:
+        if not self._provider_retention_enabled:
+            return False
+        return bool(await asyncio.to_thread(self._repository.purge_bounded_events, limit=limit))
 
     async def get_notification_preference(self, *, principal: ClerkPrincipal) -> bool:
         return await asyncio.to_thread(
@@ -1309,7 +1683,23 @@ class MessagingService:
         return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
     @staticmethod
+    def _encode_conversation_cursor(value: StoredConversation) -> str:
+        payload = json.dumps(
+            [value.created_at.astimezone(UTC).isoformat(), str(value.conversation_id)],
+            separators=(",", ":"),
+        ).encode()
+        return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+    @staticmethod
+    def _decode_conversation_cursor(cursor: str | None) -> tuple[datetime | None, UUID | None]:
+        return MessagingService._decode_timestamp_cursor(cursor)
+
+    @staticmethod
     def _decode_cursor(cursor: str | None) -> tuple[datetime | None, UUID | None]:
+        return MessagingService._decode_timestamp_cursor(cursor)
+
+    @staticmethod
+    def _decode_timestamp_cursor(cursor: str | None) -> tuple[datetime | None, UUID | None]:
         if cursor is None:
             return None, None
         try:

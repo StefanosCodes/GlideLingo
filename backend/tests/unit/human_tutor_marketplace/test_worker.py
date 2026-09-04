@@ -33,6 +33,10 @@ class JobComponents:
         self.calls.append("reconciliation")
         return self.completed == "reconciliation"
 
+    async def run_one_connect_refresh_job(self, **kwargs: Any) -> bool:
+        self.calls.append("connect_refresh")
+        return self.completed == "connect_refresh"
+
     async def run_one_money_job(self, **kwargs: Any) -> bool:
         self.calls.append("money")
         return self.completed == "money"
@@ -52,6 +56,10 @@ class JobComponents:
     async def run_retention_batch(self, **kwargs: Any) -> bool:
         self.calls.append("retention")
         return self.completed == "retention"
+
+    async def run_provider_retention_batch(self, **kwargs: Any) -> bool:
+        self.calls.append("provider_retention")
+        return self.completed == "provider_retention"
 
 
 def processor(
@@ -111,11 +119,21 @@ def test_worker_arguments_bound_poll_interval() -> None:
         _arguments(["--poll-seconds", "61"])
 
 
-def test_processor_claims_each_durable_queue_in_recovery_order() -> None:
+def test_processor_services_every_durable_queue_in_each_bounded_poll() -> None:
     components = JobComponents("reminder")
 
     assert asyncio.run(processor(components).run_one_job(worker="worker-a")) is True
-    assert components.calls == ["expiry", "reconciliation", "money", "reminder"]
+    assert components.calls == [
+        "connect_refresh",
+        "reconciliation",
+        "expiry",
+        "money",
+        "reminder",
+        "notification",
+        "calendar",
+        "provider_retention",
+        "retention",
+    ]
 
 
 def test_processor_reaches_calendar_and_retention_when_earlier_queues_are_idle() -> None:
@@ -123,12 +141,14 @@ def test_processor_reaches_calendar_and_retention_when_earlier_queues_are_idle()
 
     assert asyncio.run(processor(components).run_one_job(worker="worker-a")) is False
     assert components.calls == [
-        "expiry",
+        "connect_refresh",
         "reconciliation",
+        "expiry",
         "money",
         "reminder",
         "notification",
         "calendar",
+        "provider_retention",
         "retention",
     ]
 
@@ -140,4 +160,16 @@ def test_processor_skips_commerce_queues_during_staged_activation() -> None:
         asyncio.run(processor(components, commerce_enabled=False).run_one_job(worker="worker-a"))
         is True
     )
-    assert components.calls == ["notification", "calendar"]
+    assert components.calls == ["notification", "calendar", "provider_retention", "retention"]
+
+
+def test_processor_does_not_starve_lower_queues_behind_reconciliation_work() -> None:
+    components = JobComponents("reconciliation")
+
+    assert asyncio.run(processor(components).run_one_job(worker="worker-a")) is True
+    assert components.calls[-4:] == [
+        "notification",
+        "calendar",
+        "provider_retention",
+        "retention",
+    ]

@@ -5,7 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { MarketplaceReview } from '@/features/tutor-marketplace/api';
 import { MarketplaceReviewsOperationsScreen } from '@/features/tutor-marketplace/marketplace-reviews-operations-screen';
 
-const mockList = jest.fn<() => Promise<MarketplaceReview[]>>();
+const mockList = jest.fn<() => Promise<{ items: MarketplaceReview[]; nextOffset: number | null }>>();
 const mockModerate = jest.fn<() => Promise<MarketplaceReview>>();
 jest.mock('@/features/tutor-marketplace/api', () => ({
   listMarketplaceReviews: () => mockList(),
@@ -40,7 +40,7 @@ beforeEach(() => { mockList.mockReset(); mockModerate.mockReset(); });
 afterEach(cleanup);
 
 test('requires a recorded reason and applies the returned moderation state', async () => {
-  mockList.mockResolvedValue([review]);
+  mockList.mockResolvedValue({ items: [review], nextOffset: null });
   mockModerate.mockResolvedValue({
     ...review,
     moderationState: 'hidden',
@@ -63,7 +63,7 @@ test('requires a recorded reason and applies the returned moderation state', asy
 });
 
 test('keeps the prior state visible when a moderation request fails', async () => {
-  mockList.mockResolvedValue([review]);
+  mockList.mockResolvedValue({ items: [review], nextOffset: null });
   mockModerate.mockRejectedValue(new Error('offline'));
   const screen = await render(<SafeAreaProvider initialMetrics={metrics}>
     <MarketplaceReviewsOperationsScreen />

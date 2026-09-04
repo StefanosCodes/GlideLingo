@@ -108,6 +108,15 @@ def create_app(
     settings = settings or Settings()
     configure_logging(settings.log_level)
     database_engine = create_database_engine(settings)
+    payment_database_engine = (
+        create_database_engine(
+            settings,
+            database_url=settings.human_tutor_payment_database_url.get_secret_value(),
+        )
+        if settings.human_tutor_commerce_enabled
+        and settings.human_tutor_payment_database_url is not None
+        else None
+    )
     lesson_tutor_gateway = (
         LessonTutorHttpClient(
             base_url=settings.lesson_tutor_service_url,
@@ -196,6 +205,8 @@ def create_app(
         actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
         retention_days=settings.human_tutor_message_retention_days,
         accepting_new_conversations=settings.human_tutor_marketplace_acquisition_enabled,
+        system_notifications_enabled=settings.human_tutor_google_calendar_enabled,
+        provider_retention_enabled=settings.human_tutor_marketplace_enabled,
     )
     discovery_service = marketplace_discovery_service
     if discovery_service is None and settings.human_tutor_marketplace_enabled:
@@ -230,7 +241,10 @@ def create_app(
     assert discovery_service is not None or not settings.human_tutor_marketplace_enabled
     booking_runtime = marketplace_booking_service or BookingService(
         enabled=settings.human_tutor_commerce_enabled,
-        repository=PostgresBookingRepository(engine=database_engine),
+        repository=PostgresBookingRepository(
+            engine=database_engine,
+            payment_engine=payment_database_engine,
+        ),
         provider=stripe_marketplace_provider,
         discovery=discovery_service
         or MarketplaceDiscoveryService(
@@ -256,7 +270,10 @@ def create_app(
     )
     lifecycle_runtime = marketplace_lifecycle_service or LifecycleService(
         enabled=settings.human_tutor_commerce_enabled,
-        repository=PostgresLifecycleRepository(engine=database_engine),
+        repository=PostgresLifecycleRepository(
+            engine=database_engine,
+            payment_engine=payment_database_engine,
+        ),
         booking_service=booking_runtime,
         provider=stripe_marketplace_provider,
         pseudonym_key=(
@@ -266,6 +283,7 @@ def create_app(
         ),
         actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
         payout_execution_enabled=settings.human_tutor_payout_execution_enabled,
+        platform_account_id=settings.human_tutor_stripe_platform_account_id,
     )
     learning_bridge_runtime = marketplace_learning_bridge_service or LearningBridgeService(
         enabled=settings.human_tutor_learning_bridge_enabled,
@@ -299,6 +317,8 @@ def create_app(
                             if stripe_marketplace_provider is not None:
                                 await stripe_marketplace_provider.close()
                         finally:
+                            if payment_database_engine is not None:
+                                payment_database_engine.dispose()
                             database_engine.dispose()
 
     application = FastAPI(
@@ -306,7 +326,10 @@ def create_app(
         version="0.1.0",
         lifespan=lifespan,
     )
-    application.state.database_probe = create_database_probe(database_engine)
+    application.state.database_probe = create_database_probe(
+        database_engine,
+        payment_engine=payment_database_engine,
+    )
     application.state.desktop_minimum_supported_version = settings.desktop_minimum_supported_version
     application.state.revenuecat_webhook_max_body_bytes = settings.revenuecat_webhook_max_body_bytes
     application.state.billing_service = billing_service or BillingService(

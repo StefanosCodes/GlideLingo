@@ -1,6 +1,8 @@
 """Booking lifecycle, delayed money jobs, earnings, and verified reviews."""
 
 import asyncio
+import hashlib
+import hmac
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -38,6 +40,7 @@ LifecycleAction = Literal[
     "dispute",
     "resolve_refund",
     "resolve_release",
+    "calendar_conflict_refund",
 ]
 
 
@@ -96,9 +99,60 @@ def next_weekly_payout_at(eligible_at: datetime) -> datetime:
     return candidate if candidate >= eligible_utc else candidate + timedelta(days=7)
 
 
+def transition_fingerprint(
+    *, action: LifecycleAction, reason: str, new_starts_at: datetime | None
+) -> str:
+    return hashlib.sha256(
+        "\0".join(
+            (action, reason, new_starts_at.isoformat() if new_starts_at is not None else "")
+        ).encode()
+    ).hexdigest()
+
+
 class PostgresLifecycleRepository:
-    def __init__(self, *, engine: Engine) -> None:
+    def __init__(self, *, engine: Engine, payment_engine: Engine | None = None) -> None:
         self._engine = engine
+        self._payment_engine = payment_engine or engine
+
+    def is_transition_replay(
+        self,
+        *,
+        operation_id: UUID,
+        booking_id: UUID,
+        actor_ref: str,
+        action: LifecycleAction,
+        reason: str,
+        new_starts_at: datetime | None,
+    ) -> bool:
+        try:
+            with self._engine.connect() as connection:
+                prior = (
+                    connection.execute(
+                        text(
+                            "SELECT booking_id, actor_ref, action, request_fingerprint "
+                            "FROM marketplace_booking_transition_operation "
+                            "WHERE operation_id = :operation_id"
+                        ),
+                        {"operation_id": operation_id},
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+            if prior is None:
+                return False
+            if (
+                prior["booking_id"] != booking_id
+                or prior["actor_ref"] != actor_ref
+                or prior["action"] != action
+                or prior["request_fingerprint"]
+                != transition_fingerprint(action=action, reason=reason, new_starts_at=new_starts_at)
+            ):
+                raise TutorApplicationConflictError
+            return True
+        except TutorApplicationConflictError:
+            raise
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
 
     def transition(
         self,
@@ -110,9 +164,13 @@ class PostgresLifecycleRepository:
         new_starts_at: datetime | None,
         now: datetime,
         expected_profile_version: int | None = None,
+        operation_id: UUID | None = None,
     ) -> bool:
         try:
-            with self._engine.begin() as connection:
+            # Lifecycle transitions are the authority boundary that can enqueue
+            # money movement.  Use the distinct payment principal so the
+            # general application role cannot forge transition evidence.
+            with self._payment_engine.begin() as connection:
                 row = (
                     connection.execute(
                         text("SELECT * FROM marketplace_booking WHERE booking_id = :id FOR UPDATE"),
@@ -123,12 +181,61 @@ class PostgresLifecycleRepository:
                 )
                 if row is None:
                     return False
+                # Direct repository callers still receive database-coupled operation
+                # evidence; API callers supply the stable ID used for replay.
+                operation_id = operation_id or uuid4()
+                if operation_id is not None:
+                    request_fingerprint = transition_fingerprint(
+                        action=action, reason=reason, new_starts_at=new_starts_at
+                    )
+                    prior_operation = (
+                        connection.execute(
+                            text(
+                                "SELECT booking_id, actor_ref, action, request_fingerprint "
+                                "FROM marketplace_booking_transition_operation "
+                                "WHERE operation_id = :operation_id"
+                            ),
+                            {"operation_id": operation_id},
+                        )
+                        .mappings()
+                        .one_or_none()
+                    )
+                    if prior_operation is not None:
+                        if (
+                            prior_operation["booking_id"] == booking_id
+                            and prior_operation["actor_ref"] == actor_ref
+                            and prior_operation["action"] == action
+                            and prior_operation["request_fingerprint"] == request_fingerprint
+                        ):
+                            return True
+                        raise TutorApplicationConflictError
+                    connection.execute(
+                        text(
+                            """
+                            INSERT INTO marketplace_booking_transition_operation
+                              (operation_id, booking_id, actor_ref, action, request_fingerprint)
+                            VALUES (:operation_id, :booking_id, :actor_ref, :action, :fingerprint)
+                            """
+                        ),
+                        {
+                            "operation_id": operation_id,
+                            "booking_id": booking_id,
+                            "actor_ref": actor_ref,
+                            "action": action,
+                            "fingerprint": request_fingerprint,
+                        },
+                    )
                 role = self._role(connection, row=row, actor_ref=actor_ref)
                 current = row["state"]
                 if action == "reschedule":
                     if role not in {"learner", "tutor"} or current != "confirmed":
                         raise TutorApplicationConflictError
-                    if new_starts_at is None or new_starts_at <= now + timedelta(hours=12):
+                    cutoff = timedelta(hours=row["cancellation_cutoff_hours"])
+                    if (
+                        new_starts_at is None
+                        or row["starts_at"] <= now + cutoff
+                        or new_starts_at <= now + cutoff
+                    ):
                         raise TutorApplicationConflictError
                     current_profile_version = connection.execute(
                         text(
@@ -143,6 +250,49 @@ class PostgresLifecycleRepository:
                     ):
                         raise TutorApplicationConflictError
                     duration = row["ends_at"] - row["starts_at"]
+                    calendar = (
+                        connection.execute(
+                            text(
+                                "SELECT status, cache_generation, cache_expires_at "
+                                "FROM marketplace_calendar_connection "
+                                "WHERE tutor_id = :tutor_id FOR SHARE"
+                            ),
+                            {"tutor_id": row["tutor_id"]},
+                        )
+                        .mappings()
+                        .one_or_none()
+                    )
+                    if calendar is not None:
+                        if (
+                            calendar["status"] != "connected"
+                            or calendar["cache_generation"] is None
+                            or calendar["cache_expires_at"] is None
+                            or calendar["cache_expires_at"] <= now
+                        ):
+                            raise TutorApplicationConflictError
+                        externally_busy = connection.execute(
+                            text(
+                                """
+                                SELECT 1 FROM marketplace_calendar_busy_interval
+                                WHERE tutor_id = :tutor_id
+                                  AND generation = :generation
+                                  AND tstzrange(starts_at, ends_at, '[)') && tstzrange(
+                                    :starts_at - make_interval(mins => :buffer_before),
+                                    :ends_at + make_interval(mins => :buffer_after), '[)')
+                                LIMIT 1
+                                """
+                            ),
+                            {
+                                "tutor_id": row["tutor_id"],
+                                "generation": calendar["cache_generation"],
+                                "starts_at": new_starts_at,
+                                "ends_at": new_starts_at + duration,
+                                "buffer_before": row["buffer_before_minutes"],
+                                "buffer_after": row["buffer_after_minutes"],
+                            },
+                        ).scalar_one_or_none()
+                        if externally_busy is not None:
+                            raise TutorApplicationConflictError
                     updated = connection.execute(
                         text(
                             """
@@ -241,14 +391,24 @@ class PostgresLifecycleRepository:
                     "state": target,
                     "money_state": money_state,
                     "now": now,
-                    "completed_at": now if action == "complete" else row["completed_at"],
+                    "completed_at": (
+                        now if action in {"complete", "learner_no_show"} else row["completed_at"]
+                    ),
                     "dispute_deadline": (
                         now + timedelta(hours=row["dispute_window_hours"])
-                        if action == "complete"
+                        if action in {"complete", "learner_no_show"}
                         else row["dispute_deadline_at"]
                     ),
-                    "cancelled_at": now if action == "cancel" else row["cancelled_at"],
-                    "cancelled_by": role if action == "cancel" else row["cancelled_by_role"],
+                    "cancelled_at": (
+                        now
+                        if action in {"cancel", "calendar_conflict_refund"}
+                        else row["cancelled_at"]
+                    ),
+                    "cancelled_by": (
+                        role
+                        if action in {"cancel", "calendar_conflict_refund"}
+                        else row["cancelled_by_role"]
+                    ),
                     "no_show": (
                         "learner"
                         if action == "learner_no_show"
@@ -257,7 +417,7 @@ class PostgresLifecycleRepository:
                         else row["no_show_role"]
                     ),
                     "resolution": reason
-                    if action.startswith("resolve_")
+                    if action.startswith("resolve_") or action == "calendar_conflict_refund"
                     else row["resolution_reason"],
                 }
                 connection.execute(
@@ -277,7 +437,7 @@ class PostgresLifecycleRepository:
                     ),
                     values,
                 )
-                if action in {"cancel", "tutor_no_show"}:
+                if action in {"cancel", "tutor_no_show", "calendar_conflict_refund"}:
                     connection.execute(
                         text(
                             "UPDATE marketplace_booking_reminder_job SET state = 'cancelled', "
@@ -308,11 +468,21 @@ class PostgresLifecycleRepository:
                 connection.execute(
                     text(
                         """
-                        UPDATE marketplace_money_operation
-                        SET state = 'retryable', lease_owner = NULL,
-                            lease_expires_at = NULL, available_at = :now,
-                            safe_failure_code = 'lease_expired', updated_at = :now
-                        WHERE state = 'leased' AND lease_expires_at <= :now
+                        WITH expired AS (
+                          UPDATE marketplace_money_operation
+                          SET state = CASE WHEN attempt >= 8 THEN 'dead' ELSE 'retryable' END,
+                              lease_owner = NULL,
+                              lease_expires_at = NULL, available_at = :now,
+                              safe_failure_code = CASE WHEN attempt >= 8
+                                THEN 'attempts_exhausted' ELSE 'lease_expired' END,
+                              updated_at = :now
+                          WHERE state = 'leased' AND lease_expires_at <= :now
+                          RETURNING booking_id, kind, state
+                        )
+                        UPDATE marketplace_booking AS booking
+                        SET money_state = expired.kind || '_ambiguous', updated_at = :now
+                        FROM expired WHERE expired.state = 'dead'
+                          AND booking.booking_id = expired.booking_id
                         """
                     ),
                     {"now": now},
@@ -322,6 +492,7 @@ class PostgresLifecycleRepository:
                         """
                         SELECT operation_id FROM marketplace_money_operation
                         WHERE state IN ('queued', 'retryable') AND available_at <= :now
+                          AND attempt < 8
                           AND (:include_transfers OR kind <> 'transfer')
                         ORDER BY available_at, created_at, operation_id
                         FOR UPDATE SKIP LOCKED LIMIT 1
@@ -365,7 +536,7 @@ class PostgresLifecycleRepository:
         ):
             return False
         try:
-            with self._engine.begin() as connection:
+            with self._payment_engine.begin() as connection:
                 current = connection.execute(
                     text(
                         "SELECT state FROM marketplace_money_operation "
@@ -426,7 +597,7 @@ class PostgresLifecycleRepository:
                         .mappings()
                         .one()
                     )
-                    self._queue_money(
+                    self._queue_money_authority(
                         connection,
                         row=booking,
                         kind="refund",
@@ -449,6 +620,18 @@ class PostgresLifecycleRepository:
     ) -> StoredReminderJob | None:
         try:
             with self._engine.begin() as connection:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE marketplace_booking_reminder_job
+                        SET state = 'dead', lease_owner = NULL, lease_expires_at = NULL,
+                            safe_failure_code = 'attempts_exhausted', updated_at = :now
+                        WHERE state = 'leased' AND attempt >= 8
+                          AND lease_expires_at <= :now
+                        """
+                    ),
+                    {"now": now},
+                )
                 row = (
                     connection.execute(
                         text(
@@ -622,7 +805,20 @@ class PostgresLifecycleRepository:
                     .one_or_none()
                 )
                 if row is None:
-                    return False
+                    return bool(
+                        connection.execute(
+                            text(
+                                "SELECT 1 FROM marketplace_money_recovery_audit "
+                                "WHERE booking_id = :booking_id "
+                                "AND operator_actor_ref = :actor AND reason = :reason"
+                            ),
+                            {
+                                "booking_id": booking_id,
+                                "actor": operator_actor_ref,
+                                "reason": reason,
+                            },
+                        ).scalar_one_or_none()
+                    )
                 connection.execute(
                     text(
                         "UPDATE marketplace_booking SET money_state = :state, updated_at = :now "
@@ -638,7 +834,98 @@ class PostgresLifecycleRepository:
                     .mappings()
                     .one()
                 )
-                self._audit(connection, booking, booking["state"], operator_actor_ref, reason)
+                connection.execute(
+                    text(
+                        "INSERT INTO marketplace_money_recovery_audit "
+                        "(audit_id, booking_id, operator_actor_ref, reason, occurred_at) "
+                        "VALUES (:audit_id, :booking_id, :actor, :reason, :now)"
+                    ),
+                    {
+                        "audit_id": uuid4(),
+                        "booking_id": booking_id,
+                        "actor": operator_actor_ref,
+                        "reason": reason,
+                        "now": now,
+                    },
+                )
+                self._audit(
+                    connection,
+                    booking,
+                    booking["state"],
+                    operator_actor_ref,
+                    "money_recovery_requeued",
+                )
+                return True
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def recover_delivery_jobs(
+        self, *, booking_id: UUID, operator_actor_ref: str, reason: str, now: datetime
+    ) -> bool:
+        try:
+            with self._engine.begin() as connection:
+                if not self._has_capability(connection, operator_actor_ref, "manage_bookings"):
+                    return False
+                if (
+                    connection.execute(
+                        text("SELECT 1 FROM marketplace_booking WHERE booking_id = :id FOR UPDATE"),
+                        {"id": booking_id},
+                    ).scalar_one_or_none()
+                    is None
+                ):
+                    return False
+                reminders = connection.execute(
+                    text(
+                        "UPDATE marketplace_booking_reminder_job SET state = 'queued', "
+                        "attempt = 0, available_at = :now, lease_owner = NULL, "
+                        "lease_expires_at = NULL, safe_failure_code = 'operator_reconciled', "
+                        "updated_at = :now WHERE booking_id = :id AND state = 'dead'"
+                    ),
+                    {"id": booking_id, "now": now},
+                ).rowcount
+                notifications = connection.execute(
+                    text(
+                        "UPDATE marketplace_message_notification_job AS job "
+                        "SET status = 'queued', attempt = 0, available_at = :now, "
+                        "lease_owner = NULL, lease_expires_at = NULL, "
+                        "safe_failure_code = NULL, updated_at = :now "
+                        "FROM marketplace_message AS message "
+                        "JOIN marketplace_conversation AS conversation "
+                        "ON conversation.conversation_id = message.conversation_id "
+                        "WHERE job.message_id = message.message_id "
+                        "AND conversation.booking_id = :id AND job.status = 'dead'"
+                    ),
+                    {"id": booking_id, "now": now},
+                ).rowcount
+                if reminders + notifications == 0:
+                    return bool(
+                        connection.execute(
+                            text(
+                                "SELECT 1 FROM marketplace_delivery_recovery_audit "
+                                "WHERE booking_id = :id AND operator_actor_ref = :actor "
+                                "AND reason = :reason"
+                            ),
+                            {"id": booking_id, "actor": operator_actor_ref, "reason": reason},
+                        ).scalar_one_or_none()
+                    )
+                connection.execute(
+                    text(
+                        "INSERT INTO marketplace_delivery_recovery_audit "
+                        "(audit_id, booking_id, operator_actor_ref, reason, "
+                        "reminder_jobs_requeued, notification_jobs_requeued, occurred_at) "
+                        "VALUES (:audit_id, :id, :actor, :reason, :reminders, "
+                        ":notifications, :now)"
+                    ),
+                    {
+                        "audit_id": uuid4(),
+                        "id": booking_id,
+                        "actor": operator_actor_ref,
+                        "reason": reason,
+                        "reminders": reminders,
+                        "notifications": notifications,
+                        "now": now,
+                    },
+                )
                 return True
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
@@ -663,8 +950,7 @@ class PostgresLifecycleRepository:
                         SELECT :review_id, booking_id, :learner, tutor_id, :rating, :body
                         FROM marketplace_booking
                         WHERE booking_id = :booking_id AND learner_actor_ref = :learner
-                        ON CONFLICT (booking_id) DO UPDATE
-                        SET rating = marketplace_booking_review.rating
+                        ON CONFLICT (booking_id) DO NOTHING
                         RETURNING review_id, booking_id, tutor_id, rating, body,
                                   moderation_state, moderation_reason, moderated_at, created_at
                         """
@@ -680,20 +966,42 @@ class PostgresLifecycleRepository:
                     .mappings()
                     .one_or_none()
                 )
+                if row is None:
+                    prior = (
+                        connection.execute(
+                            text(
+                                "SELECT review_id, booking_id, tutor_id, rating, body, "
+                                "moderation_state, moderation_reason, moderated_at, created_at "
+                                "FROM marketplace_booking_review "
+                                "WHERE booking_id = :booking_id "
+                                "AND learner_actor_ref = :learner"
+                            ),
+                            {"booking_id": booking_id, "learner": learner_actor_ref},
+                        )
+                        .mappings()
+                        .one_or_none()
+                    )
+                    if prior is None:
+                        return None
+                    if prior["rating"] != rating or prior["body"] != body:
+                        raise TutorApplicationConflictError
+                    row = prior
                 return self._review(row) if row is not None else None
+        except TutorApplicationConflictError:
+            raise
         except (IntegrityError, DBAPIError) as error:
             raise TutorApplicationConflictError from error
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
     def list_reviews_for_operator(
-        self, *, operator_actor_ref: str, limit: int
-    ) -> tuple[ReviewView, ...] | None:
+        self, *, operator_actor_ref: str, offset: int, limit: int
+    ) -> tuple[tuple[ReviewView, ...], bool] | None:
         try:
             with self._engine.connect() as connection:
                 if not self._has_capability(connection, operator_actor_ref, "moderate_reviews"):
                     return None
-                return tuple(
+                rows = tuple(
                     self._review(row)
                     for row in connection.execute(
                         text(
@@ -701,12 +1009,14 @@ class PostgresLifecycleRepository:
                             SELECT review_id, booking_id, tutor_id, rating, body,
                                    moderation_state, moderation_reason, moderated_at, created_at
                             FROM marketplace_booking_review
-                            ORDER BY created_at DESC, review_id LIMIT :limit
+                            ORDER BY created_at DESC, review_id
+                            OFFSET :offset LIMIT :limit
                             """
                         ),
-                        {"limit": limit},
+                        {"offset": offset, "limit": limit + 1},
                     ).mappings()
                 )
+                return rows[:limit], len(rows) > limit
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
@@ -723,6 +1033,26 @@ class PostgresLifecycleRepository:
             with self._engine.begin() as connection:
                 if not self._has_capability(connection, operator_actor_ref, "moderate_reviews"):
                     return None
+                prior = (
+                    connection.execute(
+                        text(
+                            "SELECT * FROM marketplace_booking_review "
+                            "WHERE review_id = :review_id FOR UPDATE"
+                        ),
+                        {"review_id": review_id},
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if prior is None:
+                    return None
+                prior_state = prior["moderation_state"]
+                if (
+                    prior_state == moderation_state
+                    and prior["moderation_reason"] == reason
+                    and prior["moderated_by_actor_ref"] == operator_actor_ref
+                ):
+                    return self._review(prior)
                 row = (
                     connection.execute(
                         text(
@@ -746,6 +1076,23 @@ class PostgresLifecycleRepository:
                     )
                     .mappings()
                     .one_or_none()
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO marketplace_booking_review_moderation_audit "
+                        "(audit_id, review_id, from_state, to_state, operator_actor_ref, "
+                        "reason, occurred_at) VALUES (:audit_id, :review_id, :from_state, "
+                        ":to_state, :actor, :reason, :now)"
+                    ),
+                    {
+                        "audit_id": uuid4(),
+                        "review_id": review_id,
+                        "from_state": prior_state,
+                        "to_state": moderation_state,
+                        "actor": operator_actor_ref,
+                        "reason": reason,
+                        "now": now,
+                    },
                 )
                 return self._review(row) if row is not None else None
         except SQLAlchemyError as error:
@@ -787,7 +1134,13 @@ class PostgresLifecycleRepository:
             )
             if role == "tutor" or before_cutoff:
                 return "cancelled", "refund", row["amount_minor"], now
-            return "cancelled", "transfer", row["tutor_amount_minor"], now
+            eligibility = row["ends_at"] + timedelta(hours=row["dispute_window_hours"])
+            return (
+                "cancelled",
+                "transfer",
+                row["tutor_amount_minor"],
+                next_weekly_payout_at(eligibility + timedelta(microseconds=1)),
+            )
         if action == "complete" and state == "confirmed" and role in {"learner", "tutor"}:
             if now < row["ends_at"]:
                 raise TutorApplicationConflictError
@@ -796,17 +1149,34 @@ class PostgresLifecycleRepository:
                 "completed",
                 "transfer",
                 row["tutor_amount_minor"],
-                next_weekly_payout_at(deadline),
+                next_weekly_payout_at(deadline + timedelta(microseconds=1)),
             )
         if action == "learner_no_show" and state == "confirmed" and role == "tutor":
             if now < row["ends_at"]:
                 raise TutorApplicationConflictError
-            return "learner_no_show", "transfer", row["tutor_amount_minor"], now
+            deadline = now + timedelta(hours=row["dispute_window_hours"])
+            return (
+                "learner_no_show",
+                "transfer",
+                row["tutor_amount_minor"],
+                next_weekly_payout_at(deadline + timedelta(microseconds=1)),
+            )
         if action == "tutor_no_show" and state == "confirmed" and role == "learner":
             if now < row["ends_at"]:
                 raise TutorApplicationConflictError
             return "tutor_no_show", "refund", row["amount_minor"], now
-        if action == "dispute" and state == "completed" and role == "learner":
+        if action == "calendar_conflict_refund" and state == "confirmed" and role == "operator":
+            unresolved = connection.execute(
+                text(
+                    "SELECT 1 FROM marketplace_calendar_booking_conflict "
+                    "WHERE booking_id = :booking_id AND resolved_at IS NULL FOR UPDATE"
+                ),
+                {"booking_id": row["booking_id"]},
+            ).scalar_one_or_none()
+            if unresolved is None:
+                raise TutorApplicationConflictError
+            return "cancelled", "refund", row["amount_minor"], now
+        if action == "dispute" and state in {"completed", "learner_no_show"} and role == "learner":
             if row["dispute_deadline_at"] is None or now > row["dispute_deadline_at"]:
                 raise TutorApplicationConflictError
             connection.execute(
@@ -884,6 +1254,26 @@ class PostgresLifecycleRepository:
 
     @staticmethod
     def _queue_money(
+        connection: Connection,
+        *,
+        row: RowMapping,
+        kind: Literal["refund", "transfer", "reversal"],
+        amount_minor: int,
+        available_at: datetime,
+    ) -> None:
+        operation_id = connection.execute(
+            text("SELECT marketplace_queue_booking_money(:booking_id, :kind, :available_at)"),
+            {
+                "booking_id": row["booking_id"],
+                "kind": kind,
+                "available_at": available_at,
+            },
+        ).scalar_one_or_none()
+        if operation_id is None:
+            raise TutorApplicationConflictError
+
+    @staticmethod
+    def _queue_money_authority(
         connection: Connection,
         *,
         row: RowMapping,
@@ -1040,6 +1430,7 @@ class LifecycleService:
         actor_allowlist: tuple[str, ...],
         payout_execution_enabled: bool = True,
         notification_provider: MarketplaceNotificationProvider | None = None,
+        platform_account_id: str | None = None,
     ) -> None:
         self._enabled = enabled
         self._repository = repository
@@ -1049,6 +1440,7 @@ class LifecycleService:
         self._actor_allowlist = frozenset(actor_allowlist)
         self._payout_execution_enabled = payout_execution_enabled
         self._notification_provider = notification_provider
+        self._platform_account_id = platform_account_id
 
     async def transition(
         self,
@@ -1058,7 +1450,21 @@ class LifecycleService:
         action: LifecycleAction,
         reason: str,
         new_starts_at: datetime | None,
+        operation_id: UUID,
     ) -> BookingView:
+        actor_ref = self._actor_ref(principal)
+        if await asyncio.to_thread(
+            self._repository.is_transition_replay,
+            operation_id=operation_id,
+            booking_id=booking_id,
+            actor_ref=actor_ref,
+            action=action,
+            reason=reason,
+            new_starts_at=new_starts_at,
+        ):
+            return await self._booking_service.get_booking(
+                principal=principal, booking_id=booking_id
+            )
         expected_profile_version: int | None = None
         if action == "reschedule":
             if new_starts_at is None:
@@ -1068,7 +1474,6 @@ class LifecycleService:
                 booking_id=booking_id,
                 starts_at=new_starts_at,
             )
-        actor_ref = self._actor_ref(principal)
         updated = await asyncio.to_thread(
             self._repository.transition,
             booking_id=booking_id,
@@ -1078,6 +1483,7 @@ class LifecycleService:
             new_starts_at=new_starts_at,
             now=datetime.now(UTC),
             expected_profile_version=expected_profile_version,
+            operation_id=operation_id,
         )
         if not updated:
             raise TutorApplicationNotFoundError
@@ -1104,16 +1510,18 @@ class LifecycleService:
         return review
 
     async def list_reviews(
-        self, *, principal: ClerkPrincipal, limit: int
-    ) -> tuple[ReviewView, ...]:
-        reviews = await asyncio.to_thread(
+        self, *, principal: ClerkPrincipal, offset: int, limit: int
+    ) -> tuple[tuple[ReviewView, ...], int | None]:
+        result = await asyncio.to_thread(
             self._repository.list_reviews_for_operator,
             operator_actor_ref=self._actor_ref(principal),
+            offset=offset,
             limit=limit,
         )
-        if reviews is None:
+        if result is None:
             raise HumanTutorMarketplaceForbiddenError
-        return reviews
+        reviews, has_more = result
+        return reviews, offset + limit if has_more else None
 
     async def moderate_review(
         self,
@@ -1153,8 +1561,19 @@ class LifecycleService:
         if operation is None:
             return False
         provider = self._provider
-        if provider is None:
+        if provider is None or self._platform_account_id is None:
             raise HumanTutorMarketplaceUnavailableError
+        actual_platform_account = await provider.get_platform_account_id()
+        if not hmac.compare_digest(actual_platform_account, self._platform_account_id):
+            await asyncio.to_thread(
+                self._repository.fail_money_operation,
+                operation_id=operation.operation_id,
+                worker=worker,
+                code="platform_account_mismatch",
+                ambiguous=False,
+                now=datetime.now(UTC),
+            )
+            return True
         try:
             if operation.kind == "refund":
                 if operation.provider_payment_intent_id is None:
@@ -1251,6 +1670,19 @@ class LifecycleService:
     ) -> BookingView:
         if not await asyncio.to_thread(
             self._repository.recover_money_operation,
+            booking_id=booking_id,
+            operator_actor_ref=self._actor_ref(principal),
+            reason=reason,
+            now=datetime.now(UTC),
+        ):
+            raise HumanTutorMarketplaceForbiddenError
+        return await self._booking_service.get_booking(principal=principal, booking_id=booking_id)
+
+    async def recover_delivery(
+        self, *, principal: ClerkPrincipal, booking_id: UUID, reason: str
+    ) -> BookingView:
+        if not await asyncio.to_thread(
+            self._repository.recover_delivery_jobs,
             booking_id=booking_id,
             operator_actor_ref=self._actor_ref(principal),
             reason=reason,

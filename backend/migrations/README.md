@@ -148,6 +148,12 @@ tutor marketplace addenda in numeric order:
 - `013_human_tutor_marketplace_learning_bridge.sql` adds explicit booking-scoped learner consent,
   append-only consent audit, bounded learning selections, and tutor follow-up that has no foreign key
   or write path to official learning evidence.
+- `014_human_tutor_marketplace_hardening.sql` adds bounded multi-credential and multi-offering
+  ownership, exact atomic publication, participant action rate evidence, transition/review audit
+  records, strict review timing, money-operation immutability, bounded server-clock retention, and a
+  separate NOLOGIN payment-authority role. The DDL operator needs temporary `ADMIN OPTION` on
+  `glidelingo_app` so `014` can make the payment role inherit ordinary data-plane rights; runtime
+  LOGIN principals are provisioned separately as documented in the runbook.
 
 Use the same DDL-capable operator and transactional `psql --set ON_ERROR_STOP=1` posture as `006`.
 Never run these migrations from API startup. Revoke inherited Cloud SQL roles from

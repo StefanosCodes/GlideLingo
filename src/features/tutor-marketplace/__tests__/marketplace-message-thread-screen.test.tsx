@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, jest, test } from '@jest/globals';
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import type { MarketplaceMessage } from '@/features/tutor-marketplace/api';
@@ -47,6 +47,30 @@ test('renders malicious markup as literal text and sends once without clearing e
   await waitFor(() => expect(screen.getByText('YOU')).toBeTruthy());
   expect(mockSend).toHaveBeenCalledTimes(1);
   expect(screen.getByLabelText('Message').props.value).toBe('');
+});
+
+test('synchronously rejects a double submit and deduplicates a replayed message id', async () => {
+  let resolveSend: (message: MarketplaceMessage) => void = () => undefined;
+  const pending = new Promise<MarketplaceMessage>((resolve) => { resolveSend = resolve; });
+  mockList.mockResolvedValue({ items: [own], nextCursor: null });
+  mockSend.mockReturnValue(pending);
+  const screen = await render(<SafeAreaProvider initialMetrics={metrics}><MarketplaceMessageThreadScreen /></SafeAreaProvider>);
+  await waitFor(() => expect(screen.getByText('Thanks')).toBeTruthy());
+  await fireEvent.changeText(screen.getByLabelText('Message'), 'Retry safely');
+  const sendButton = screen.getByRole('button', { name: 'Send message' });
+  const pressSend = sendButton.props.onClick ?? sendButton.props.onResponderRelease;
+  expect(typeof pressSend).toBe('function');
+  await act(() => {
+    pressSend({ nativeEvent: {} });
+    pressSend({ nativeEvent: {} });
+  });
+  expect(mockSend).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    resolveSend(own);
+    await pending;
+  });
+  await waitFor(() => expect(screen.getByLabelText('Message').props.value).toBe(''));
+  expect(screen.getAllByText('Thanks')).toHaveLength(1);
 });
 
 test('offers report and block controls with user-visible outcomes', async () => {

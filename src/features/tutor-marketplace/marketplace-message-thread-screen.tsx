@@ -17,26 +17,26 @@ import {
   TutorMarketplaceClientError,
 } from '@/features/tutor-marketplace/api';
 import { isHumanTutorMessagingEnabled } from '@/features/tutor-marketplace/config';
+import { createMarketplaceClientId } from '@/features/tutor-marketplace/client-operation-id';
 import { useTheme } from '@/hooks/use-theme';
 
-type State = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; messages: MarketplaceMessage[] };
-
-function createClientMessageId(): string {
-  const value = globalThis.crypto?.randomUUID?.();
-  if (value) return value;
-  return `00000000-0000-4000-8000-${Date.now().toString().padStart(12, '0').slice(-12)}`;
-}
+type State = { kind: 'loading' } | { kind: 'error' } | {
+  kind: 'ready'; messages: MarketplaceMessage[]; nextCursor: string | null;
+};
 
 export function MarketplaceMessageThreadScreen() {
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const enabled = isHumanTutorMessagingEnabled();
   const theme = useTheme();
   const sequence = useRef(0);
+  const pendingSend = useRef<{ body: string; id: string } | null>(null);
+  const sendInFlight = useRef(false);
   const [retry, setRetry] = useState(0);
   const [state, setState] = useState<State>(enabled ? { kind: 'loading' } : { kind: 'error' });
   const [draft, setDraft] = useState('');
   const [working, setWorking] = useState<'send' | 'block' | 'report' | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
 
   useEffect(() => {
     if (!enabled) return;
@@ -44,7 +44,9 @@ export function MarketplaceMessageThreadScreen() {
     const current = ++sequence.current;
     void listMarketplaceMessages(conversationId, undefined, controller.signal)
       .then((page) => {
-        if (!controller.signal.aborted && current === sequence.current) setState({ kind: 'ready', messages: page.items });
+        if (!controller.signal.aborted && current === sequence.current) setState({
+          kind: 'ready', messages: page.items, nextCursor: page.nextCursor,
+        });
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted || current !== sequence.current) return;
@@ -54,21 +56,54 @@ export function MarketplaceMessageThreadScreen() {
     return () => controller.abort();
   }, [conversationId, enabled, retry]);
 
+  const loadOlder = async () => {
+    if (state.kind !== 'ready' || !state.nextCursor || loadingOlder) return;
+    const cursor = state.nextCursor;
+    const request = ++sequence.current;
+    setLoadingOlder(true);
+    try {
+      const page = await listMarketplaceMessages(conversationId, cursor);
+      if (request !== sequence.current) return;
+      setState((current) => current.kind === 'ready' && current.nextCursor === cursor ? {
+        kind: 'ready',
+        messages: [...page.items.filter((message) =>
+          !current.messages.some((existing) => existing.messageId === message.messageId)), ...current.messages],
+        nextCursor: page.nextCursor,
+      } : current);
+    } catch {
+      if (request === sequence.current) setActionMessage('Older messages could not be loaded.');
+    } finally {
+      if (request === sequence.current) setLoadingOlder(false);
+    }
+  };
+
   const send = async () => {
     const body = draft.trim();
-    if (working || !body) return;
+    if (sendInFlight.current || working || !body) return;
+    sendInFlight.current = true;
+    let sendAttempt = pendingSend.current;
+    if (sendAttempt?.body !== body) {
+      sendAttempt = { body, id: createMarketplaceClientId() };
+      pendingSend.current = sendAttempt;
+    }
     setWorking('send'); setActionMessage(null);
     try {
-      const message = await sendMarketplaceMessage(conversationId, createClientMessageId(), body);
-      setState((current) => current.kind === 'ready' ? { kind: 'ready', messages: [...current.messages, message] } : current);
+      const message = await sendMarketplaceMessage(conversationId, sendAttempt.id, body);
+      setState((current) => current.kind === 'ready' ? {
+        ...current,
+        messages: current.messages.some((item) => item.messageId === message.messageId)
+          ? current.messages
+          : [...current.messages, message],
+      } : current);
       setDraft('');
+      pendingSend.current = null;
     } catch (error) {
       setActionMessage(error instanceof TutorMarketplaceClientError && error.kind === 'limited'
         ? 'You have sent several messages quickly. Wait a minute before trying again.'
         : error instanceof TutorMarketplaceClientError && error.kind === 'validation'
           ? 'Before booking, messages cannot include contact details or links.'
           : 'That message was not sent. Your draft is still here.');
-    } finally { setWorking(null); }
+    } finally { sendInFlight.current = false; setWorking(null); }
   };
 
   const block = async () => {
@@ -101,6 +136,9 @@ export function MarketplaceMessageThreadScreen() {
       <GlideButton label="Try again" onPress={() => { setState({ kind: 'loading' }); setRetry((value) => value + 1); }} variant="secondary" />
     </GlideSurface> : null}
     {state.kind === 'ready' ? <>
+      {state.nextCursor ? <GlideButton disabled={loadingOlder}
+        label={loadingOlder ? 'Loading older messages…' : 'Load older messages'}
+        onPress={() => void loadOlder()} variant="secondary" /> : null}
       {state.messages.length === 0 ? <GlideSurface padding="roomy" style={styles.card} variant="tinted"><ThemedText type="body">No messages yet.</ThemedText></GlideSurface> : null}
       {state.messages.map((message) => <GlideSurface key={message.messageId} padding="regular" style={styles.card} variant={message.kind === 'system' ? 'tinted' : 'card'}>
         <ThemedText type="eyebrow" themeColor="textSecondary">{message.kind === 'system' ? 'GLIDELINGO' : message.isOwn ? 'YOU' : message.senderRole.toUpperCase()}</ThemedText>

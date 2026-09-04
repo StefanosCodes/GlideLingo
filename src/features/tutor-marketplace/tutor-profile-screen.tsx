@@ -12,11 +12,13 @@ import {
   saveTutorCredential,
   saveTutorOffering,
   setTutorPublication,
+  type TutorOffering,
   type TutorProfile,
   TutorMarketplaceClientError,
   updateTutorProfileDraft,
 } from '@/features/tutor-marketplace/api';
 import { isHumanTutorMarketplaceEnabled } from '@/features/tutor-marketplace/config';
+import { createMarketplaceClientId } from '@/features/tutor-marketplace/client-operation-id';
 import { useTheme } from '@/hooks/use-theme';
 
 type LoadState = { kind: 'loading' } | { kind: 'ready'; profile: TutorProfile } | { kind: 'error' };
@@ -28,6 +30,7 @@ export function TutorProfileScreen() {
   const [retryCount, setRetryCount] = useState(0);
   const [loadState, setLoadState] = useState<LoadState>(enabled ? { kind: 'loading' } : { kind: 'error' });
   const [working, setWorking] = useState<string | null>(null);
+  const [addingOfferingId, setAddingOfferingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -113,9 +116,26 @@ export function TutorProfileScreen() {
           <CredentialEditor profile={loadState.profile} saving={working === 'credential'} onSave={(input) =>
             void run('credential', () => saveTutorCredential(input, loadState.profile.credential?.version ?? 0))
           } />
-          <OfferingEditor profile={loadState.profile} saving={working === 'offering'} onSave={(input) =>
-            void run('offering', () => saveTutorOffering(input, loadState.profile.offering?.version ?? 0))
-          } />
+          {(loadState.profile.offerings ?? (loadState.profile.offering ? [loadState.profile.offering] : [])).map((offering) =>
+            <OfferingEditor key={offering.offeringId} offering={offering} profile={loadState.profile}
+              saving={working === `offering:${offering.offeringId}`} onSave={(input) =>
+                void run(`offering:${offering.offeringId}`, () =>
+                  saveTutorOffering(input, offering.version, offering.offeringId))
+              } />)}
+          {addingOfferingId ? <OfferingEditor key={addingOfferingId} offering={null}
+            profile={loadState.profile} saving={working === `offering:${addingOfferingId}`}
+            onSave={(input) => void run(`offering:${addingOfferingId}`, async () => {
+              const profile = await saveTutorOffering(input, 0, addingOfferingId);
+              setAddingOfferingId(null);
+              return profile;
+            })} /> : null}
+          {!addingOfferingId ? <GlideButton
+            disabled={working !== null || loadState.profile.isPublished ||
+              loadState.profile.applicationStatus !== 'approved'}
+            label="Add lesson offering"
+            onPress={() => setAddingOfferingId(createMarketplaceClientId())}
+            testID="add-tutor-offering"
+            variant="secondary" /> : null}
           <PublicationControl profile={loadState.profile} saving={working === 'publication'} onChange={(publish) =>
             void run('publication', () => setTutorPublication(loadState.profile, publish))
           } />
@@ -187,20 +207,21 @@ function CredentialEditor({ profile, saving, onSave }: {
   );
 }
 
-function OfferingEditor({ profile, saving, onSave }: {
+function OfferingEditor({ profile, offering, saving, onSave }: {
   profile: TutorProfile;
+  offering: TutorOffering | null;
   saving: boolean;
   onSave: (input: { title: string; durationMinutes: 25 | 50; amountMinor: number; currency: 'USD' }) => void;
 }) {
-  const [title, setTitle] = useState(profile.offering?.title ?? '25-minute conversation lesson');
-  const [price, setPrice] = useState(profile.offering ? String(profile.offering.amountMinor / 100) : '25');
-  const [duration, setDuration] = useState<25 | 50>(profile.offering?.durationMinutes ?? 25);
+  const [title, setTitle] = useState(offering?.title ?? '25-minute conversation lesson');
+  const [price, setPrice] = useState(offering ? String(offering.amountMinor / 100) : '25');
+  const [duration, setDuration] = useState<25 | 50>(offering?.durationMinutes ?? 25);
   const amountMinor = Math.round(Number(price) * 100);
   const locked = profile.applicationStatus !== 'approved' || profile.isPublished;
   const valid = title.trim().length >= 3 && Number.isInteger(amountMinor) && amountMinor >= 500 && amountMinor <= 50_000;
   return (
     <GlideSurface padding="roomy" style={styles.card}>
-      <ThemedText type="title2">Lesson offering draft</ThemedText>
+      <ThemedText type="title2">{offering ? offering.title : 'New lesson offering'}</ThemedText>
       <LabeledInput editable={!locked} label="Lesson title" maxLength={100} onChangeText={setTitle} value={title} />
       <LabeledInput accessibilityHint="Enter a price from 5 to 500 US dollars" editable={!locked} keyboardType="decimal-pad"
         label="Price in USD" maxLength={7} onChangeText={setPrice} value={price} />
@@ -210,10 +231,11 @@ function OfferingEditor({ profile, saving, onSave }: {
       </ThemedText>
       <GlideButton disabled={locked || !valid || saving} label={saving ? 'Saving offering…' : 'Save offering draft'}
         onPress={() => onSave({ title: title.trim(), durationMinutes: duration, amountMinor, currency: 'USD' })}
-        testID="save-tutor-offering" />
+        testID={`save-tutor-offering-${offering?.offeringId ?? 'new'}`} />
     </GlideSurface>
   );
 }
+
 
 function PublicationControl({ profile, saving, onChange }: {
   profile: TutorProfile;

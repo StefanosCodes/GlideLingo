@@ -1,7 +1,9 @@
 import asyncio
+import json
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from threading import Barrier
@@ -14,7 +16,8 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import DBAPIError
 
 from app.core.config import Settings
-from app.core.errors import TutorApplicationConflictError
+from app.core.errors import MarketplaceMessageLimitedError, TutorApplicationConflictError
+from app.db.engine import DatabaseUnavailableError, create_database_probe
 from app.modules.human_tutor_marketplace.availability import TimeInterval
 from app.modules.human_tutor_marketplace.booking import (
     BookingService,
@@ -39,7 +42,10 @@ from app.modules.human_tutor_marketplace.lifecycle import (
     PostgresLifecycleRepository,
     next_weekly_payout_at,
 )
-from app.modules.human_tutor_marketplace.messaging import PostgresMessagingRepository
+from app.modules.human_tutor_marketplace.messaging import (
+    MessagingService,
+    PostgresMessagingRepository,
+)
 from app.modules.human_tutor_marketplace.repository import (
     PostgresTutorApplicationRepository,
     StoredTutorProfile,
@@ -75,6 +81,9 @@ MIGRATIONS = (
     Path(__file__).resolve().parents[2]
     / "migrations"
     / "013_human_tutor_marketplace_learning_bridge.sql",
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "014_human_tutor_marketplace_hardening.sql",
 )
 SAFE_SEARCH_PATH = "pg_catalog, public, pg_temp"
 TUTOR_ACTOR = derive_marketplace_actor_ref(
@@ -102,6 +111,7 @@ OUTSIDER_ACTOR = derive_marketplace_actor_ref(
 class FakeReconciliationStripe:
     def __init__(self) -> None:
         self.checkouts: dict[str, StripeCheckout] = {}
+        self.checkouts_by_key: dict[str, StripeCheckout] = {}
         self.created_idempotency_keys: list[str] = []
 
     async def get_platform_account_id(self) -> str:
@@ -109,7 +119,10 @@ class FakeReconciliationStripe:
 
     async def create_checkout(self, **kwargs: Any) -> StripeCheckout:
         booking_id = cast(UUID, kwargs["booking_id"])
-        self.created_idempotency_keys.append(cast(str, kwargs["idempotency_key"]))
+        idempotency_key = cast(str, kwargs["idempotency_key"])
+        self.created_idempotency_keys.append(idempotency_key)
+        if idempotency_key in self.checkouts_by_key:
+            return self.checkouts_by_key[idempotency_key]
         checkout = StripeCheckout(
             checkout_id=f"cs_test_{booking_id.hex[:12]}",
             url="https://checkout.stripe.com/c/pay/reconciled123",
@@ -119,9 +132,12 @@ class FakeReconciliationStripe:
             livemode=False,
             booking_id=booking_id,
             platform_account_id="acct_reviewed123",
+            amount_minor=cast(int, kwargs["amount_minor"]),
+            currency=cast(str, kwargs["currency"]),
             created_at=datetime.now(UTC),
         )
         self.checkouts[checkout.checkout_id] = checkout
+        self.checkouts_by_key[idempotency_key] = checkout
         return checkout
 
     async def retrieve_checkout(self, *, checkout_id: str) -> StripeCheckout:
@@ -138,6 +154,8 @@ class FakeReconciliationStripe:
             livemode=expired.livemode,
             booking_id=expired.booking_id,
             platform_account_id=expired.platform_account_id,
+            amount_minor=expired.amount_minor,
+            currency=expired.currency,
             created_at=datetime.now(UTC),
         )
         self.checkouts[checkout_id] = expired
@@ -171,6 +189,7 @@ def marketplace_engine() -> Generator[Engine]:
         connection.exec_driver_sql(
             f'GRANT USAGE, CREATE ON SCHEMA "{schema}" TO cloudsqlsuperuser WITH GRANT OPTION'
         )
+        connection.exec_driver_sql("GRANT glidelingo_app TO cloudsqlsuperuser WITH ADMIN OPTION")
         connection.exec_driver_sql("GRANT cloudsqlsuperuser TO glidelingo")
 
     raw_connection = operator.raw_connection()
@@ -219,6 +238,29 @@ def marketplace_engine() -> Generator[Engine]:
         with operator.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
             connection.exec_driver_sql(f'DROP SCHEMA "{schema}" CASCADE')
         operator.dispose()
+
+
+@pytest.fixture
+def marketplace_runtime_engines(
+    marketplace_engine: Engine,
+) -> Generator[tuple[Engine, Engine]]:
+    with marketplace_engine.connect() as connection:
+        schema = connection.execute(text("SELECT current_schema()")).scalar_one()
+    database_url = Settings().database_url.get_secret_value()
+    common = f"-c search_path={schema},public -c statement_timeout=2000"
+    app_engine = create_engine(
+        database_url,
+        connect_args={"options": f"{common} -c role=glidelingo_app"},
+    )
+    payment_engine = create_engine(
+        database_url,
+        connect_args={"options": f"{common} -c role=glidelingo_marketplace_payment_worker"},
+    )
+    try:
+        yield app_engine, payment_engine
+    finally:
+        payment_engine.dispose()
+        app_engine.dispose()
 
 
 def application_request() -> CreateTutorApplicationRequest:
@@ -279,6 +321,7 @@ def create_bookable_tutor(
             observed_at=datetime.now(UTC),
         ),
         environment="SANDBOX",
+        platform_account_id="acct_reviewed123",
     )
     assert connected is not None and connected.payouts_enabled
     assert booking.save_meeting_url(
@@ -422,6 +465,16 @@ def test_runtime_role_cannot_grant_capabilities_mutate_audit_or_run_ddl(
         "DELETE FROM marketplace_booking_schedule_revision",
         "UPDATE marketplace_money_ledger SET amount_minor = 0",
         "DELETE FROM marketplace_money_ledger",
+        "INSERT INTO marketplace_money_ledger "
+        "(entry_id, booking_id, kind, amount_minor, currency) "
+        "VALUES (gen_random_uuid(), gen_random_uuid(), 'charge', 500, 'USD')",
+        "INSERT INTO marketplace_money_operation "
+        "(operation_id, booking_id, kind, amount_minor, currency, idempotency_key) "
+        "VALUES (gen_random_uuid(), gen_random_uuid(), 'refund', 500, 'USD', "
+        "'forbidden-runtime-operation')",
+        "SELECT * FROM marketplace_confirm_booking_payment(gen_random_uuid(), "
+        "'cs_test_forbidden', 'pi_forbidden123', now(), 'SANDBOX', "
+        "'acct_forbidden123', 500, 'USD')",
         "ALTER TABLE marketplace_tutor_application ADD COLUMN forbidden text",
         "UPDATE marketplace_tutor_profile SET is_published = true",
     ]
@@ -972,6 +1025,26 @@ def test_calendar_oauth_replay_cache_concurrency_and_encrypted_storage(
     assert "refresh-token-secret" not in serialized
     assert not {"summary", "description", "attendees", "location", "calendar_id"} & columns
 
+    with marketplace_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE marketplace_calendar_refresh_job SET status = 'dead', attempt = 8, "
+                "safe_failure_code = 'provider_timeout' WHERE tutor_id = :tutor_id"
+            ),
+            {"tutor_id": profile.tutor_id},
+        )
+    calendar.recover_refresh(tutor_id=profile.tutor_id, now=now)
+    recovered_job = calendar.claim_refresh(worker="calendar-recovered", now=now, lease_seconds=60)
+    assert recovered_job is not None and recovered_job.attempt == 1
+    assert calendar.finish_refresh(
+        job_id=recovered_job.job_id,
+        worker="calendar-recovered",
+        now=now,
+        outcome="completed",
+        available_at=now + timedelta(minutes=10),
+        failure_code=None,
+    )
+
     reconnect = calendar.mark_failure(
         tutor_id=profile.tutor_id,
         expected_version=refreshed.version,
@@ -983,6 +1056,268 @@ def test_calendar_oauth_replay_cache_concurrency_and_encrypted_storage(
         calendar.get_busy_snapshot(tutor_id=profile.tutor_id, now=now).freshness
         == "reconnect_required"
     )
+
+
+@pytest.mark.integration
+def test_pending_booking_calendar_conflict_notifies_on_confirmation_and_resolves(
+    marketplace_engine: Engine,
+) -> None:
+    _, booking, profile = create_bookable_tutor(marketplace_engine)
+    calendar = PostgresCalendarRepository(engine=marketplace_engine)
+    now = datetime.now(UTC)
+    connected = calendar.upsert_connection(
+        tutor_id=profile.tutor_id,
+        actor_ref=TUTOR_ACTOR,
+        encrypted_refresh_token=b"encrypted-refresh-token" + b"x" * 32,
+        token_key_version=1,
+    )
+    initial_cache = calendar.replace_busy_cache(
+        tutor_id=profile.tutor_id,
+        expected_version=connected.version,
+        intervals=(),
+        refreshed_at=now,
+        expires_at=now + timedelta(minutes=10),
+    )
+    assert initial_cache is not None
+    starts_at = now + timedelta(days=3)
+    held = booking.create_hold(
+        learner_actor_ref=LEARNER_ACTOR,
+        tutor_id=profile.tutor_id,
+        starts_at=starts_at,
+        idempotency_key=uuid4(),
+        now=now,
+        hold_seconds=600,
+        environment="SANDBOX",
+        platform_account_id="acct_reviewed123",
+    )
+    assert held is not None
+    suffix = held.booking_id.hex[:12]
+    open_checkout = StripeCheckout(
+        checkout_id=f"cs_test_{suffix}",
+        url="https://checkout.stripe.com/c/pay/calendarconflict123",
+        payment_intent_id=f"pi_{suffix}",
+        status="open",
+        payment_status="unpaid",
+        livemode=False,
+        booking_id=held.booking_id,
+        platform_account_id="acct_reviewed123",
+        amount_minor=held.amount_minor,
+        currency=held.currency,
+        created_at=now,
+    )
+    assert (
+        booking.attach_checkout(
+            booking_id=held.booking_id,
+            learner_actor_ref=LEARNER_ACTOR,
+            checkout=open_checkout,
+        )
+        is not None
+    )
+    conflicted_cache = calendar.replace_busy_cache(
+        tutor_id=profile.tutor_id,
+        expected_version=initial_cache.version,
+        intervals=(TimeInterval(held.starts_at, held.ends_at),),
+        refreshed_at=now + timedelta(seconds=1),
+        expires_at=now + timedelta(minutes=10),
+    )
+    assert conflicted_cache is not None
+    outcome, confirmed = booking.apply_checkout_observation(
+        checkout=replace(open_checkout, url=None, status="complete", payment_status="paid"),
+        payload_sha256=suffix.ljust(64, "a"),
+        event_id=f"evt_{suffix}",
+        event_type="checkout.session.completed",
+        source="provider_webhook",
+        environment="SANDBOX",
+        platform_account_id="acct_reviewed123",
+    )
+    assert outcome == "applied"
+    assert confirmed is not None and confirmed.has_calendar_conflict
+    duplicate_outcome, _ = booking.apply_checkout_observation(
+        checkout=replace(open_checkout, url=None, status="complete", payment_status="paid"),
+        payload_sha256=suffix.ljust(64, "a"),
+        event_id=f"evt_{suffix}",
+        event_type="checkout.session.completed",
+        source="provider_webhook",
+        environment="SANDBOX",
+        platform_account_id="acct_reviewed123",
+    )
+    assert duplicate_outcome == "duplicate"
+    with marketplace_engine.connect() as connection:
+        conflict_message_count = connection.execute(
+            text(
+                "SELECT count(*) FROM marketplace_message AS message "
+                "JOIN marketplace_conversation AS conversation USING (conversation_id) "
+                "WHERE conversation.booking_id = :id "
+                "AND message.body LIKE 'A newly detected calendar conflict%'"
+            ),
+            {"id": held.booking_id},
+        ).scalar_one()
+        conflict_notification_count = connection.execute(
+            text(
+                "SELECT count(*) FROM marketplace_message_notification_job AS job "
+                "JOIN marketplace_message AS message USING (message_id) "
+                "JOIN marketplace_conversation AS conversation USING (conversation_id) "
+                "WHERE conversation.booking_id = :id AND job.template = 'calendar_conflict'"
+            ),
+            {"id": held.booking_id},
+        ).scalar_one()
+    assert conflict_message_count == 1
+    assert conflict_notification_count == 1
+
+    lifecycle = PostgresLifecycleRepository(engine=marketplace_engine)
+    assert lifecycle.transition(
+        booking_id=held.booking_id,
+        actor_ref=LEARNER_ACTOR,
+        action="reschedule",
+        reason="Participants moved the lesson away from the calendar conflict.",
+        new_starts_at=starts_at + timedelta(days=1),
+        now=now,
+        expected_profile_version=profile.version,
+    )
+    with marketplace_engine.connect() as connection:
+        resolution = connection.execute(
+            text(
+                "SELECT resolution_reason FROM marketplace_calendar_booking_conflict "
+                "WHERE booking_id = :id"
+            ),
+            {"id": held.booking_id},
+        ).scalar_one()
+    assert resolution == "rescheduled"
+
+
+@pytest.mark.integration
+def test_conversation_and_booking_keysets_do_not_skip_after_mutable_fields_change(
+    marketplace_engine: Engine,
+) -> None:
+    _, booking, profile = create_bookable_tutor(marketplace_engine)
+    messaging = PostgresMessagingRepository(engine=marketplace_engine)
+    now = datetime.now(UTC)
+    conversation_ids = [uuid4(), uuid4(), uuid4()]
+    learners = [LEARNER_ACTOR, OUTSIDER_ACTOR, OPERATOR_ACTOR]
+    with marketplace_engine.begin() as connection:
+        for index, (conversation_id, learner) in enumerate(
+            zip(conversation_ids, learners, strict=True)
+        ):
+            created_at = now - timedelta(minutes=3 - index)
+            connection.execute(
+                text(
+                    "INSERT INTO marketplace_conversation "
+                    "(conversation_id, learner_actor_ref, tutor_id, tutor_actor_ref, "
+                    "created_at, updated_at) VALUES "
+                    "(:id, :learner, :tutor_id, :tutor, :created_at, :created_at)"
+                ),
+                {
+                    "id": conversation_id,
+                    "learner": learner,
+                    "tutor_id": profile.tutor_id,
+                    "tutor": TUTOR_ACTOR,
+                    "created_at": created_at,
+                },
+            )
+    first_conversations, has_more = messaging.list_conversations(
+        actor_ref=TUTOR_ACTOR,
+        before_created_at=None,
+        before_conversation_id=None,
+        limit=1,
+    )
+    assert has_more and len(first_conversations) == 1
+    cursor = MessagingService._encode_conversation_cursor(first_conversations[-1])
+    before_created_at, before_conversation_id = MessagingService._decode_conversation_cursor(cursor)
+    with marketplace_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE marketplace_conversation SET updated_at = :updated_at "
+                "WHERE conversation_id = :id"
+            ),
+            {"updated_at": now + timedelta(hours=1), "id": conversation_ids[0]},
+        )
+    second_conversations, second_has_more = messaging.list_conversations(
+        actor_ref=TUTOR_ACTOR,
+        before_created_at=before_created_at,
+        before_conversation_id=before_conversation_id,
+        limit=2,
+    )
+    assert not second_has_more
+    assert {item.conversation_id for item in first_conversations + second_conversations} == set(
+        conversation_ids
+    )
+
+    confirmed = []
+    for day in (2, 3, 4):
+        held = booking.create_hold(
+            learner_actor_ref=LEARNER_ACTOR,
+            tutor_id=profile.tutor_id,
+            starts_at=now + timedelta(days=day),
+            idempotency_key=uuid4(),
+            now=now,
+            hold_seconds=600,
+            environment="SANDBOX",
+            platform_account_id="acct_reviewed123",
+        )
+        assert held is not None
+        suffix = held.booking_id.hex[:12]
+        open_checkout = StripeCheckout(
+            checkout_id=f"cs_test_{suffix}",
+            url="https://checkout.stripe.com/c/pay/keyset123",
+            payment_intent_id=f"pi_{suffix}",
+            status="open",
+            payment_status="unpaid",
+            livemode=False,
+            booking_id=held.booking_id,
+            platform_account_id="acct_reviewed123",
+            amount_minor=held.amount_minor,
+            currency=held.currency,
+            created_at=now,
+        )
+        assert (
+            booking.attach_checkout(
+                booking_id=held.booking_id,
+                learner_actor_ref=LEARNER_ACTOR,
+                checkout=open_checkout,
+            )
+            is not None
+        )
+        outcome, value = booking.apply_checkout_observation(
+            checkout=replace(open_checkout, url=None, status="complete", payment_status="paid"),
+            payload_sha256=suffix.ljust(64, "a"),
+            event_id=f"evt_{suffix}",
+            event_type="checkout.session.completed",
+            source="provider_webhook",
+            environment="SANDBOX",
+            platform_account_id="acct_reviewed123",
+        )
+        assert outcome == "applied" and value is not None
+        confirmed.append(value)
+        sleep(0.01)
+    first_bookings, has_more = booking.list_bookings(
+        actor_ref=LEARNER_ACTOR,
+        before_created_at=None,
+        before_booking_id=None,
+        limit=1,
+    )
+    assert has_more and len(first_bookings) == 1
+    cursor = BookingService._encode_cursor(first_bookings[-1])
+    before_created_at, before_booking_id = BookingService._decode_cursor(cursor)
+    lifecycle = PostgresLifecycleRepository(engine=marketplace_engine)
+    assert lifecycle.transition(
+        booking_id=confirmed[0].booking_id,
+        actor_ref=LEARNER_ACTOR,
+        action="reschedule",
+        reason="Move the older booking across the previous start-time page boundary.",
+        new_starts_at=now + timedelta(days=10),
+        now=now,
+        expected_profile_version=profile.version,
+    )
+    remaining_bookings, remaining_has_more = booking.list_bookings(
+        actor_ref=LEARNER_ACTOR,
+        before_created_at=before_created_at,
+        before_booking_id=before_booking_id,
+        limit=3,
+    )
+    assert not remaining_has_more
+    assert {item.booking_id for item in first_bookings + remaining_bookings} == {
+        item.booking_id for item in confirmed
+    }
 
 
 @pytest.mark.integration
@@ -1062,10 +1397,11 @@ def test_messaging_participant_safety_reports_rate_limits_and_jobs(
     assert duplicate is not None and duplicate.message_id == learner_message.message_id
     assert messaging.get_notification_preference(actor_ref=LEARNER_ACTOR)
     assert not messaging.set_notification_preference(actor_ref=LEARNER_ACTOR, email_enabled=False)
+    tutor_client_id = uuid4()
     tutor_state, tutor_message = messaging.send_message(
         conversation_id=conversation.conversation_id,
         actor_ref=TUTOR_ACTOR,
-        client_message_id=uuid4(),
+        client_message_id=tutor_client_id,
         body="Welcome to the conversation.",
         now=now,
     )
@@ -1086,6 +1422,7 @@ def test_messaging_participant_safety_reports_rate_limits_and_jobs(
         reporter_actor_ref=LEARNER_ACTOR,
         reason="unsafe",
         details="This message needs a safety review.",
+        now=now,
     )
     assert report is not None
     assert (
@@ -1101,10 +1438,108 @@ def test_messaging_participant_safety_reports_rate_limits_and_jobs(
     assert {message.conversation_id for message in scoped_report[2]} == {
         conversation.conversation_id
     }
+    assert (
+        messaging.create_report(
+            report_id=uuid4(),
+            conversation_id=conversation.conversation_id,
+            message_id=learner_message.message_id,
+            reporter_actor_ref=LEARNER_ACTOR,
+            reason="unsafe",
+            details="A participant cannot report their own message as the other participant.",
+            now=now,
+        )
+        is None
+    )
+    general_report = messaging.create_report(
+        report_id=uuid4(),
+        conversation_id=conversation.conversation_id,
+        message_id=None,
+        reporter_actor_ref=LEARNER_ACTOR,
+        reason="other",
+        details="General conversation-level safety concern.",
+        now=now,
+    )
+    assert general_report is not None and general_report.message_id is None
+    _, concurrent_message = messaging.send_message(
+        conversation_id=conversation.conversation_id,
+        actor_ref=TUTOR_ACTOR,
+        client_message_id=uuid4(),
+        body="A second message for concurrent report deduplication.",
+        now=now,
+    )
+    assert concurrent_message is not None
+
+    def concurrent_report(report_id: UUID) -> Any:
+        return messaging.create_report(
+            report_id=report_id,
+            conversation_id=conversation.conversation_id,
+            message_id=concurrent_message.message_id,
+            reporter_actor_ref=LEARNER_ACTOR,
+            reason="unsafe",
+            details="Concurrent report deduplication evidence.",
+            now=now,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        concurrent_reports = list(executor.map(concurrent_report, (uuid4(), uuid4())))
+    assert all(item is not None for item in concurrent_reports)
+    assert len({item.report_id for item in concurrent_reports if item is not None}) == 1
+    with marketplace_engine.begin() as connection:
+        for _ in range(7):
+            connection.execute(
+                text(
+                    "INSERT INTO marketplace_message_report_rate_event "
+                    "(event_id, reporter_actor_ref, subject_actor_ref, occurred_at) "
+                    "VALUES (:id, :reporter, :subject, :now)"
+                ),
+                {
+                    "id": uuid4(),
+                    "reporter": LEARNER_ACTOR,
+                    "subject": TUTOR_ACTOR,
+                    "now": now,
+                },
+            )
+    duplicate_report = messaging.create_report(
+        report_id=uuid4(),
+        conversation_id=conversation.conversation_id,
+        message_id=tutor_message.message_id,
+        reporter_actor_ref=LEARNER_ACTOR,
+        reason="spam",
+        details="A duplicate request must return the original durable report.",
+        now=now,
+    )
+    assert duplicate_report == report
+    _, rate_limited_report_message = messaging.send_message(
+        conversation_id=conversation.conversation_id,
+        actor_ref=TUTOR_ACTOR,
+        client_message_id=uuid4(),
+        body="A third message for bounded report-rate verification.",
+        now=now,
+    )
+    assert rate_limited_report_message is not None
+    with pytest.raises(MarketplaceMessageLimitedError):
+        messaging.create_report(
+            report_id=uuid4(),
+            conversation_id=conversation.conversation_id,
+            message_id=rate_limited_report_message.message_id,
+            reporter_actor_ref=LEARNER_ACTOR,
+            reason="unsafe",
+            details="This request exceeds the bounded report rate.",
+            now=now,
+        )
 
     assert messaging.block_other(
         conversation_id=conversation.conversation_id, actor_ref=LEARNER_ACTOR
     )
+    retry_after_block, retried_message = messaging.send_message(
+        conversation_id=conversation.conversation_id,
+        actor_ref=TUTOR_ACTOR,
+        client_message_id=tutor_client_id,
+        body="Welcome to the conversation.",
+        now=now,
+    )
+    assert retry_after_block == "duplicate"
+    assert retried_message is not None and retried_message.message_id == tutor_message.message_id
     blocked, _ = messaging.send_message(
         conversation_id=conversation.conversation_id,
         actor_ref=TUTOR_ACTOR,
@@ -1118,15 +1553,35 @@ def test_messaging_participant_safety_reports_rate_limits_and_jobs(
         learner_actor_ref=OUTSIDER_ACTOR, tutor_id=profile.tutor_id
     )
     assert rate_conversation is not None
+    first_rate_message_id = uuid4()
+    first_rate_message = None
     for index in range(10):
         result, _ = messaging.send_message(
             conversation_id=rate_conversation.conversation_id,
             actor_ref=OUTSIDER_ACTOR,
-            client_message_id=uuid4(),
+            client_message_id=first_rate_message_id if index == 0 else uuid4(),
             body=f"Bounded message {index}",
             now=now,
         )
         assert result == "created"
+        if index == 0:
+            _, first_rate_message = messaging.send_message(
+                conversation_id=rate_conversation.conversation_id,
+                actor_ref=OUTSIDER_ACTOR,
+                client_message_id=first_rate_message_id,
+                body="Bounded message 0",
+                now=now,
+            )
+            assert first_rate_message is not None
+    retry_after_limit, retry_after_limit_message = messaging.send_message(
+        conversation_id=rate_conversation.conversation_id,
+        actor_ref=OUTSIDER_ACTOR,
+        client_message_id=first_rate_message_id,
+        body="Bounded message 0",
+        now=now,
+    )
+    assert retry_after_limit == "duplicate"
+    assert retry_after_limit_message == first_rate_message
     first_page, has_more = messaging.list_messages(
         conversation_id=rate_conversation.conversation_id,
         actor_ref=OUTSIDER_ACTOR,
@@ -1199,7 +1654,55 @@ def test_messaging_participant_safety_reports_rate_limits_and_jobs(
             text("SELECT status FROM marketplace_message_notification_job WHERE job_id = :job_id"),
             {"job_id": job.job_id},
         ).scalar_one()
+        exhausted_conversation_id = connection.execute(
+            text(
+                "SELECT message.conversation_id "
+                "FROM marketplace_message_notification_job AS notification "
+                "JOIN marketplace_message AS message USING (message_id) "
+                "WHERE notification.job_id = :job_id"
+            ),
+            {"job_id": job.job_id},
+        ).scalar_one()
     assert exhausted_status == "dead"
+    recovery_reason = "Delivery provider recovered after the terminal retry."
+    assert not messaging.recover_notifications(
+        conversation_id=exhausted_conversation_id,
+        operator_actor_ref=SECOND_OPERATOR_ACTOR,
+        reason=recovery_reason,
+        now=now,
+    )
+    assert messaging.recover_notifications(
+        conversation_id=exhausted_conversation_id,
+        operator_actor_ref=OPERATOR_ACTOR,
+        reason=recovery_reason,
+        now=now,
+    )
+    assert messaging.recover_notifications(
+        conversation_id=exhausted_conversation_id,
+        operator_actor_ref=OPERATOR_ACTOR,
+        reason=recovery_reason,
+        now=now,
+    )
+    assert not messaging.recover_notifications(
+        conversation_id=exhausted_conversation_id,
+        operator_actor_ref=OPERATOR_ACTOR,
+        reason="A materially different recovery request.",
+        now=now,
+    )
+    with marketplace_engine.connect() as connection:
+        recovered_status = connection.execute(
+            text("SELECT status FROM marketplace_message_notification_job WHERE job_id = :job_id"),
+            {"job_id": job.job_id},
+        ).scalar_one()
+        recovery_audits = connection.execute(
+            text(
+                "SELECT count(*) FROM marketplace_notification_recovery_audit "
+                "WHERE conversation_id = :conversation_id"
+            ),
+            {"conversation_id": exhausted_conversation_id},
+        ).scalar_one()
+    assert recovered_status == "queued"
+    assert recovery_audits == 1
 
     old = now - timedelta(days=100)
     with marketplace_engine.begin() as connection:
@@ -1229,6 +1732,20 @@ def test_messaging_participant_safety_reports_rate_limits_and_jobs(
         now=now,
     )
     assert resolved is not None and resolved.status == "resolved"
+    replayed_resolution = messaging.resolve_report(
+        operator_actor_ref=OPERATOR_ACTOR,
+        report_id=report.report_id,
+        reason="Reviewed and applied the documented safety policy.",
+        now=now,
+    )
+    assert replayed_resolution == resolved
+    with pytest.raises(TutorApplicationConflictError):
+        messaging.resolve_report(
+            operator_actor_ref=OPERATOR_ACTOR,
+            report_id=report.report_id,
+            reason="A different resolution must not replay.",
+            now=now,
+        )
     with marketplace_engine.connect() as connection:
         audit_actions = (
             connection.execute(
@@ -1522,6 +2039,7 @@ def test_suspension_lock_prevents_concurrent_publication(
     assert with_offering is not None
     assert with_offering.offering is not None
     offering_version = with_offering.offering.version
+    offering_id = with_offering.offering.offering_id
     with marketplace_engine.begin() as connection:
         connection.execute(
             text(
@@ -1559,13 +2077,20 @@ def test_suspension_lock_prevents_concurrent_publication(
                     UUID | None,
                     connection.execute(
                         text(
-                            "SELECT marketplace_set_tutor_publication(:actor_ref, "
-                            ":profile_version, :offering_version, true)"
+                            "SELECT marketplace_set_tutor_publication_v2(:actor_ref, "
+                            ":profile_version, CAST(:expected_offerings AS jsonb), true)"
                         ),
                         {
                             "actor_ref": TUTOR_ACTOR,
                             "profile_version": profile.version,
-                            "offering_version": offering_version,
+                            "expected_offerings": json.dumps(
+                                [
+                                    {
+                                        "offering_id": str(offering_id),
+                                        "expected_version": offering_version,
+                                    }
+                                ]
+                            ),
                         },
                     ).scalar_one(),
                 )
@@ -1740,6 +2265,8 @@ def test_booking_holds_overlap_webhooks_money_and_participant_scope(
         livemode=False,
         booking_id=held.booking_id,
         platform_account_id=platform_account,
+        amount_minor=held.amount_minor,
+        currency=held.currency,
         created_at=now,
     )
     pending = booking.attach_checkout(
@@ -1751,6 +2278,45 @@ def test_booking_holds_overlap_webhooks_money_and_participant_scope(
     assert pending.amount_minor == pending.commission_amount_minor + pending.tutor_amount_minor
     assert pending.commission_basis_points == 2000
 
+    invalid_paid = (
+        replace(
+            checkout,
+            url=None,
+            status="complete",
+            payment_status="paid",
+            amount_minor=2400,
+            created_at=now + timedelta(seconds=10),
+        ),
+        replace(
+            checkout,
+            url=None,
+            status="complete",
+            payment_status="paid",
+            currency="EUR",
+            created_at=now + timedelta(seconds=11),
+        ),
+        replace(
+            checkout,
+            url=None,
+            payment_intent_id=None,
+            status="complete",
+            payment_status="paid",
+            created_at=now + timedelta(seconds=12),
+        ),
+    )
+    for index, observation in enumerate(invalid_paid):
+        ignored, unchanged = booking.apply_checkout_observation(
+            checkout=observation,
+            payload_sha256=str(index).ljust(64, "0"),
+            event_id=f"evt_invalid{index:08d}",
+            event_type="checkout.session.completed",
+            source="provider_webhook",
+            environment="SANDBOX",
+            platform_account_id=platform_account,
+        )
+        assert ignored == "ignored"
+        assert unchanged is not None and unchanged.state == "payment_pending"
+
     confirmed_checkout = StripeCheckout(
         checkout_id=checkout.checkout_id,
         url=None,
@@ -1760,6 +2326,8 @@ def test_booking_holds_overlap_webhooks_money_and_participant_scope(
         livemode=False,
         booking_id=held.booking_id,
         platform_account_id=platform_account,
+        amount_minor=held.amount_minor,
+        currency=held.currency,
         created_at=now + timedelta(minutes=1),
     )
     outcome, confirmed = booking.apply_checkout_observation(
@@ -1793,6 +2361,8 @@ def test_booking_holds_overlap_webhooks_money_and_participant_scope(
         livemode=False,
         booking_id=held.booking_id,
         platform_account_id=platform_account,
+        amount_minor=held.amount_minor,
+        currency=held.currency,
         created_at=now,
     )
     stale, _ = booking.apply_checkout_observation(
@@ -1815,6 +2385,8 @@ def test_booking_holds_overlap_webhooks_money_and_participant_scope(
         livemode=False,
         booking_id=held.booking_id,
         platform_account_id="acct_wrong12345",
+        amount_minor=held.amount_minor,
+        currency=held.currency,
         created_at=now + timedelta(minutes=2),
     )
     ignored, _ = booking.apply_checkout_observation(
@@ -1837,7 +2409,7 @@ def test_booking_holds_overlap_webhooks_money_and_participant_scope(
             ),
             {"booking_id": held.booking_id},
         ).scalar_one()
-    assert system_messages == 1
+    assert system_messages == 3
 
 
 @pytest.mark.integration
@@ -1866,6 +2438,17 @@ def test_buffers_and_provider_checkout_terminal_state_guard_inventory(
     )
     assert first is not None
     assert first.buffer_before_minutes == 5 and first.buffer_after_minutes == 10
+    busy = PostgresDiscoveryRepository(engine=marketplace_engine).list_internal_busy(
+        tutor_id=profile.tutor_id,
+        starts_at=first.ends_at,
+        ends_at=first.ends_at + timedelta(minutes=25),
+    )
+    assert busy == (
+        TimeInterval(
+            starts_at=first.starts_at - timedelta(minutes=5),
+            ends_at=first.ends_at + timedelta(minutes=10),
+        ),
+    )
     with pytest.raises(TutorApplicationConflictError):
         booking.create_hold(
             learner_actor_ref=OUTSIDER_ACTOR,
@@ -1889,13 +2472,111 @@ def test_buffers_and_provider_checkout_terminal_state_guard_inventory(
             livemode=False,
             booking_id=first.booking_id,
             platform_account_id="acct_reviewed123",
+            amount_minor=first.amount_minor,
+            currency=first.currency,
             created_at=now,
         ),
     )
     assert pending is not None
+    with marketplace_engine.connect() as connection:
+        connection.execute(text("SET ROLE glidelingo_app"))
+        nested = connection.begin_nested()
+        with pytest.raises(DBAPIError):
+            connection.execute(
+                text(
+                    "INSERT INTO marketplace_money_ledger "
+                    "(entry_id, booking_id, kind, amount_minor, currency) "
+                    "VALUES (:entry_id, :booking_id, 'charge', :amount, :currency)"
+                ),
+                {
+                    "entry_id": uuid4(),
+                    "booking_id": pending.booking_id,
+                    "amount": pending.amount_minor,
+                    "currency": pending.currency,
+                },
+            )
+        nested.rollback()
+        nested = connection.begin_nested()
+        with pytest.raises(DBAPIError):
+            connection.execute(
+                text(
+                    "SELECT * FROM marketplace_confirm_booking_payment("
+                    ":booking_id, :checkout_id, :payment_intent_id, :event_at, "
+                    "'SANDBOX', 'acct_reviewed123', :amount, 'USD')"
+                ),
+                {
+                    "booking_id": pending.booking_id,
+                    "checkout_id": pending.provider_checkout_id,
+                    "payment_intent_id": f"pi_{first.booking_id.hex[:12]}",
+                    "event_at": now,
+                    "amount": pending.amount_minor,
+                },
+            )
+        nested.rollback()
+        connection.execute(text("RESET ROLE"))
     assert booking.expire_holds(now=now + timedelta(minutes=20), limit=10) == 0
     pending_after_expiry = booking.get_booking(booking_id=first.booking_id, actor_ref=LEARNER_ACTOR)
     assert pending_after_expiry is not None and pending_after_expiry.state == "payment_pending"
+
+    ambiguous = booking.create_hold(
+        learner_actor_ref=OUTSIDER_ACTOR,
+        tutor_id=profile.tutor_id,
+        starts_at=now + timedelta(days=3),
+        idempotency_key=uuid4(),
+        now=now,
+        hold_seconds=600,
+        environment="SANDBOX",
+        platform_account_id="acct_reviewed123",
+    )
+    assert ambiguous is not None
+    ambiguous = booking.mark_checkout_ambiguous(
+        booking_id=ambiguous.booking_id,
+        learner_actor_ref=OUTSIDER_ACTOR,
+        reason_code="provider_timeout",
+    )
+    assert ambiguous is not None and ambiguous.provider_checkout_id is None
+    with marketplace_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE marketplace_payment_reconciliation_job "
+                "SET status = 'dead', attempt = 8, safe_failure_code = 'attempts_exhausted' "
+                "WHERE booking_id = :booking_id"
+            ),
+            {"booking_id": ambiguous.booking_id},
+        )
+    assert (
+        booking.recover_reconciliation(
+            booking_id=ambiguous.booking_id,
+            operator_actor_ref=OUTSIDER_ACTOR,
+            reason="An unauthorized actor must not recover this job.",
+            now=now,
+        )
+        is None
+    )
+    recovered = booking.recover_reconciliation(
+        booking_id=ambiguous.booking_id,
+        operator_actor_ref=OPERATOR_ACTOR,
+        reason="Provider state was checked and the exhausted job may safely retry.",
+        now=now,
+    )
+    assert recovered is not None and recovered.state == "payment_ambiguous"
+    with marketplace_engine.connect() as connection:
+        job = connection.execute(
+            text(
+                "SELECT status, attempt, safe_failure_code "
+                "FROM marketplace_payment_reconciliation_job WHERE booking_id = :booking_id"
+            ),
+            {"booking_id": ambiguous.booking_id},
+        ).one()
+        audit_reason = connection.execute(
+            text(
+                "SELECT reason FROM marketplace_reconciliation_recovery_audit "
+                "WHERE booking_id = :booking_id"
+            ),
+            {"booking_id": ambiguous.booking_id},
+        ).scalar_one()
+    assert job == ("retryable", 0, "operator_reconciled")
+    assert audit_reason == "Provider state was checked and the exhausted job may safely retry."
 
     plain = booking.create_hold(
         learner_actor_ref=LEARNER_ACTOR,
@@ -1908,6 +2589,14 @@ def test_buffers_and_provider_checkout_terminal_state_guard_inventory(
         platform_account_id="acct_reviewed123",
     )
     assert plain is not None
+    with marketplace_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE marketplace_payment_reconciliation_job SET status = 'dead' "
+                "WHERE booking_id = :booking_id"
+            ),
+            {"booking_id": plain.booking_id},
+        )
     assert booking.expire_holds(now=now + timedelta(minutes=20), limit=10) == 1
     plain_after_expiry = booking.get_booking(booking_id=plain.booking_id, actor_ref=LEARNER_ACTOR)
     assert plain_after_expiry is not None and plain_after_expiry.state == "expired"
@@ -1924,6 +2613,8 @@ def test_buffers_and_provider_checkout_terminal_state_guard_inventory(
             livemode=False,
             booking_id=first.booking_id,
             platform_account_id="acct_reviewed123",
+            amount_minor=first.amount_minor,
+            currency=first.currency,
             created_at=now + timedelta(minutes=21),
         ),
         payload_sha256="f" * 64,
@@ -1949,7 +2640,7 @@ def test_buffers_and_provider_checkout_terminal_state_guard_inventory(
 
 
 @pytest.mark.integration
-def test_reconciliation_recovers_ambiguous_create_and_expires_provider_before_release(
+def test_reconciliation_recovers_crash_after_provider_effect_before_inventory_release(
     marketplace_engine: Engine,
 ) -> None:
     _, repository, profile = create_bookable_tutor(marketplace_engine)
@@ -1981,29 +2672,143 @@ def test_reconciliation_recovers_ambiguous_create_and_expires_provider_before_re
         platform_account_id="acct_reviewed123",
     )
     assert held is not None
-    assert (
-        repository.mark_checkout_ambiguous(
+    idempotency_key = f"booking:{held.booking_id}:checkout"
+    provider_effect = asyncio.run(
+        provider.create_checkout(
             booking_id=held.booking_id,
-            learner_actor_ref=LEARNER_ACTOR,
-            reason_code="provider_timeout",
+            amount_minor=held.amount_minor,
+            currency=held.currency,
+            idempotency_key=idempotency_key,
         )
-        is not None
     )
+    assert provider_effect.status == "open"
     sleep(1.05)
 
     assert asyncio.run(service.run_one_reconciliation_job(worker="reconcile-a"))
     reconciled = repository.get_booking(booking_id=held.booking_id, actor_ref=LEARNER_ACTOR)
     assert reconciled is not None and reconciled.state == "expired"
-    assert provider.created_idempotency_keys == [f"booking:{held.booking_id}:checkout"]
+    assert provider.created_idempotency_keys == [idempotency_key, idempotency_key]
     assert not asyncio.run(service.run_one_reconciliation_job(worker="reconcile-b"))
+
+
+@pytest.mark.integration
+def test_payment_authority_roles_confirm_and_reject_forged_general_role_evidence(
+    marketplace_engine: Engine,
+    marketplace_runtime_engines: tuple[Engine, Engine],
+) -> None:
+    _, booking, profile = create_bookable_tutor(marketplace_engine)
+    app_engine, payment_engine = marketplace_runtime_engines
+    create_database_probe(app_engine, payment_engine=payment_engine)()
+    with pytest.raises(DatabaseUnavailableError):
+        create_database_probe(app_engine, payment_engine=app_engine)()
+    with pytest.raises(DatabaseUnavailableError):
+        create_database_probe(marketplace_engine, payment_engine=payment_engine)()
+    now = datetime.now(UTC)
+    held = booking.create_hold(
+        learner_actor_ref=LEARNER_ACTOR,
+        tutor_id=profile.tutor_id,
+        starts_at=now + timedelta(days=2),
+        idempotency_key=uuid4(),
+        now=now,
+        hold_seconds=600,
+        environment="SANDBOX",
+        platform_account_id="acct_reviewed123",
+    )
+    assert held is not None
+    checkout = StripeCheckout(
+        checkout_id=f"cs_test_{held.booking_id.hex[:12]}",
+        url="https://checkout.stripe.com/c/pay/authority123",
+        payment_intent_id=f"pi_{held.booking_id.hex[:12]}",
+        status="complete",
+        payment_status="paid",
+        livemode=False,
+        booking_id=held.booking_id,
+        platform_account_id="acct_reviewed123",
+        amount_minor=held.amount_minor,
+        currency=held.currency,
+        created_at=now,
+    )
+    assert (
+        booking.attach_checkout(
+            booking_id=held.booking_id,
+            learner_actor_ref=LEARNER_ACTOR,
+            checkout=replace(checkout, status="open", payment_status="unpaid"),
+        )
+        is not None
+    )
+    runtime_booking = PostgresBookingRepository(
+        engine=app_engine,
+        payment_engine=payment_engine,
+    )
+    outcome, confirmed = runtime_booking.apply_checkout_observation(
+        checkout=checkout,
+        payload_sha256="1" * 64,
+        event_id="evt_authorityrole1234567890",
+        event_type="checkout.session.completed",
+        source="provider_webhook",
+        environment="SANDBOX",
+        platform_account_id="acct_reviewed123",
+    )
+    assert outcome == "applied"
+    assert confirmed is not None and confirmed.state == "confirmed"
+
+    with pytest.raises(DBAPIError), app_engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO marketplace_booking_transition_operation "
+                "(operation_id, booking_id, actor_ref, action, request_fingerprint) "
+                "VALUES (:operation_id, :booking_id, :actor, 'tutor_no_show', :fingerprint)"
+            ),
+            {
+                "operation_id": uuid4(),
+                "booking_id": held.booking_id,
+                "actor": LEARNER_ACTOR,
+                "fingerprint": "a" * 64,
+            },
+        )
+    with pytest.raises(DBAPIError), app_engine.begin() as connection:
+        connection.execute(
+            text(
+                "SELECT marketplace_queue_booking_money("
+                ":booking_id, 'refund', transaction_timestamp())"
+            ),
+            {"booking_id": held.booking_id},
+        )
+
+    lifecycle = PostgresLifecycleRepository(
+        engine=app_engine,
+        payment_engine=payment_engine,
+    )
+    assert lifecycle.transition(
+        booking_id=held.booking_id,
+        actor_ref=TUTOR_ACTOR,
+        action="cancel",
+        reason="Tutor cancelled with a full learner refund.",
+        new_starts_at=None,
+        now=now,
+    )
+    operation = lifecycle.claim_money_operation(
+        worker="authority-worker", now=now, lease_seconds=60
+    )
+    assert operation is not None and operation.kind == "refund"
+    assert lifecycle.finish_money_operation(
+        operation=operation,
+        result=StripeMoneyResult("re_authority123", False, held.amount_minor, held.currency),
+        worker="authority-worker",
+    )
 
 
 @pytest.mark.integration
 def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
     marketplace_engine: Engine,
+    marketplace_runtime_engines: tuple[Engine, Engine],
 ) -> None:
     _, booking, profile = create_bookable_tutor(marketplace_engine)
-    lifecycle = PostgresLifecycleRepository(engine=marketplace_engine)
+    app_engine, payment_engine = marketplace_runtime_engines
+    lifecycle = PostgresLifecycleRepository(
+        engine=app_engine,
+        payment_engine=payment_engine,
+    )
     now = datetime.now(UTC)
 
     def confirmed(starts_at: datetime, learner: str = LEARNER_ACTOR) -> Any:
@@ -2031,6 +2836,8 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
                 livemode=False,
                 booking_id=held.booking_id,
                 platform_account_id="acct_reviewed123",
+                amount_minor=held.amount_minor,
+                currency=held.currency,
                 created_at=now,
             ),
         )
@@ -2045,6 +2852,8 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
                 livemode=False,
                 booking_id=held.booking_id,
                 platform_account_id="acct_reviewed123",
+                amount_minor=held.amount_minor,
+                currency=held.currency,
                 created_at=now,
             ),
             payload_sha256=suffix.ljust(64, "a"),
@@ -2059,6 +2868,7 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
 
     rescheduled = confirmed(now + timedelta(days=5))
     new_start = now + timedelta(days=6)
+    reschedule_operation_id = uuid4()
     assert lifecycle.transition(
         booking_id=rescheduled.booking_id,
         actor_ref=LEARNER_ACTOR,
@@ -2067,7 +2877,29 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         new_starts_at=new_start,
         now=now,
         expected_profile_version=profile.version,
+        operation_id=reschedule_operation_id,
     )
+    assert lifecycle.transition(
+        booking_id=rescheduled.booking_id,
+        actor_ref=LEARNER_ACTOR,
+        action="reschedule",
+        reason="Learner and tutor agreed to a later lesson time.",
+        new_starts_at=new_start,
+        now=now,
+        expected_profile_version=profile.version,
+        operation_id=reschedule_operation_id,
+    )
+    with pytest.raises(TutorApplicationConflictError):
+        lifecycle.transition(
+            booking_id=rescheduled.booking_id,
+            actor_ref=LEARNER_ACTOR,
+            action="reschedule",
+            reason="Changed retry input must conflict.",
+            new_starts_at=new_start,
+            now=now,
+            expected_profile_version=profile.version,
+            operation_id=reschedule_operation_id,
+        )
     with marketplace_engine.connect() as connection:
         revision = connection.execute(
             text(
@@ -2089,7 +2921,114 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         ("lesson_reminder", "queued"),
     ]
 
+    delivery = confirmed(now + timedelta(days=20))
+    with marketplace_engine.connect() as connection:
+        delivery_conversation_id = connection.execute(
+            text("SELECT conversation_id FROM marketplace_conversation WHERE booking_id = :id"),
+            {"id": delivery.booking_id},
+        ).scalar_one()
+    delivery_messaging = PostgresMessagingRepository(engine=marketplace_engine)
+    sent, delivery_message = delivery_messaging.send_message(
+        conversation_id=delivery_conversation_id,
+        actor_ref=LEARNER_ACTOR,
+        client_message_id=uuid4(),
+        body="Please confirm the lesson preparation details.",
+        now=now,
+    )
+    assert sent == "created" and delivery_message is not None
+    with marketplace_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE marketplace_booking_reminder_job SET state = 'dead', attempt = 8, "
+                "safe_failure_code = 'attempts_exhausted' WHERE booking_id = :id"
+            ),
+            {"id": delivery.booking_id},
+        )
+        connection.execute(
+            text(
+                "UPDATE marketplace_message_notification_job SET status = 'dead', attempt = 8, "
+                "safe_failure_code = 'unavailable' WHERE message_id = :message_id"
+            ),
+            {"message_id": delivery_message.message_id},
+        )
+    delivery_reason = "Delivery provider and worker health were restored."
+    assert not lifecycle.recover_delivery_jobs(
+        booking_id=delivery.booking_id,
+        operator_actor_ref=SECOND_OPERATOR_ACTOR,
+        reason=delivery_reason,
+        now=now,
+    )
+    assert lifecycle.recover_delivery_jobs(
+        booking_id=delivery.booking_id,
+        operator_actor_ref=OPERATOR_ACTOR,
+        reason=delivery_reason,
+        now=now,
+    )
+    assert lifecycle.recover_delivery_jobs(
+        booking_id=delivery.booking_id,
+        operator_actor_ref=OPERATOR_ACTOR,
+        reason=delivery_reason,
+        now=now,
+    )
+    assert not lifecycle.recover_delivery_jobs(
+        booking_id=delivery.booking_id,
+        operator_actor_ref=OPERATOR_ACTOR,
+        reason="A different recovery must not be treated as a replay.",
+        now=now,
+    )
+    with marketplace_engine.connect() as connection:
+        reminder_states = set(
+            connection.execute(
+                text("SELECT state FROM marketplace_booking_reminder_job WHERE booking_id = :id"),
+                {"id": delivery.booking_id},
+            ).scalars()
+        )
+        notification_state = connection.execute(
+            text(
+                "SELECT status FROM marketplace_message_notification_job "
+                "WHERE message_id = :message_id"
+            ),
+            {"message_id": delivery_message.message_id},
+        ).scalar_one()
+        delivery_audits = connection.execute(
+            text("SELECT count(*) FROM marketplace_delivery_recovery_audit WHERE booking_id = :id"),
+            {"id": delivery.booking_id},
+        ).scalar_one()
+    assert reminder_states == {"queued"}
+    assert notification_state == "queued"
+    assert delivery_audits == 1
+
     refundable = confirmed(now + timedelta(hours=13))
+    with marketplace_engine.connect() as connection:
+        connection.execute(text("SET ROLE glidelingo_app"))
+        for statement, values in (
+            (
+                "UPDATE marketplace_booking SET state = 'completed', completed_at = :now, "
+                "dispute_deadline_at = :deadline, updated_at = :now WHERE booking_id = :id",
+                {"id": refundable.booking_id, "now": now, "deadline": now + timedelta(hours=24)},
+            ),
+            (
+                "UPDATE marketplace_booking SET money_state = 'transferred', updated_at = :now "
+                "WHERE booking_id = :id",
+                {"id": refundable.booking_id, "now": now},
+            ),
+            (
+                "INSERT INTO marketplace_booking_review "
+                "(review_id, booking_id, learner_actor_ref, tutor_id, rating) "
+                "VALUES (:review_id, :id, :learner, :tutor_id, 5)",
+                {
+                    "review_id": uuid4(),
+                    "id": refundable.booking_id,
+                    "learner": LEARNER_ACTOR,
+                    "tutor_id": profile.tutor_id,
+                },
+            ),
+        ):
+            nested = connection.begin_nested()
+            with pytest.raises(DBAPIError):
+                connection.execute(text(statement), values)
+            nested.rollback()
+        connection.execute(text("RESET ROLE"))
     assert lifecycle.transition(
         booking_id=refundable.booking_id,
         actor_ref=LEARNER_ACTOR,
@@ -2115,7 +3054,16 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         new_starts_at=None,
         now=now,
     )
-    transfer = lifecycle.claim_money_operation(worker="money-worker", now=now, lease_seconds=60)
+    payout_at = next_weekly_payout_at(late.ends_at + timedelta(hours=24, microseconds=1))
+    assert (
+        lifecycle.claim_money_operation(
+            worker="money-worker", now=payout_at - timedelta(microseconds=1), lease_seconds=60
+        )
+        is None
+    )
+    transfer = lifecycle.claim_money_operation(
+        worker="money-worker", now=payout_at, lease_seconds=60
+    )
     assert transfer is not None and transfer.kind == "transfer" and transfer.amount_minor == 2000
     lifecycle.fail_money_operation(
         operation_id=transfer.operation_id,
@@ -2130,7 +3078,9 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         reason="Provider dashboard and idempotency result reconciled.",
         now=now,
     )
-    retried = lifecycle.claim_money_operation(worker="money-worker-2", now=now, lease_seconds=60)
+    retried = lifecycle.claim_money_operation(
+        worker="money-worker-2", now=payout_at, lease_seconds=60
+    )
     assert retried is not None and retried.idempotency_key == transfer.idempotency_key
     assert lifecycle.finish_money_operation(
         operation=retried,
@@ -2170,11 +3120,20 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
     no_show_transfer = lifecycle.claim_money_operation(
         worker="money-worker-learner-no-show", now=now, lease_seconds=60
     )
-    assert no_show_transfer is not None and no_show_transfer.kind == "transfer"
-    assert lifecycle.finish_money_operation(
-        operation=no_show_transfer,
-        result=StripeMoneyResult("tr_learnernoshow1", False, 2000, "USD"),
-        worker="money-worker-learner-no-show",
+    assert no_show_transfer is None
+    assert lifecycle.transition(
+        booking_id=learner_absent.booking_id,
+        actor_ref=LEARNER_ACTOR,
+        action="dispute",
+        reason="Learner disputed the no-show at the protected deadline.",
+        new_starts_at=None,
+        now=now + timedelta(hours=24),
+    )
+    assert (
+        lifecycle.claim_money_operation(
+            worker="money-worker-learner-no-show", now=now + timedelta(days=14), lease_seconds=60
+        )
+        is None
     )
 
     leased = confirmed(now - timedelta(days=7))
@@ -2186,10 +3145,19 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         new_starts_at=None,
         now=now,
     )
-    abandoned = lifecycle.claim_money_operation(worker="crashed-worker", now=now, lease_seconds=60)
+    payout_at = next_weekly_payout_at(now + timedelta(hours=24, microseconds=1))
+    assert (
+        lifecycle.claim_money_operation(
+            worker="too-early-worker", now=payout_at - timedelta(microseconds=1), lease_seconds=60
+        )
+        is None
+    )
+    abandoned = lifecycle.claim_money_operation(
+        worker="crashed-worker", now=payout_at, lease_seconds=60
+    )
     assert abandoned is not None and abandoned.booking_id == leased.booking_id
     reclaimed = lifecycle.claim_money_operation(
-        worker="restart-worker", now=now + timedelta(seconds=61), lease_seconds=60
+        worker="restart-worker", now=payout_at + timedelta(seconds=61), lease_seconds=60
     )
     assert reclaimed is not None
     assert reclaimed.operation_id == abandoned.operation_id
@@ -2214,7 +3182,7 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         new_starts_at=None,
         now=now,
     )
-    retry_at = now
+    retry_at = next_weekly_payout_at(now + timedelta(hours=24, microseconds=1))
     exhausted_operation = None
     for attempt in range(8):
         exhausted_operation = lifecycle.claim_money_operation(
@@ -2330,7 +3298,10 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
     )
     assert public_tutor is not None
     assert public_tutor.rating == 5.0 and public_tutor.rating_count == 1
-    assert lifecycle.list_reviews_for_operator(operator_actor_ref=OUTSIDER_ACTOR, limit=10) is None
+    assert (
+        lifecycle.list_reviews_for_operator(operator_actor_ref=OUTSIDER_ACTOR, offset=0, limit=10)
+        is None
+    )
     moderated = lifecycle.moderate_review(
         operator_actor_ref=OPERATOR_ACTOR,
         review_id=review.review_id,
@@ -2351,10 +3322,12 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         new_starts_at=None,
         now=race_completed_at,
     )
-    raced_transfer = lifecycle.claim_money_operation(
-        worker="money-worker-race", now=payout_window, lease_seconds=60
+    assert (
+        lifecycle.claim_money_operation(
+            worker="money-worker-race", now=payout_window, lease_seconds=60
+        )
+        is None
     )
-    assert raced_transfer is not None and raced_transfer.booking_id == reversal_booking.booking_id
     assert lifecycle.transition(
         booking_id=reversal_booking.booking_id,
         actor_ref=LEARNER_ACTOR,
@@ -2363,27 +3336,13 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         new_starts_at=None,
         now=payout_window,
     )
-    assert lifecycle.finish_money_operation(
-        operation=raced_transfer,
-        result=StripeMoneyResult("tr_racedpayout1", False, 2000, "USD"),
-        worker="money-worker-race",
-    )
     assert lifecycle.transition(
         booking_id=reversal_booking.booking_id,
         actor_ref=OPERATOR_ACTOR,
         action="resolve_refund",
-        reason="Operator approved refund after an in-flight transfer completed.",
+        reason="Operator approved refund after the deadline dispute won the boundary.",
         new_starts_at=None,
         now=payout_window,
-    )
-    reversal = lifecycle.claim_money_operation(
-        worker="money-worker-reversal", now=payout_window, lease_seconds=60
-    )
-    assert reversal is not None and reversal.kind == "reversal"
-    assert lifecycle.finish_money_operation(
-        operation=reversal,
-        result=StripeMoneyResult("trr_racedpayout1", False, 2000, "USD"),
-        worker="money-worker-reversal",
     )
     final_refund = lifecycle.claim_money_operation(
         worker="money-worker-after-reversal",
@@ -2413,12 +3372,7 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
             {"id": reversal_booking.booking_id},
         ).all()
     assert [tuple(row) for row in ledger] == [("charge", 2500), ("refund", 2500)]
-    assert [tuple(row) for row in reversal_ledger] == [
-        ("charge", 2500),
-        ("transfer", 2000),
-        ("reversal", 2000),
-        ("refund", 2500),
-    ]
+    assert [tuple(row) for row in reversal_ledger] == [("charge", 2500), ("refund", 2500)]
 
     reverse_order = confirmed(race_completed_at - timedelta(days=1))
     assert lifecycle.transition(
@@ -2438,8 +3392,9 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         )
         is None
     )
+    transfer_eligible_at = next_weekly_payout_at(payout_window + timedelta(microseconds=1))
     transfer_first = lifecycle.claim_money_operation(
-        worker="transfer-first", now=payout_window, lease_seconds=60
+        worker="transfer-first", now=transfer_eligible_at, lease_seconds=60
     )
     assert transfer_first is not None and transfer_first.booking_id == reverse_order.booking_id
     assert lifecycle.finish_money_operation(
@@ -2447,40 +3402,15 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         result=StripeMoneyResult("tr_transferfirst1", False, 2000, "USD"),
         worker="transfer-first",
     )
-    assert lifecycle.transition(
-        booking_id=reverse_order.booking_id,
-        actor_ref=LEARNER_ACTOR,
-        action="dispute",
-        reason="Learner disputed exactly after the transfer committed.",
-        new_starts_at=None,
-        now=payout_window,
-    )
-    assert lifecycle.transition(
-        booking_id=reverse_order.booking_id,
-        actor_ref=OPERATOR_ACTOR,
-        action="resolve_refund",
-        reason="Operator approved the reverse-order race refund.",
-        new_starts_at=None,
-        now=payout_window,
-    )
-    reverse_reversal = lifecycle.claim_money_operation(
-        worker="reverse-reversal", now=payout_window, lease_seconds=60
-    )
-    assert reverse_reversal is not None and reverse_reversal.kind == "reversal"
-    assert lifecycle.finish_money_operation(
-        operation=reverse_reversal,
-        result=StripeMoneyResult("trr_transferfirst1", False, 2000, "USD"),
-        worker="reverse-reversal",
-    )
-    reverse_refund = lifecycle.claim_money_operation(
-        worker="reverse-refund", now=payout_window, lease_seconds=60
-    )
-    assert reverse_refund is not None and reverse_refund.kind == "refund"
-    assert lifecycle.finish_money_operation(
-        operation=reverse_refund,
-        result=StripeMoneyResult("re_transferfirst1", False, 2500, "USD"),
-        worker="reverse-refund",
-    )
+    with pytest.raises(TutorApplicationConflictError):
+        lifecycle.transition(
+            booking_id=reverse_order.booking_id,
+            actor_ref=LEARNER_ACTOR,
+            action="dispute",
+            reason="Learner tried to dispute after the protected window closed.",
+            new_starts_at=None,
+            now=transfer_eligible_at,
+        )
 
 
 @pytest.mark.integration
@@ -2517,6 +3447,8 @@ def test_learning_context_consent_expiry_and_non_authoritative_follow_up(
                 livemode=False,
                 booking_id=held.booking_id,
                 platform_account_id="acct_reviewed123",
+                amount_minor=held.amount_minor,
+                currency=held.currency,
                 created_at=now,
             ),
         )
@@ -2532,6 +3464,8 @@ def test_learning_context_consent_expiry_and_non_authoritative_follow_up(
             livemode=False,
             booking_id=held.booking_id,
             platform_account_id="acct_reviewed123",
+            amount_minor=held.amount_minor,
+            currency=held.currency,
             created_at=now,
         ),
         payload_sha256=suffix.ljust(64, "d"),

@@ -10,7 +10,7 @@ import asyncio
 import logging
 import signal
 import socket
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Protocol, cast
@@ -50,23 +50,61 @@ class MarketplaceJobProcessor:
         self._commerce_enabled = commerce_enabled
 
     async def run_one_job(self, *, worker: str) -> bool:
+        processed = False
+
+        async def run(label: str, operation: Callable[..., Awaitable[object]]) -> bool:
+            try:
+                return bool(await operation(worker=worker))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                LOGGER.exception(
+                    "marketplace queue processor failed; continuing remaining queues",
+                    extra={"event": "marketplace_queue_error", "queue": label},
+                )
+                return False
+
         if self._commerce_enabled:
-            if await self._booking.expire_holds(now=_utc_now(), limit=100):
-                return True
-            for process in (
-                self._booking.run_one_reconciliation_job,
-                self._lifecycle.run_one_money_job,
-                self._lifecycle.run_one_reminder_job,
+            processed = (
+                await run("connect_refresh", self._booking.run_one_connect_refresh_job) or processed
+            )
+            processed = (
+                await run("reconciliation", self._booking.run_one_reconciliation_job) or processed
+            )
+            try:
+                processed = (
+                    bool(await self._booking.expire_holds(now=_utc_now(), limit=100)) or processed
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                LOGGER.exception(
+                    "marketplace hold expiry failed; continuing remaining queues",
+                    extra={"event": "marketplace_queue_error", "queue": "hold_expiry"},
+                )
+            for label, process in (
+                ("money", self._lifecycle.run_one_money_job),
+                ("reminder", self._lifecycle.run_one_reminder_job),
             ):
-                if await process(worker=worker):
-                    return True
-        for process in (
-            self._messaging.run_one_notification_job,
-            self._calendar.run_one_refresh_job,
+                processed = await run(label, process) or processed
+        for label, process in (
+            ("notification", self._messaging.run_one_notification_job),
+            ("calendar", self._calendar.run_one_refresh_job),
         ):
-            if await process(worker=worker):
-                return True
-        return await self._messaging.run_retention_batch(now=_utc_now(), limit=1000)
+            processed = await run(label, process) or processed
+        try:
+            processed = await self._messaging.run_provider_retention_batch(limit=1000) or processed
+            return (
+                await self._messaging.run_retention_batch(now=_utc_now(), limit=1000) or processed
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.exception(
+                "marketplace retention failed after durable queues",
+                extra={"event": "marketplace_queue_error", "queue": "retention"},
+            )
+            return processed
 
 
 async def run_worker(

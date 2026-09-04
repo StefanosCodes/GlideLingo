@@ -15,34 +15,44 @@ import {
   setMarketplaceMessageEmailPreference,
   type MarketplaceConversation,
 } from '@/features/tutor-marketplace/api';
-import { isHumanTutorMessagingEnabled } from '@/features/tutor-marketplace/config';
+import {
+  isHumanTutorMarketplaceAcquisitionEnabled,
+  isHumanTutorMessagingEnabled,
+} from '@/features/tutor-marketplace/config';
 import { useTheme } from '@/hooks/use-theme';
 
 type State =
   | { kind: 'loading' }
   | { kind: 'error' }
-  | { kind: 'ready'; conversations: MarketplaceConversation[] };
+  | { kind: 'ready'; conversations: MarketplaceConversation[]; nextCursor: string | null };
 
 export function MarketplaceMessagesScreen() {
   const enabled = isHumanTutorMessagingEnabled();
+  const acquisitionEnabled = isHumanTutorMarketplaceAcquisitionEnabled();
   const router = useRouter();
   const theme = useTheme();
   const sequence = useRef(0);
+  const preferenceBusy = useRef(false);
   const [retry, setRetry] = useState(0);
   const [state, setState] = useState<State>(enabled ? { kind: 'loading' } : { kind: 'error' });
   const [emailEnabled, setEmailEnabled] = useState<boolean | null>(null);
   const [savingPreference, setSavingPreference] = useState(false);
+  const [preferenceError, setPreferenceError] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [pageError, setPageError] = useState(false);
 
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
     const current = ++sequence.current;
+    setLoadingMore(false);
+    setPageError(false);
     void Promise.all([
       listMarketplaceConversations(controller.signal),
       getMarketplaceMessageEmailPreference(controller.signal),
-    ]).then(([conversations, preference]) => {
+    ]).then(([page, preference]) => {
         if (!controller.signal.aborted && current === sequence.current) {
-          setState({ kind: 'ready', conversations });
+          setState({ kind: 'ready', conversations: page.items, nextCursor: page.nextCursor });
           setEmailEnabled(preference);
         }
       })
@@ -54,13 +64,39 @@ export function MarketplaceMessagesScreen() {
     return () => controller.abort();
   }, [enabled, retry]);
 
+  const loadMore = async () => {
+    if (state.kind !== 'ready' || state.nextCursor === null || loadingMore) return;
+    const cursor = state.nextCursor;
+    const request = ++sequence.current;
+    setLoadingMore(true);
+    setPageError(false);
+    try {
+      const page = await listMarketplaceConversations(undefined, cursor);
+      if (request !== sequence.current) return;
+      setState((current) => current.kind === 'ready' && current.nextCursor === cursor ? {
+        kind: 'ready',
+        conversations: [...current.conversations, ...page.items.filter((conversation) =>
+          !current.conversations.some((existing) => existing.conversationId === conversation.conversationId))],
+        nextCursor: page.nextCursor,
+      } : current);
+    } catch {
+      if (request === sequence.current) setPageError(true);
+    } finally {
+      if (request === sequence.current) setLoadingMore(false);
+    }
+  };
+
   const updatePreference = async (value: boolean) => {
-    if (savingPreference) return;
+    if (preferenceBusy.current) return;
+    preferenceBusy.current = true;
     const previous = emailEnabled;
-    setEmailEnabled(value); setSavingPreference(true);
+    setEmailEnabled(value); setSavingPreference(true); setPreferenceError(null);
     try { setEmailEnabled(await setMarketplaceMessageEmailPreference(value)); }
-    catch { setEmailEnabled(previous); }
-    finally { setSavingPreference(false); }
+    catch {
+      setEmailEnabled(previous);
+      setPreferenceError('Email preference could not be saved. Your previous setting was restored.');
+    }
+    finally { preferenceBusy.current = false; setSavingPreference(false); }
   };
 
   if (!enabled) {
@@ -83,6 +119,7 @@ export function MarketplaceMessagesScreen() {
         </View><GlideSwitch accessibilityLabel="New-message email" onValueChange={(value) => void updatePreference(value)}
           testID="message-email-preference" value={emailEnabled} /></View>
         {savingPreference ? <ThemedText type="footnote" themeColor="textSecondary">Saving preference…</ThemedText> : null}
+        {preferenceError ? <ThemedText accessibilityRole="alert" type="footnote">{preferenceError}</ThemedText> : null}
       </GlideSurface> : null}
       {state.kind === 'loading' ? (
         <GlideSurface accessible accessibilityLabel="Loading tutor conversations" padding="roomy" style={styles.card}>
@@ -98,8 +135,8 @@ export function MarketplaceMessagesScreen() {
       {state.kind === 'ready' && state.conversations.length === 0 ? (
         <GlideSurface padding="roomy" style={styles.card} variant="tinted">
           <ThemedText type="title2">No conversations yet.</ThemedText>
-          <ThemedText type="body" themeColor="textSecondary">Open a tutor profile to start a safe, private conversation.</ThemedText>
-          <GlideButton label="Find a tutor" onPress={() => router.push('/tutors')} variant="secondary" />
+          <ThemedText type="body" themeColor="textSecondary">{acquisitionEnabled ? 'Open a tutor profile to start a safe, private conversation.' : 'New tutor conversations are paused. Existing conversations remain available.'}</ThemedText>
+          {acquisitionEnabled ? <GlideButton label="Find a tutor" onPress={() => router.push('/tutors')} variant="secondary" /> : null}
         </GlideSurface>
       ) : null}
       {state.kind === 'ready' ? state.conversations.map((conversation) => (
@@ -115,6 +152,13 @@ export function MarketplaceMessagesScreen() {
           </ThemedText>
         </Pressable>
       )) : null}
+      {state.kind === 'ready' && state.nextCursor !== null ? <GlideButton
+        disabled={loadingMore}
+        label={loadingMore ? 'Loading more conversations…' : 'Load more conversations'}
+        onPress={() => void loadMore()}
+        variant="secondary"
+      /> : null}
+      {pageError ? <ThemedText accessibilityRole="alert" type="footnote">More conversations could not be loaded. Existing results are unchanged.</ThemedText> : null}
     </ScreenFrame>
   );
 }

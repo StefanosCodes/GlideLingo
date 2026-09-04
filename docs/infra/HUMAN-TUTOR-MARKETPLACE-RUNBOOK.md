@@ -26,16 +26,34 @@ Repository completion does not imply that any later plane is ready.
 ## Migration order and least privilege
 
 Use a short-lived DDL operator and `psql --set ON_ERROR_STOP=1`. Never apply migrations from API
-startup or with the `glidelingo_app` login. Reconstruct the live migration queue immediately before
-application; do not rely on this document as evidence that another branch has merged.
+startup or with a runtime login. For migration `014`, the DDL operator must have `ADMIN OPTION` on
+`glidelingo_app` so it can compose the NOLOGIN payment role transactionally; remove that temporary
+membership after the migration. Reconstruct the live migration queue immediately before application;
+do not rely on this document as evidence that another branch has merged.
 
 Expected order is `001`, `002`, `003`, the separately owned `004` affiliate and `005` billing
 migrations, `006` marketplace core, the integration-owned `007`, then marketplace `008` through
-`013`. Migrations `008`–`013` are additive except for the intentional forward-compatible booking
+`014`. Migrations `008`–`014` are additive except for the intentional forward-compatible booking
 constraint replacement in `012`; each file is one transaction and preserves existing booking facts.
 Do not renumber around an unmerged predecessor.
 
-Before any flag change, connect as `glidelingo_app` and prove:
+Provision two distinct environment-specific LOGIN principals without recording their credentials:
+
+- the general API login is a member of `glidelingo_app` only;
+- the payment-authority login is a member of `glidelingo_marketplace_payment_worker` only; that
+  NOLOGIN role inherits `glidelingo_app` and adds the transition-evidence, money-ledger, money-job,
+  and verified-payment function rights required by the API and marketplace worker;
+- `glidelingo_app` is not a member of, and cannot assume,
+  `glidelingo_marketplace_payment_worker`; neither login is an owner, superuser, DDL role, or member
+  of `cloudsqlsuperuser`.
+
+Set the general URL in `GLIDELINGO_DATABASE_URL` and the payment login URL in
+`GLIDELINGO_HUMAN_TUTOR_PAYMENT_DATABASE_URL`. String inequality is only an early configuration
+guard. While commerce is enabled, `/health/ready` also connects through both URLs and fails closed
+unless the connected users are distinct, non-superusers with the exact composed membership and the
+general principal lacks direct transition, money insertion, and payment-confirmation authority.
+
+Before any flag change, connect as the general runtime login and prove:
 
 - no schema `CREATE`, `CREATEDB`, `CREATEROLE`, ownership, or inherited `cloudsqlsuperuser`;
 - no `UPDATE` or `DELETE` on transition, access, consent, and money ledgers;
@@ -44,6 +62,10 @@ Before any flag change, connect as `glidelingo_app` and prove:
 - the expected bounded runtime grants in each reviewed migration and no public function execution;
 - overlap, booking-state, review-eligibility, money-conservation, and learning-authority triggers are
   installed with their pinned `search_path`.
+
+Then connect as the payment-authority login and prove the readiness role contract plus one controlled
+confirmation, refund, transfer, and reversal-to-refund flow. Never grant the payment role to the
+general login or use an owner URL to satisfy this check.
 
 A failed statement must leave no partial schema. Re-run the production-shaped migration and runtime
 privilege tests before proceeding; never repair a critical journey with an ad hoc database write.
@@ -57,7 +79,8 @@ tokens into tickets, dashboards, or logs.
 For each environment, record and independently verify:
 
 - GCP project number/name, Cloud Run service and revision, Cloud SQL instance/database, runtime
-  service account, and Secret Manager resource plus pinned numeric version for every secret;
+  service account, both distinct database login identities/role memberships, and Secret Manager
+  resource plus pinned numeric version for every secret;
 - Clerk instance/issuer, JWKS URL host, audience, authorized parties, and the identities of the
   allowlisted internal test actors;
 - Stripe account ID shown by an authenticated account-retrieval request, livemode, Connect country
@@ -112,6 +135,8 @@ Revoked Google access becomes reconnect-required, and a new OAuth connection res
 The worker may start once the base marketplace flag is enabled: it skips all commerce-owned expiry,
 reconciliation, money, and reminder queues until commerce is enabled, while independently enabled
 calendar and messaging queues remain available during staged activation.
+Each poll performs a bounded unit or batch from every enabled queue, so a sustained checkout or hold
+backlog cannot starve refunds, reversals, reminders, notifications, calendar refresh, or retention.
 `SIGTERM` and `SIGINT` stop after the current bounded claim; no actor, booking, payment, provider,
 token, message content, or calendar event content is logged.
 
@@ -196,7 +221,7 @@ key rotation needs a separately reviewed data-migration plan; do not strand encr
 
 Set both acquisition flags false first and verify new discovery/conversation/checkout receives the
 fail-closed response while existing confirmed bookings and operator routes remain usable. Drain
-workers only when money safety permits. Roll back application revisions with schema `006`–`013` left
+workers only when money safety permits. Roll back application revisions with schema `006`–`014` left
 in place. Re-run reconciliation and ledger-conservation checks. Do not downgrade schemas, erase audit
 facts, or disable every support surface for a paid learner or owed tutor.
 

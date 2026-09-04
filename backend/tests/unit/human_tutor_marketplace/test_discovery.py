@@ -74,12 +74,12 @@ class Repository:
         )
 
     def get_manual_availability_by_actor(
-        self, *, actor_ref: str
+        self, *, actor_ref: str, offering_id: UUID | None = None
     ) -> StoredManualAvailability | None:
         return self.schedule
 
     def get_manual_availability_by_tutor(
-        self, *, tutor_id: UUID, require_public: bool
+        self, *, tutor_id: UUID, require_public: bool, offering_id: UUID | None = None
     ) -> StoredManualAvailability | None:
         return self.schedule if tutor_id == TUTOR_ID else None
 

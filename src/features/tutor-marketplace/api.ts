@@ -76,7 +76,11 @@ export type TutorProfile = {
   publicationBlockers: ('application_not_approved' | 'payout_not_ready' | 'offering_missing')[];
   credential: TutorCredential | null;
   offering: TutorOffering | null;
+  credentials?: TutorCredential[];
+  offerings?: TutorOffering[];
 };
+
+export type PublicTutorOffering = Pick<TutorOffering, 'offeringId' | 'title' | 'durationMinutes' | 'amountMinor' | 'currency'>;
 
 export type TutorApplicationQueue = {
   items: TutorApplication[];
@@ -102,9 +106,18 @@ export type PublicTutor = {
   rating: number | null;
   ratingCount: number;
   isFavorite: boolean;
+  offerings?: PublicTutorOffering[];
 };
 
 export type TutorSearchResult = { items: PublicTutor[]; nextCursor: string | null };
+
+export type MarketplaceOperatorCapability =
+  | 'review_tutor_applications'
+  | 'manage_tutor_status'
+  | 'verify_tutor_credentials'
+  | 'review_message_reports'
+  | 'manage_bookings'
+  | 'moderate_reviews';
 
 export type MarketplaceReview = {
   reviewId: string;
@@ -137,6 +150,7 @@ export type ManualAvailability = Omit<ManualAvailabilityDraft, 'expectedProfileV
 export type TutorSlot = { startsAt: string; endsAt: string };
 export type TutorSlots = {
   tutorId: string;
+  offeringId?: string | null;
   timeZone: string;
   source: 'manual' | 'manual+google';
   freshness: 'current' | 'stale' | 'reconnect_required';
@@ -204,6 +218,7 @@ export type MarketplaceBooking = {
   scheduleVersion: number;
   moneyState: 'charged' | 'refund_pending' | 'refund_ambiguous' | 'refunded' | 'transfer_pending' | 'transfer_ambiguous' | 'transferred' | 'reversal_pending' | 'reversal_ambiguous' | 'reversed' | null;
   disputeDeadlineAt: string | null;
+  hasCalendarConflict: boolean;
 };
 
 export type TutorEarnings = { pendingMinor: number; transferredMinor: number; currency: 'USD' };
@@ -249,6 +264,26 @@ export class TutorMarketplaceClientError extends Error {
     this.name = 'TutorMarketplaceClientError';
     this.kind = kind;
   }
+}
+
+export async function getMarketplaceOperatorCapabilities(
+  signal?: AbortSignal,
+): Promise<MarketplaceOperatorCapability[]> {
+  return runMarketplaceRequest(async () => {
+    const allowed = new Set<MarketplaceOperatorCapability>([
+      'review_tutor_applications', 'manage_tutor_status', 'verify_tutor_credentials',
+      'review_message_reports', 'manage_bookings', 'moderate_reviews',
+    ]);
+    const result = await getJson({
+      parse: (value) => isRecord(value) && Array.isArray(value.capabilities) &&
+        value.capabilities.length <= 6 && value.capabilities.every((item) =>
+          typeof item === 'string' && allowed.has(item as MarketplaceOperatorCapability))
+        ? value.capabilities as MarketplaceOperatorCapability[] : null,
+      path: '/v1/marketplace/operator-capabilities',
+      signal,
+    });
+    return result.data;
+  });
 }
 
 export async function getOwnTutorApplication(signal?: AbortSignal): Promise<TutorApplication> {
@@ -350,10 +385,12 @@ export async function updateTutorProfileDraft(
 export async function saveTutorCredential(
   input: Pick<TutorCredential, 'credentialType' | 'title' | 'issuer'>,
   expectedVersion: number,
+  credentialId?: string,
 ): Promise<TutorProfile> {
   return runMarketplaceRequest(async () => {
     const result = await postJson({
       body: {
+        credential_id: credentialId,
         expected_version: expectedVersion,
         credential_type: input.credentialType,
         title: input.title,
@@ -369,10 +406,12 @@ export async function saveTutorCredential(
 export async function saveTutorOffering(
   input: Pick<TutorOffering, 'title' | 'durationMinutes' | 'amountMinor' | 'currency'>,
   expectedVersion: number,
+  offeringId?: string,
 ): Promise<TutorProfile> {
   return runMarketplaceRequest(async () => {
     const result = await postJson({
       body: {
+        offering_id: offeringId,
         expected_version: expectedVersion,
         title: input.title,
         duration_minutes: input.durationMinutes,
@@ -387,13 +426,16 @@ export async function saveTutorOffering(
 }
 
 export async function setTutorPublication(profile: TutorProfile, publish: boolean): Promise<TutorProfile> {
-  if (profile.offering === null) throw new TutorMarketplaceClientError('validation');
-  const offeringVersion = profile.offering.version;
+  const offerings = profile.offerings?.length ? profile.offerings : profile.offering ? [profile.offering] : [];
+  if (!offerings.length) throw new TutorMarketplaceClientError('validation');
   return runMarketplaceRequest(async () => {
     const result = await postJson({
       body: {
         expected_profile_version: profile.version,
-        expected_offering_version: offeringVersion,
+        expected_offerings: offerings.map((offering) => ({
+          offering_id: offering.offeringId,
+          expected_version: offering.version,
+        })),
         publish,
       },
       parse: parseTutorProfile,
@@ -481,12 +523,13 @@ export async function listPublicTutorSlots(
   startsAt: string,
   endsAt: string,
   signal?: AbortSignal,
+  offeringId?: string,
 ): Promise<TutorSlots> {
   return runMarketplaceRequest(async () => {
     const result = await getJson({
       parse: parseTutorSlots,
       path: `/v1/tutors/${tutorId}/slots`,
-      query: { ends_at: endsAt, starts_at: startsAt },
+      query: { ends_at: endsAt, starts_at: startsAt, offering_id: offeringId },
       signal,
     });
     return result.data;
@@ -660,10 +703,11 @@ export async function createBookingCheckout(
   tutorId: string,
   startsAt: string,
   idempotencyKey: string,
+  offeringId?: string,
 ): Promise<MarketplaceBooking> {
   return runMarketplaceRequest(async () => {
     const result = await postJson({
-      body: { tutor_id: tutorId, starts_at: startsAt, idempotency_key: idempotencyKey },
+      body: { tutor_id: tutorId, offering_id: offeringId, starts_at: startsAt, idempotency_key: idempotencyKey },
       parse: parseMarketplaceBooking,
       path: '/v1/bookings/checkout',
     });
@@ -671,15 +715,23 @@ export async function createBookingCheckout(
   });
 }
 
-export async function listMarketplaceBookings(signal?: AbortSignal): Promise<MarketplaceBooking[]> {
+export async function listMarketplaceBookings(
+  signal?: AbortSignal,
+  cursor?: string,
+  limit = 50,
+): Promise<{ items: MarketplaceBooking[]; nextCursor: string | null }> {
   return runMarketplaceRequest(async () => {
     const result = await getJson({
       parse: (value) => {
-        if (!isRecord(value) || !Array.isArray(value.items) || value.items.length > 100) return null;
+        if (!isRecord(value) || !Array.isArray(value.items) || value.items.length > limit ||
+          !(value.next_cursor === null || (typeof value.next_cursor === 'string' && value.next_cursor.length <= 512))) return null;
         const items = value.items.map(parseMarketplaceBooking);
-        return items.some((item) => item === null) ? null : items as MarketplaceBooking[];
+        return items.some((item) => item === null) ? null : {
+          items: items as MarketplaceBooking[], nextCursor: value.next_cursor as string | null,
+        };
       },
       path: '/v1/bookings',
+      query: { cursor, limit },
       signal,
     });
     return result.data;
@@ -725,15 +777,44 @@ export async function recoverMarketplaceBookingMoney(
   });
 }
 
+export async function recoverMarketplaceBookingReconciliation(
+  bookingId: string,
+  reason: string,
+): Promise<MarketplaceBooking> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { reason },
+      parse: parseMarketplaceBooking,
+      path: `/v1/marketplace-operations/bookings/${bookingId}/reconciliation-recovery`,
+    });
+    return result.data;
+  });
+}
+
+export async function recoverMarketplaceBookingDelivery(
+  bookingId: string,
+  reason: string,
+): Promise<MarketplaceBooking> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { reason },
+      parse: parseMarketplaceBooking,
+      path: `/v1/marketplace-operations/bookings/${bookingId}/delivery-recovery`,
+    });
+    return result.data;
+  });
+}
+
 export async function transitionMarketplaceBooking(
   bookingId: string,
-  action: 'reschedule' | 'cancel' | 'complete' | 'learner_no_show' | 'tutor_no_show' | 'dispute' | 'resolve_refund' | 'resolve_release',
+  action: 'reschedule' | 'cancel' | 'complete' | 'learner_no_show' | 'tutor_no_show' | 'dispute' | 'resolve_refund' | 'resolve_release' | 'calendar_conflict_refund',
   reason: string,
+  operationId: string,
   newStartsAt: string | null = null,
 ): Promise<MarketplaceBooking> {
   return runMarketplaceRequest(async () => {
     const result = await postJson({
-      body: { action, reason, new_starts_at: newStartsAt },
+      body: { action, reason, new_starts_at: newStartsAt, operation_id: operationId },
       parse: parseMarketplaceBooking,
       path: `/v1/bookings/${bookingId}/transition`,
     });
@@ -757,16 +838,23 @@ export async function createMarketplaceBookingReview(
   });
 }
 
-export async function listMarketplaceReviews(signal?: AbortSignal): Promise<MarketplaceReview[]> {
+export async function listMarketplaceReviews(
+  signal?: AbortSignal,
+  offset = 0,
+): Promise<{ items: MarketplaceReview[]; nextOffset: number | null }> {
   return runMarketplaceRequest(async () => {
     const result = await getJson({
       parse: (value) => {
-        if (!isRecord(value) || !Array.isArray(value.items)) return null;
+        if (!isRecord(value) || !Array.isArray(value.items) ||
+          !(value.next_offset === null || (typeof value.next_offset === 'number' &&
+            Number.isInteger(value.next_offset) && value.next_offset >= 0))) return null;
         const items = value.items.map(parseMarketplaceReview);
-        return items.every((item): item is MarketplaceReview => item !== null) ? items : null;
+        return items.every((item): item is MarketplaceReview => item !== null) ? {
+          items, nextOffset: value.next_offset as number | null,
+        } : null;
       },
       path: '/v1/marketplace-operations/reviews',
-      query: { limit: 50 },
+      query: { limit: 50, offset },
       signal,
     });
     return result.data;
@@ -890,15 +978,21 @@ export async function saveMarketplaceTutorFollowUp(
 
 export async function listMarketplaceConversations(
   signal?: AbortSignal,
-): Promise<MarketplaceConversation[]> {
+  cursor?: string,
+  limit = 50,
+): Promise<{ items: MarketplaceConversation[]; nextCursor: string | null }> {
   return runMarketplaceRequest(async () => {
     const result = await getJson({
       parse: (value) => {
-        if (!isRecord(value) || !Array.isArray(value.items) || value.items.length > 100) return null;
+        if (!isRecord(value) || !Array.isArray(value.items) || value.items.length > limit ||
+          !(value.next_cursor === null || (typeof value.next_cursor === 'string' && value.next_cursor.length <= 512))) return null;
         const items = value.items.map(parseMarketplaceConversation);
-        return items.some((item) => item === null) ? null : items as MarketplaceConversation[];
+        return items.some((item) => item === null) ? null : {
+          items: items as MarketplaceConversation[], nextCursor: value.next_cursor as string | null,
+        };
       },
       path: '/v1/conversations',
+      query: { cursor, limit },
       signal,
     });
     return result.data;
@@ -989,15 +1083,21 @@ export async function reportMarketplaceMessage(
 
 export async function listMarketplaceMessageReports(
   signal?: AbortSignal,
-): Promise<MarketplaceMessageReport[]> {
+  offset = 0,
+  limit = 50,
+): Promise<{ items: MarketplaceMessageReport[]; nextOffset: number | null }> {
   return runMarketplaceRequest(async () => {
     const result = await getJson({
       parse: (value) => {
-        if (!isRecord(value) || !Array.isArray(value.items) || value.items.length > 100) return null;
+        if (!isRecord(value) || !Array.isArray(value.items) || value.items.length > limit ||
+          !(value.next_offset === null || (Number.isSafeInteger(value.next_offset) && (value.next_offset as number) >= 0))) return null;
         const items = value.items.map(parseMarketplaceMessageReport);
-        return items.some((item) => item === null) ? null : items as MarketplaceMessageReport[];
+        return items.some((item) => item === null) ? null : {
+          items: items as MarketplaceMessageReport[], nextOffset: value.next_offset as number | null,
+        };
       },
       path: '/v1/marketplace-operations/message-reports',
+      query: { offset, limit },
       signal,
     });
     return result.data;
@@ -1027,6 +1127,20 @@ export async function resolveMarketplaceMessageReport(
       body: { reason },
       parse: parseMarketplaceMessageReport,
       path: `/v1/marketplace-operations/message-reports/${reportId}/resolve`,
+    });
+    return result.data;
+  });
+}
+
+export async function recoverMarketplaceConversationNotifications(
+  conversationId: string,
+  reason: string,
+): Promise<void> {
+  await runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { reason },
+      parse: (value) => isRecord(value) && value.success === true ? true : null,
+      path: `/v1/marketplace-operations/conversations/${conversationId}/notification-recovery`,
     });
     return result.data;
   });
@@ -1169,6 +1283,19 @@ export function parsePublicTutor(value: unknown): PublicTutor | null {
     !Number.isSafeInteger(value.rating_count) || (value.rating_count as number) < 0 ||
     typeof value.is_favorite !== 'boolean'
   ) return null;
+  const legacyOffering = {
+    offeringId: value.offering_id,
+    title: value.offering_title,
+    durationMinutes: value.duration_minutes,
+    amountMinor: value.amount_minor as number,
+    currency: value.currency,
+  } as PublicTutorOffering;
+  const offerings = value.offerings === undefined
+    ? [legacyOffering]
+    : Array.isArray(value.offerings)
+      ? value.offerings.map(parsePublicTutorOffering)
+      : [null];
+  if (offerings.some((offering) => offering === null) || offerings.length < 1 || offerings.length > 20) return null;
   return {
     tutorId: value.tutor_id, headline: value.headline, biography: value.biography,
     timeZone: value.time_zone, languages: [...value.languages], dialects: [...value.dialects],
@@ -1177,7 +1304,17 @@ export function parsePublicTutor(value: unknown): PublicTutor | null {
     durationMinutes: value.duration_minutes, amountMinor: value.amount_minor as number,
     currency: value.currency, rating: value.rating as number | null,
     ratingCount: value.rating_count as number, isFavorite: value.is_favorite,
+    offerings: offerings as PublicTutorOffering[],
   };
+}
+
+function parsePublicTutorOffering(value: unknown): PublicTutorOffering | null {
+  if (!isRecord(value) || !isUuid(value.offering_id) || !isBoundedString(value.title, 100) ||
+      (value.duration_minutes !== 25 && value.duration_minutes !== 50) ||
+      !Number.isSafeInteger(value.amount_minor) || (value.amount_minor as number) < 500 ||
+      (value.amount_minor as number) > 50_000 || value.currency !== 'USD') return null;
+  return { offeringId: value.offering_id, title: value.title, durationMinutes: value.duration_minutes,
+    amountMinor: value.amount_minor as number, currency: value.currency };
 }
 
 export function parseTutorSearchResult(value: unknown): TutorSearchResult | null {
@@ -1190,6 +1327,7 @@ export function parseTutorSearchResult(value: unknown): TutorSearchResult | null
 
 export function parseTutorSlots(value: unknown): TutorSlots | null {
   if (!isRecord(value) || !isUuid(value.tutor_id) || !isBoundedString(value.time_zone, 64) ||
+      !(value.offering_id === undefined || value.offering_id === null || isUuid(value.offering_id)) ||
       (value.source !== 'manual' && value.source !== 'manual+google') ||
       !['current', 'stale', 'reconnect_required'].includes(value.freshness as string) ||
       !Array.isArray(value.slots) ||
@@ -1201,7 +1339,10 @@ export function parseTutorSlots(value: unknown): TutorSlots | null {
   });
   if (slots.some((slot) => slot === null)) return null;
   return {
-    tutorId: value.tutor_id, timeZone: value.time_zone,
+    tutorId: value.tutor_id,
+    offeringId: value.offering_id === undefined || value.offering_id === null
+      ? null : value.offering_id,
+    timeZone: value.time_zone,
     source: value.source, freshness: value.freshness as TutorSlots['freshness'], slots: slots as TutorSlot[],
   };
 }
@@ -1235,11 +1376,14 @@ export function parseMarketplaceBooking(value: unknown): MarketplaceBooking | nu
       !(value.money_state === null || ['charged', 'refund_pending', 'refund_ambiguous', 'refunded',
         'transfer_pending', 'transfer_ambiguous', 'transferred', 'reversal_pending',
         'reversal_ambiguous', 'reversed'].includes(value.money_state as string)) ||
-      !isNullableIsoTimestamp(value.dispute_deadline_at)) {
+      !isNullableIsoTimestamp(value.dispute_deadline_at) ||
+      typeof value.has_calendar_conflict !== 'boolean') {
     return null;
   }
   const protectedStates = ['confirmed', 'completed', 'learner_no_show', 'disputed', 'resolved_release'];
-  if (protectedStates.includes(value.state as string) !== (value.meeting_url !== null && value.ics !== null)) return null;
+  const protectedBooking = protectedStates.includes(value.state as string);
+  if ((protectedBooking && value.ics === null) ||
+      (!protectedBooking && (value.meeting_url !== null || value.ics !== null))) return null;
   return {
     bookingId: value.booking_id, role: value.role as MarketplaceBooking['role'], tutorId: value.tutor_id,
     state: value.state as MarketplaceBooking['state'], startsAt: value.starts_at,
@@ -1251,6 +1395,7 @@ export function parseMarketplaceBooking(value: unknown): MarketplaceBooking | nu
     scheduleVersion: value.schedule_version as number,
     moneyState: value.money_state as MarketplaceBooking['moneyState'],
     disputeDeadlineAt: value.dispute_deadline_at,
+    hasCalendarConflict: value.has_calendar_conflict as boolean,
   };
 }
 
@@ -1436,6 +1581,14 @@ export function parseTutorProfile(value: unknown): TutorProfile | null {
   if ((value.credential !== null && credential === null) || (value.offering !== null && offering === null)) {
     return null;
   }
+  const credentials = value.credentials === undefined
+    ? credential ? [credential] : []
+    : Array.isArray(value.credentials) ? value.credentials.map(parseTutorCredential) : [null];
+  const offerings = value.offerings === undefined
+    ? offering ? [offering] : []
+    : Array.isArray(value.offerings) ? value.offerings.map(parseTutorOffering) : [null];
+  if (credentials.some((item) => item === null) || offerings.some((item) => item === null) ||
+      credentials.length > 20 || offerings.length > 20) return null;
   return {
     tutorId: value.tutor_id,
     applicationId: value.application_id,
@@ -1449,6 +1602,8 @@ export function parseTutorProfile(value: unknown): TutorProfile | null {
     publicationBlockers: [...value.publication_blockers],
     credential,
     offering,
+    credentials: credentials as TutorCredential[],
+    offerings: offerings as TutorOffering[],
   };
 }
 

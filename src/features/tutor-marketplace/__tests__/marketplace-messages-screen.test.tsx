@@ -5,7 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { MarketplaceConversation } from '@/features/tutor-marketplace/api';
 import { MarketplaceMessagesScreen } from '@/features/tutor-marketplace/marketplace-messages-screen';
 
-const mockList = jest.fn<() => Promise<MarketplaceConversation[]>>();
+const mockList = jest.fn<() => Promise<{ items: MarketplaceConversation[]; nextCursor: string | null }>>();
 const mockGetPreference = jest.fn<() => Promise<boolean>>();
 const mockSetPreference = jest.fn<() => Promise<boolean>>();
 const mockPush = jest.fn();
@@ -30,13 +30,18 @@ const conversation: MarketplaceConversation = {
 
 beforeEach(() => {
   process.env.EXPO_PUBLIC_HUMAN_TUTOR_MESSAGING_ENABLED = 'true';
+  process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ACQUISITION_ENABLED = 'true';
   mockList.mockReset(); mockGetPreference.mockReset(); mockSetPreference.mockReset(); mockPush.mockReset();
   mockGetPreference.mockResolvedValue(true); mockSetPreference.mockResolvedValue(false);
 });
-afterEach(() => { cleanup(); delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_MESSAGING_ENABLED; });
+afterEach(() => {
+  cleanup();
+  delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_MESSAGING_ENABLED;
+  delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ACQUISITION_ENABLED;
+});
 
 test('renders the empty journey and links back to discovery', async () => {
-  mockList.mockResolvedValue([]);
+  mockList.mockResolvedValue({ items: [], nextCursor: null });
   const screen = await render(<SafeAreaProvider initialMetrics={metrics}><MarketplaceMessagesScreen /></SafeAreaProvider>);
   await waitFor(() => expect(screen.getByText('No conversations yet.')).toBeTruthy());
   await fireEvent.press(screen.getByText('Find a tutor'));
@@ -44,7 +49,7 @@ test('renders the empty journey and links back to discovery', async () => {
 });
 
 test('opens a participant conversation and recovers after an error', async () => {
-  mockList.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([conversation]);
+  mockList.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ items: [conversation], nextCursor: null });
   const screen = await render(<SafeAreaProvider initialMetrics={metrics}><MarketplaceMessagesScreen /></SafeAreaProvider>);
   await waitFor(() => expect(screen.getByText('Conversations could not be loaded.')).toBeTruthy());
   await fireEvent.press(screen.getByText('Try again'));
@@ -53,8 +58,16 @@ test('opens a participant conversation and recovers after an error', async () =>
   expect(mockPush).toHaveBeenCalledWith(`/messages/${conversation.conversationId}`);
 });
 
+test('does not link to discovery while acquisition is paused', async () => {
+  delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ACQUISITION_ENABLED;
+  mockList.mockResolvedValue({ items: [], nextCursor: null });
+  const screen = await render(<SafeAreaProvider initialMetrics={metrics}><MarketplaceMessagesScreen /></SafeAreaProvider>);
+  await waitFor(() => expect(screen.getByText(/New tutor conversations are paused/)).toBeTruthy());
+  expect(screen.queryByText('Find a tutor')).toBeNull();
+});
+
 test('updates the message email preference through a race-safe switch', async () => {
-  mockList.mockResolvedValue([]);
+  mockList.mockResolvedValue({ items: [], nextCursor: null });
   const screen = await render(<SafeAreaProvider initialMetrics={metrics}><MarketplaceMessagesScreen /></SafeAreaProvider>);
   await waitFor(() => expect(screen.getByTestId('message-email-preference')).toBeTruthy());
   await fireEvent(screen.getByTestId('message-email-preference'), 'valueChange', false);

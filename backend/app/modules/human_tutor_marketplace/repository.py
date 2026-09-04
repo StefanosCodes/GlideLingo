@@ -1,5 +1,6 @@
 """PostgreSQL persistence for tutor applications and operator review."""
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -95,6 +96,8 @@ class StoredTutorProfile:
     is_published: bool
     credential: StoredTutorCredential | None
     offering: StoredTutorOffering | None
+    credentials: tuple[StoredTutorCredential, ...] = ()
+    offerings: tuple[StoredTutorOffering, ...] = ()
 
 
 class ApplicationAlreadyExistsError(Exception):
@@ -124,6 +127,8 @@ class TutorApplicationRepository(Protocol):
     def submit(self, *, actor_ref: str, expected_version: int) -> StoredTutorApplication | None: ...
 
     def has_operator_capability(self, *, actor_ref: str, capability: str) -> bool: ...
+
+    def list_operator_capabilities(self, *, actor_ref: str) -> tuple[str, ...]: ...
 
     def list_review_queue(
         self, *, offset: int, limit: int
@@ -191,7 +196,8 @@ class TutorApplicationRepository(Protocol):
         *,
         actor_ref: str,
         expected_profile_version: int,
-        expected_offering_version: int,
+        expected_offering_version: int | None,
+        expected_offerings: tuple[tuple[UUID, int], ...] | None = None,
         publish: bool,
     ) -> StoredTutorProfile | None: ...
 
@@ -377,23 +383,40 @@ class PostgresTutorApplicationRepository:
                     or profile["is_published"]
                 ):
                     return None
-                existing = (
+                existing_rows = (
                     connection.execute(
                         text(
                             """
                             SELECT credential_id, version, verification_status
                             FROM marketplace_tutor_credential
                             WHERE tutor_id = :tutor_id
+                              AND (CAST(:credential_id AS uuid) IS NULL
+                                   OR credential_id = CAST(:credential_id AS uuid))
+                            ORDER BY credential_id
                             FOR UPDATE
                             """
                         ),
-                        {"tutor_id": profile["tutor_id"]},
+                        {"tutor_id": profile["tutor_id"], "credential_id": request.credential_id},
                     )
                     .mappings()
-                    .one_or_none()
+                    .all()
                 )
+                if request.credential_id is None and len(existing_rows) > 1:
+                    return None
+                existing = existing_rows[0] if existing_rows else None
                 if existing is None:
                     if request.expected_version != 0:
+                        return None
+                    if (
+                        connection.execute(
+                            text(
+                                "SELECT count(*) FROM marketplace_tutor_credential "
+                                "WHERE tutor_id = :tutor_id"
+                            ),
+                            {"tutor_id": profile["tutor_id"]},
+                        ).scalar_one()
+                        >= 20
+                    ):
                         return None
                     connection.execute(
                         text(
@@ -407,7 +430,7 @@ class PostgresTutorApplicationRepository:
                             """
                         ),
                         {
-                            "credential_id": uuid4(),
+                            "credential_id": request.credential_id or uuid4(),
                             "application_id": profile["application_id"],
                             "tutor_id": profile["tutor_id"],
                             "credential_type": request.credential_type,
@@ -538,23 +561,40 @@ class PostgresTutorApplicationRepository:
                     or profile["is_published"]
                 ):
                     return None
-                existing = (
+                existing_rows = (
                     connection.execute(
                         text(
                             """
                             SELECT offering_id, version, state
                             FROM marketplace_tutor_offering
                             WHERE tutor_id = :tutor_id
+                              AND (CAST(:offering_id AS uuid) IS NULL
+                                   OR offering_id = CAST(:offering_id AS uuid))
+                            ORDER BY offering_id
                             FOR UPDATE
                             """
                         ),
-                        {"tutor_id": profile["tutor_id"]},
+                        {"tutor_id": profile["tutor_id"], "offering_id": request.offering_id},
                     )
                     .mappings()
-                    .one_or_none()
+                    .all()
                 )
+                if request.offering_id is None and len(existing_rows) > 1:
+                    return None
+                existing = existing_rows[0] if existing_rows else None
                 if existing is None:
                     if request.expected_version != 0:
+                        return None
+                    if (
+                        connection.execute(
+                            text(
+                                "SELECT count(*) FROM marketplace_tutor_offering "
+                                "WHERE tutor_id = :tutor_id"
+                            ),
+                            {"tutor_id": profile["tutor_id"]},
+                        ).scalar_one()
+                        >= 20
+                    ):
                         return None
                     policies = self._current_policies(connection)
                     connection.execute(
@@ -571,7 +611,7 @@ class PostgresTutorApplicationRepository:
                             """
                         ),
                         {
-                            "offering_id": uuid4(),
+                            "offering_id": request.offering_id or uuid4(),
                             "application_id": profile["application_id"],
                             "tutor_id": profile["tutor_id"],
                             "title": request.title,
@@ -627,24 +667,41 @@ class PostgresTutorApplicationRepository:
         *,
         actor_ref: str,
         expected_profile_version: int,
-        expected_offering_version: int,
+        expected_offering_version: int | None,
+        expected_offerings: tuple[tuple[UUID, int], ...] | None = None,
         publish: bool,
     ) -> StoredTutorProfile | None:
         try:
             with self._engine.begin() as connection:
+                if expected_offerings is None:
+                    rows = connection.execute(
+                        text(
+                            "SELECT offering_id FROM marketplace_tutor_offering AS offering "
+                            "JOIN marketplace_tutor_profile AS profile USING (tutor_id) "
+                            "WHERE profile.actor_ref = :actor_ref ORDER BY offering_id"
+                        ),
+                        {"actor_ref": actor_ref},
+                    ).all()
+                    if len(rows) != 1 or expected_offering_version is None:
+                        return None
+                    expected_offerings = ((rows[0][0], expected_offering_version),)
+                expectations = [
+                    {"offering_id": str(offering_id), "expected_version": version}
+                    for offering_id, version in expected_offerings
+                ]
                 application_id = connection.execute(
                     text(
                         """
-                        SELECT marketplace_set_tutor_publication(
+                        SELECT marketplace_set_tutor_publication_v2(
                           :actor_ref, :expected_profile_version,
-                          :expected_offering_version, :publish
+                          CAST(:expected_offerings AS jsonb), :publish
                         )
                         """
                     ),
                     {
                         "actor_ref": actor_ref,
                         "expected_profile_version": expected_profile_version,
-                        "expected_offering_version": expected_offering_version,
+                        "expected_offerings": json.dumps(expectations),
                         "publish": publish,
                     },
                 ).scalar_one()
@@ -946,6 +1003,22 @@ class PostgresTutorApplicationRepository:
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
+    def list_operator_capabilities(self, *, actor_ref: str) -> tuple[str, ...]:
+        try:
+            with self._engine.connect() as connection:
+                return tuple(
+                    connection.execute(
+                        text(
+                            "SELECT capability FROM marketplace_operator_capability "
+                            "WHERE actor_ref = :actor_ref AND revoked_at IS NULL "
+                            "ORDER BY capability"
+                        ),
+                        {"actor_ref": actor_ref},
+                    ).scalars()
+                )
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
     def list_review_queue(
         self, *, offset: int, limit: int
     ) -> tuple[list[StoredTutorApplication], bool]:
@@ -1128,7 +1201,7 @@ class PostgresTutorApplicationRepository:
         row = cls._get_profile_row(connection, actor_ref=actor_ref)
         if row is None:
             return None
-        credential_row = (
+        credential_rows = (
             connection.execute(
                 text(
                     """
@@ -1137,14 +1210,15 @@ class PostgresTutorApplicationRepository:
                            verified_by_actor_ref
                     FROM marketplace_tutor_credential
                     WHERE tutor_id = :tutor_id
+                    ORDER BY created_at, credential_id
                     """
                 ),
                 {"tutor_id": row["tutor_id"]},
             )
             .mappings()
-            .one_or_none()
+            .all()
         )
-        offering_row = (
+        offering_rows = (
             connection.execute(
                 text(
                     """
@@ -1152,14 +1226,15 @@ class PostgresTutorApplicationRepository:
                            currency, state, commission_policy_id, cancellation_policy_id
                     FROM marketplace_tutor_offering
                     WHERE tutor_id = :tutor_id
+                    ORDER BY duration_minutes, amount_minor, lower(title), offering_id
                     """
                 ),
                 {"tutor_id": row["tutor_id"]},
             )
             .mappings()
-            .one_or_none()
+            .all()
         )
-        credential = (
+        credentials = tuple(
             StoredTutorCredential(
                 credential_id=credential_row["credential_id"],
                 version=credential_row["version"],
@@ -1171,11 +1246,10 @@ class PostgresTutorApplicationRepository:
                 reviewed_at=credential_row["reviewed_at"],
                 verified_by_actor_ref=credential_row["verified_by_actor_ref"],
             )
-            if credential_row is not None
-            else None
+            for credential_row in credential_rows
         )
-        offering = None
-        if offering_row is not None:
+        offerings: list[StoredTutorOffering] = []
+        for offering_row in offering_rows:
             policy_rows = (
                 connection.execute(
                     text(
@@ -1198,17 +1272,20 @@ class PostgresTutorApplicationRepository:
                 policy_row["policy_type"]: cls._hydrate_policy(policy_row)
                 for policy_row in policy_rows
             }
-            offering = StoredTutorOffering(
-                offering_id=offering_row["offering_id"],
-                version=offering_row["version"],
-                title=offering_row["title"],
-                duration_minutes=offering_row["duration_minutes"],
-                amount_minor=offering_row["amount_minor"],
-                currency=offering_row["currency"],
-                state=offering_row["state"],
-                commission_policy=policies["commission"],
-                cancellation_policy=policies["cancellation"],
+            offerings.append(
+                StoredTutorOffering(
+                    offering_id=offering_row["offering_id"],
+                    version=offering_row["version"],
+                    title=offering_row["title"],
+                    duration_minutes=offering_row["duration_minutes"],
+                    amount_minor=offering_row["amount_minor"],
+                    currency=offering_row["currency"],
+                    state=offering_row["state"],
+                    commission_policy=policies["commission"],
+                    cancellation_policy=policies["cancellation"],
+                )
             )
+        offerings_tuple = tuple(offerings)
         return StoredTutorProfile(
             tutor_id=row["tutor_id"],
             application_id=row["application_id"],
@@ -1220,8 +1297,10 @@ class PostgresTutorApplicationRepository:
             time_zone=row["time_zone"],
             payout_ready=row["payout_ready"],
             is_published=row["is_published"],
-            credential=credential,
-            offering=offering,
+            credentials=credentials,
+            offerings=offerings_tuple,
+            credential=credentials[0] if credentials else None,
+            offering=offerings_tuple[0] if offerings_tuple else None,
         )
 
     @staticmethod

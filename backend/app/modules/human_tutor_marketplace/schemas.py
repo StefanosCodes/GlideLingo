@@ -176,6 +176,7 @@ class SaveTutorCredentialRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
+    credential_id: UUID | None = None
     expected_version: int = Field(ge=0)
     credential_type: TutorCredentialType
     title: CredentialTitle
@@ -193,10 +194,11 @@ class DecideTutorCredentialRequest(BaseModel):
 
 
 class SaveTutorOfferingRequest(BaseModel):
-    """Create with expected version zero or edit the tutor's single draft offering."""
+    """Create with expected version zero or edit one tutor-owned draft offering."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
+    offering_id: UUID | None = None
     expected_version: int = Field(ge=0)
     title: OfferingTitle
     duration_minutes: Literal[25, 50]
@@ -210,8 +212,28 @@ class SetTutorPublicationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     expected_profile_version: int = Field(ge=1)
-    expected_offering_version: int = Field(ge=1)
+    expected_offering_version: int | None = Field(default=None, ge=1)
+    expected_offerings: list["TutorOfferingExpectation"] | None = Field(
+        default=None, min_length=1, max_length=20
+    )
     publish: bool
+
+    @model_validator(mode="after")
+    def validate_offering_expectations(self) -> Self:
+        if (self.expected_offering_version is None) == (self.expected_offerings is None):
+            raise ValueError("provide exactly one offering expectation mechanism")
+        if self.expected_offerings is not None and len(
+            {item.offering_id for item in self.expected_offerings}
+        ) != len(self.expected_offerings):
+            raise ValueError("offering expectations must be unique")
+        return self
+
+
+class TutorOfferingExpectation(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    offering_id: UUID
+    expected_version: int = Field(ge=1)
 
 
 class TutorCredentialResponse(BaseModel):
@@ -268,6 +290,9 @@ class TutorProfileResponse(BaseModel):
     is_published: bool
     payout_ready: bool
     publication_blockers: list[PublicationBlocker]
+    credentials: list[TutorCredentialResponse] = Field(default_factory=list, max_length=20)
+    offerings: list[TutorOfferingResponse] = Field(default_factory=list, max_length=20)
+    # Deprecated singleton projections retained for existing clients during rollout.
     credential: TutorCredentialResponse | None = None
     offering: TutorOfferingResponse | None = None
 
@@ -377,6 +402,7 @@ class TutorSlotsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tutor_id: UUID
+    offering_id: UUID | None = None
     time_zone: str
     source: Literal["manual", "manual+google"] = "manual"
     freshness: Literal["current", "stale", "reconnect_required"] = "current"
@@ -433,6 +459,7 @@ class ConversationListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[ConversationResponse]
+    next_cursor: str | None = Field(default=None, max_length=512)
 
 
 class SendMessageRequest(BaseModel):
@@ -464,6 +491,21 @@ class MarketplaceActionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     success: Literal[True] = True
+
+
+class MarketplaceOperatorCapabilitiesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    capabilities: list[
+        Literal[
+            "review_tutor_applications",
+            "manage_tutor_status",
+            "verify_tutor_credentials",
+            "review_message_reports",
+            "manage_bookings",
+            "moderate_reviews",
+        ]
+    ]
 
 
 class MessageNotificationPreferenceRequest(BaseModel):
@@ -509,6 +551,7 @@ class MessageReportListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[MessageReportResponse]
+    next_offset: int | None = Field(default=None, ge=0)
 
 
 class ResolveMessageReportRequest(BaseModel):
@@ -541,6 +584,7 @@ class CreateBookingCheckoutRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tutor_id: UUID
+    offering_id: UUID | None = None
     starts_at: datetime
     idempotency_key: UUID
 
@@ -593,12 +637,14 @@ class BookingResponse(BaseModel):
         | None
     )
     dispute_deadline_at: datetime | None
+    has_calendar_conflict: bool
 
 
 class BookingListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[BookingResponse]
+    next_cursor: str | None = Field(default=None, max_length=512)
 
 
 class MarketplaceStripeWebhookResponse(BaseModel):
@@ -610,6 +656,7 @@ class MarketplaceStripeWebhookResponse(BaseModel):
 class BookingTransitionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    operation_id: UUID
     action: Literal[
         "reschedule",
         "cancel",
@@ -619,6 +666,7 @@ class BookingTransitionRequest(BaseModel):
         "dispute",
         "resolve_refund",
         "resolve_release",
+        "calendar_conflict_refund",
     ]
     reason: str = Field(min_length=8, max_length=500)
     new_starts_at: datetime | None = None
@@ -655,6 +703,7 @@ class BookingReviewListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[BookingReviewResponse]
+    next_offset: int | None = Field(default=None, ge=0)
 
 
 class ModerateBookingReviewRequest(BaseModel):
@@ -769,6 +818,16 @@ class LearningContextResponse(BaseModel):
     follow_up: TutorFollowUpResponse | None
 
 
+class PublicTutorOfferingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    offering_id: UUID
+    title: str
+    duration_minutes: Literal[25, 50]
+    amount_minor: int = Field(ge=500, le=50_000)
+    currency: Currency
+
+
 class PublicTutorResponse(BaseModel):
     """Safe discovery projection with no application, actor, payout, or private-review facts."""
 
@@ -781,7 +840,7 @@ class PublicTutorResponse(BaseModel):
     languages: list[str]
     dialects: list[str]
     specialties: list[str]
-    verified_credentials: list[str]
+    verified_credentials: list[str] = Field(max_length=20)
     offering_id: UUID
     offering_title: str
     duration_minutes: Literal[25, 50]
@@ -790,6 +849,7 @@ class PublicTutorResponse(BaseModel):
     rating: float | None
     rating_count: int = Field(ge=0)
     is_favorite: bool
+    offerings: list[PublicTutorOfferingResponse] = Field(default_factory=list, max_length=20)
 
 
 class TutorSearchResponse(BaseModel):

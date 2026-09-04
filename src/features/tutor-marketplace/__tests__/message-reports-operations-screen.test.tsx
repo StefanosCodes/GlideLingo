@@ -5,12 +5,14 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { MarketplaceMessageReport } from '@/features/tutor-marketplace/api';
 import { MessageReportsOperationsScreen } from '@/features/tutor-marketplace/message-reports-operations-screen';
 
-const mockList = jest.fn<() => Promise<MarketplaceMessageReport[]>>();
+const mockList = jest.fn<() => Promise<{ items: MarketplaceMessageReport[]; nextOffset: number | null }>>();
 const mockGet = jest.fn<() => Promise<MarketplaceMessageReport>>();
 const mockResolve = jest.fn<() => Promise<MarketplaceMessageReport>>();
+const mockRecover = jest.fn<() => Promise<void>>();
 jest.mock('@/features/tutor-marketplace/api', () => ({
   getMarketplaceMessageReport: () => mockGet(),
   listMarketplaceMessageReports: () => mockList(),
+  recoverMarketplaceConversationNotifications: () => mockRecover(),
   resolveMarketplaceMessageReport: () => mockResolve(),
 }));
 jest.mock('@/components/screen-frame', () => {
@@ -30,23 +32,34 @@ const report: MarketplaceMessageReport = {
   }],
 };
 
-beforeEach(() => { mockList.mockReset(); mockGet.mockReset(); mockResolve.mockReset(); });
+beforeEach(() => { mockList.mockReset(); mockGet.mockReset(); mockResolve.mockReset(); mockRecover.mockReset(); });
 afterEach(cleanup);
 
 test('renders an empty capability-scoped queue', async () => {
-  mockList.mockResolvedValue([]);
+  mockList.mockResolvedValue({ items: [], nextOffset: null });
   const screen = await render(<SafeAreaProvider initialMetrics={metrics}><MessageReportsOperationsScreen /></SafeAreaProvider>);
   await waitFor(() => expect(screen.getByText('No message reports need review.')).toBeTruthy());
 });
 
 test('loads only the selected report context before allowing resolution', async () => {
-  mockList.mockResolvedValue([{ ...report, messages: [] }]); mockGet.mockResolvedValue(report); mockResolve.mockResolvedValue({ ...report, status: 'resolved' });
+  mockList.mockResolvedValue({ items: [{ ...report, messages: [] }], nextOffset: null }); mockGet.mockResolvedValue(report); mockResolve.mockResolvedValue({ ...report, status: 'resolved' });
   const screen = await render(<SafeAreaProvider initialMetrics={metrics}><MessageReportsOperationsScreen /></SafeAreaProvider>);
   await waitFor(() => expect(screen.getByText('Review report')).toBeTruthy());
   expect(screen.queryByText('Reported text')).toBeNull();
   await fireEvent.press(screen.getByText('Review report'));
   await waitFor(() => expect(screen.getByText('Reported text')).toBeTruthy());
   expect(screen.queryByText(/actor_ref/i)).toBeNull();
+  mockRecover.mockResolvedValue();
+  await fireEvent.changeText(
+    screen.getByLabelText('Notification recovery reason'),
+    'Provider delivery issue has been corrected.',
+  );
+  await fireEvent.press(screen.getByText('Retry failed notifications'));
+  await waitFor(() => expect(mockRecover).toHaveBeenCalledTimes(1));
+  await fireEvent.changeText(
+    screen.getByLabelText('Report resolution reason'),
+    'Evidence reviewed and safety action documented.',
+  );
   await fireEvent.press(screen.getByText('Resolve after review'));
   await waitFor(() => expect(screen.getByText(/RESOLVED/)).toBeTruthy());
   expect(mockResolve).toHaveBeenCalledTimes(1);

@@ -9,6 +9,7 @@ import { GlideSurface } from '@/components/ui/glide-surface';
 import { Spacing } from '@/constants/theme';
 import { createBookingCheckout, createMarketplaceConversation, getPublicTutor, listPublicTutorSlots, setPublicTutorFavorite, type PublicTutor, type TutorSlot } from '@/features/tutor-marketplace/api';
 import { isHumanTutorCommerceEnabled, isHumanTutorMessagingEnabled } from '@/features/tutor-marketplace/config';
+import { createMarketplaceClientId } from '@/features/tutor-marketplace/client-operation-id';
 import { useTheme } from '@/hooks/use-theme';
 
 type State = { kind: 'loading' } | { kind: 'error' } | {
@@ -16,6 +17,7 @@ type State = { kind: 'loading' } | { kind: 'error' } | {
   tutor: PublicTutor;
   slots: TutorSlot[];
   slotFreshness: 'current' | 'stale' | 'reconnect_required';
+  selectedOfferingId: string;
 };
 
 export function TutorPublicProfileScreen() {
@@ -27,6 +29,7 @@ export function TutorPublicProfileScreen() {
   const [savingFavorite, setSavingFavorite] = useState(false);
   const [startingConversation, setStartingConversation] = useState(false);
   const [bookingSlot, setBookingSlot] = useState<string | null>(null);
+  const favoriteInFlight = useRef(false);
   const idempotencyKeys = useRef(new Map<string, string>());
   const [actionError, setActionError] = useState<string | null>(null);
   const [state, setState] = useState<State>({ kind: 'loading' });
@@ -35,12 +38,14 @@ export function TutorPublicProfileScreen() {
     const current = ++sequence.current;
     const startsAt = new Date();
     const endsAt = new Date(startsAt.getTime() + 14 * 24 * 60 * 60 * 1000);
-    void Promise.all([
-      getPublicTutor(tutorId, controller.signal),
-      listPublicTutorSlots(tutorId, startsAt.toISOString(), endsAt.toISOString(), controller.signal),
-    ]).then(([tutor, slots]) => {
+    void getPublicTutor(tutorId, controller.signal).then(async (tutor) => {
+      const selectedOfferingId = tutor.offerings?.[0]?.offeringId ?? tutor.offeringId;
+      const slots = await listPublicTutorSlots(
+        tutorId, startsAt.toISOString(), endsAt.toISOString(), controller.signal,
+        selectedOfferingId,
+      );
       if (!controller.signal.aborted && current === sequence.current) {
-        setState({ kind: 'ready', tutor, slots: slots.slots, slotFreshness: slots.freshness });
+        setState({ kind: 'ready', tutor, slots: slots.slots, slotFreshness: slots.freshness, selectedOfferingId });
       }
     }).catch(() => {
       if (!controller.signal.aborted && current === sequence.current) setState({ kind: 'error' });
@@ -56,12 +61,22 @@ export function TutorPublicProfileScreen() {
   </GlideSurface></ScreenFrame>;
 
   const toggleFavorite = async () => {
-    if (savingFavorite) return;
+    if (favoriteInFlight.current) return;
+    favoriteInFlight.current = true;
+    const targetTutorId = state.tutor.tutorId;
+    const desiredFavorite = !state.tutor.isFavorite;
+    setActionError(null);
     setSavingFavorite(true);
     try {
-      const tutor = await setPublicTutorFavorite(state.tutor.tutorId, !state.tutor.isFavorite);
-      setState({ ...state, tutor });
+      const tutor = await setPublicTutorFavorite(targetTutorId, desiredFavorite);
+      setState((current) => current.kind === 'ready' && current.tutor.tutorId === targetTutorId ? {
+        ...current,
+        tutor: { ...current.tutor, isFavorite: tutor.isFavorite },
+      } : current);
+    } catch {
+      setActionError('Your favorite could not be updated. Try again.');
     } finally {
+      favoriteInFlight.current = false;
       setSavingFavorite(false);
     }
   };
@@ -78,26 +93,76 @@ export function TutorPublicProfileScreen() {
   const book = async (slot: TutorSlot) => {
     if (bookingSlot) return;
     setBookingSlot(slot.startsAt); setActionError(null);
-    let idempotencyKey = idempotencyKeys.current.get(slot.startsAt);
+    const operationKey = `${state.tutor.tutorId}:${state.selectedOfferingId}:${slot.startsAt}`;
+    let idempotencyKey = idempotencyKeys.current.get(operationKey);
     if (!idempotencyKey) {
-      idempotencyKey = createClientOperationId();
-      idempotencyKeys.current.set(slot.startsAt, idempotencyKey);
+      idempotencyKey = createMarketplaceClientId();
+      idempotencyKeys.current.set(operationKey, idempotencyKey);
     }
+    let booking;
     try {
-      const booking = await createBookingCheckout(state.tutor.tutorId, slot.startsAt, idempotencyKey);
+      booking = await createBookingCheckout(
+        state.tutor.tutorId, slot.startsAt, idempotencyKey, state.selectedOfferingId,
+      );
+      idempotencyKeys.current.delete(operationKey);
       router.push(`/bookings/${booking.bookingId}`);
-      if (booking.checkoutUrl) await Linking.openURL(booking.checkoutUrl);
     } catch {
       setActionError('Checkout could not be started. Your card was not assumed charged; retry safely.');
-    } finally { setBookingSlot(null); }
+      setBookingSlot(null);
+      return;
+    }
+    if (booking.checkoutUrl) {
+      try {
+        await Linking.openURL(booking.checkoutUrl);
+      } catch {
+        setActionError('Your booking was created, but checkout could not be opened. Continue it from the booking page.');
+      }
+    }
+    setBookingSlot(null);
   };
+  const selectOffering = async (offeringId: string) => {
+    if (offeringId === state.selectedOfferingId) return;
+    const targetTutorId = state.tutor.tutorId;
+    const current = ++sequence.current;
+    setActionError(null);
+    try {
+      const startsAt = new Date();
+      const endsAt = new Date(startsAt.getTime() + 14 * 24 * 60 * 60 * 1000);
+      const slots = await listPublicTutorSlots(
+        targetTutorId, startsAt.toISOString(), endsAt.toISOString(), undefined, offeringId,
+      );
+      if (current === sequence.current) setState((latest) =>
+        latest.kind === 'ready' && latest.tutor.tutorId === targetTutorId ? {
+          ...latest,
+          selectedOfferingId: offeringId,
+          slots: slots.slots,
+          slotFreshness: slots.freshness,
+        } : latest);
+    } catch {
+      if (current === sequence.current) setActionError('Availability could not be updated. Try again.');
+    }
+  };
+  const tutorOfferings = state.tutor.offerings?.length ? state.tutor.offerings : [{
+    offeringId: state.tutor.offeringId, title: state.tutor.offeringTitle,
+    durationMinutes: state.tutor.durationMinutes, amountMinor: state.tutor.amountMinor,
+    currency: state.tutor.currency,
+  }];
+  const selectedOffering = tutorOfferings.find(
+    (offering) => offering.offeringId === state.selectedOfferingId,
+  ) ?? tutorOfferings[0];
   return <ScreenFrame testID="tutor-public-profile-screen">
     <View style={styles.header}><ThemedText type="eyebrow" themeColor="textSecondary">PUBLIC TUTOR PROFILE</ThemedText>
       <ThemedText type="display">{state.tutor.headline}</ThemedText>
       <ThemedText type="body">{state.tutor.biography}</ThemedText></View>
     <GlideSurface padding="roomy" style={styles.card}>
-      <ThemedText type="title2">{state.tutor.offeringTitle}</ThemedText>
-      <ThemedText type="body" themeColor="textSecondary">{state.tutor.durationMinutes} minutes · ${(state.tutor.amountMinor / 100).toFixed(2)} USD · {state.tutor.timeZone}</ThemedText>
+      <ThemedText type="title2">Choose a lesson</ThemedText>
+      {tutorOfferings.map((offering) => <GlideButton
+        key={offering.offeringId}
+        label={`${offering.title} · ${offering.durationMinutes} min · $${(offering.amountMinor / 100).toFixed(2)}`}
+        onPress={() => void selectOffering(offering.offeringId)}
+        variant={offering.offeringId === state.selectedOfferingId ? 'primary' : 'secondary'}
+      />)}
+      {selectedOffering ? <ThemedText type="body" themeColor="textSecondary">Times below are for {selectedOffering.title} · {state.tutor.timeZone}</ThemedText> : null}
       <ThemedText type="body">Languages: {state.tutor.languages.join(', ')}</ThemedText>
       {state.tutor.dialects.length ? <ThemedText type="body">Dialects: {state.tutor.dialects.join(', ')}</ThemedText> : null}
       {state.tutor.verifiedCredentials.map((credential) => <ThemedText key={credential} type="footnote">Verified credential: {credential}</ThemedText>)}
@@ -112,7 +177,7 @@ export function TutorPublicProfileScreen() {
       {state.slotFreshness === 'stale' ? <ThemedText type="body" themeColor="textSecondary">Calendar availability is temporarily stale. No time is shown as bookable until it refreshes.</ThemedText> :
         state.slotFreshness === 'reconnect_required' ? <ThemedText type="body" themeColor="textSecondary">This tutor needs to reconnect their calendar before calendar-backed times can appear.</ThemedText> :
         state.slots.length === 0 ? <ThemedText type="body" themeColor="textSecondary">No manual slots are available in the next two weeks.</ThemedText> :
-        state.slots.slice(0, 8).map((slot) => <View key={slot.startsAt} style={styles.slotRow}>
+        state.slots.map((slot) => <View key={slot.startsAt} style={styles.slotRow}>
           <ThemedText type="body">{new Date(slot.startsAt).toLocaleString()}</ThemedText>
           {isHumanTutorCommerceEnabled() ? <GlideButton disabled={bookingSlot !== null}
             label={bookingSlot === slot.startsAt ? 'Holding time…' : 'Book'}
@@ -122,10 +187,6 @@ export function TutorPublicProfileScreen() {
   </ScreenFrame>;
 }
 
-function createClientOperationId(): string {
-  return globalThis.crypto?.randomUUID?.()
-    ?? `00000000-0000-4000-8000-${Date.now().toString().padStart(12, '0').slice(-12)}`;
-}
 
 const styles = StyleSheet.create({
   card: { gap: Spacing.two, width: '100%' },

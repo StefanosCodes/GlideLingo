@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     human_tutor_learning_bridge_enabled: bool = False
     human_tutor_stripe_environment: Literal["SANDBOX", "PRODUCTION"] = "SANDBOX"
     human_tutor_stripe_secret_key: SecretStr | None = None
+    human_tutor_payment_database_url: SecretStr | None = None
     human_tutor_stripe_webhook_secret: SecretStr | None = None
     human_tutor_stripe_platform_account_id: str | None = None
     human_tutor_stripe_api_version: str = "2026-02-25.clover"
@@ -351,6 +352,14 @@ class Settings(BaseSettings):
             return self
         if not self.human_tutor_marketplace_enabled:
             raise ValueError("Tutor commerce requires the human tutor marketplace")
+        if (
+            self.human_tutor_payment_database_url is None
+            or self.human_tutor_payment_database_url.get_secret_value()
+            == self.database_url.get_secret_value()
+        ):
+            raise ValueError(
+                "Tutor commerce requires a distinct payment-authority database principal"
+            )
         if not self.human_tutor_approved_meeting_hosts:
             raise ValueError("Tutor commerce requires an approved meeting-host allowlist")
         expected_prefix = (

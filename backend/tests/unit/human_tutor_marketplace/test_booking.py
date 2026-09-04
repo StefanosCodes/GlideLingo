@@ -65,6 +65,8 @@ def checkout_payload(*, created: int = 1_800_000_000) -> dict[str, object]:
         "payment_intent": "pi_reviewed123",
         "status": "open",
         "payment_status": "unpaid",
+        "amount_total": 2500,
+        "currency": "usd",
         "livemode": False,
         "metadata": {
             "booking_id": str(BOOKING_ID),
@@ -196,3 +198,20 @@ def test_webhook_uses_event_time_and_rejects_unknown_event_type() -> None:
     payload["type"] = "charge.succeeded"
     with pytest.raises(TutorApplicationConflictError):
         parse_checkout_webhook(json.dumps(payload).encode())
+
+
+def test_paid_checkout_requires_provider_amount_currency_and_payment_intent() -> None:
+    for mutate in (
+        {"amount_total": 0},
+        {"currency": "eur"},
+        {"status": "complete", "payment_status": "paid", "payment_intent": None},
+    ):
+        checkout = checkout_payload() | mutate
+        payload = {
+            "id": "evt_reviewed123",
+            "type": "checkout.session.completed",
+            "created": 1_800_000_100,
+            "data": {"object": checkout},
+        }
+        with pytest.raises(TutorApplicationConflictError):
+            parse_checkout_webhook(json.dumps(payload).encode())

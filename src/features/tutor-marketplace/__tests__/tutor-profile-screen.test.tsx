@@ -20,6 +20,9 @@ jest.mock('@/features/tutor-marketplace/api', () => ({
   saveTutorOffering: (...args: unknown[]) => mockSaveOffering(...args),
   setTutorPublication: (...args: unknown[]) => mockSetPublication(...args),
 }));
+jest.mock('@/features/tutor-marketplace/client-operation-id', () => ({
+  createMarketplaceClientId: () => '535516e3-6ab7-4de4-83ae-1ac7d6b76cdb',
+}));
 jest.mock('@/hooks/use-theme', () => ({
   useTheme: () => jest.requireActual<typeof import('@/constants/theme')>('@/constants/theme').Colors.light,
 }));
@@ -113,6 +116,42 @@ test('suspended tutor sees a private read-only workspace', async () => {
   expect(screen.getByLabelText('Tutor headline').props.editable).toBe(false);
   expect(screen.getByTestId('save-tutor-profile').props.accessibilityState.disabled).toBe(true);
   expect(screen.getByTestId('save-tutor-credential').props.accessibilityState.disabled).toBe(true);
-  expect(screen.getByTestId('save-tutor-offering').props.accessibilityState.disabled).toBe(true);
+  expect(screen.getByTestId('add-tutor-offering').props.accessibilityState.disabled).toBe(true);
   expect(screen.getByTestId('set-tutor-publication').props.accessibilityState.disabled).toBe(true);
+});
+
+test('creates a second offering with a stable id and edits the selected offering', async () => {
+  process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ENABLED = 'true';
+  const first = {
+    offeringId: '335516e3-6ab7-4de4-83ae-1ac7d6b76cdb', version: 3,
+    title: 'Conversation practice', durationMinutes: 25 as const, amountMinor: 2500,
+    currency: 'USD' as const, state: 'draft' as const,
+    commissionPolicy: { policyId: 'commission-v1', policyType: 'commission' as const, version: 1, commissionBasisPoints: 2000, cancellationCutoffHours: null, disputeWindowHours: null, effectiveAt: '2026-09-04T00:00:00Z' },
+    cancellationPolicy: { policyId: 'cancellation-v1', policyType: 'cancellation' as const, version: 1, commissionBasisPoints: null, cancellationCutoffHours: 12, disputeWindowHours: 24, effectiveAt: '2026-09-04T00:00:00Z' },
+  };
+  const second = { ...first, offeringId: '435516e3-6ab7-4de4-83ae-1ac7d6b76cdb', version: 5, title: 'Exam speaking' };
+  const multiple: TutorProfile = {
+    ...profile, offering: first, offerings: [first, second],
+    publicationBlockers: ['payout_not_ready'],
+  };
+  mockGetProfile.mockResolvedValue(multiple);
+  mockSaveOffering.mockResolvedValue(multiple);
+
+  const screen = await render(<SafeAreaProvider initialMetrics={safeAreaMetrics}><TutorProfileScreen /></SafeAreaProvider>);
+  await waitFor(() => expect(screen.getByTestId(`save-tutor-offering-${second.offeringId}`)).toBeTruthy());
+  await fireEvent.press(screen.getByTestId(`save-tutor-offering-${second.offeringId}`));
+  await waitFor(() => expect(mockSaveOffering).toHaveBeenCalledWith(
+    expect.objectContaining({ title: second.title }), 5, second.offeringId,
+  ));
+  await waitFor(() => expect(
+    screen.getByTestId('add-tutor-offering').props.accessibilityState.disabled,
+  ).toBe(false));
+  await fireEvent.press(screen.getByTestId('add-tutor-offering'));
+  await waitFor(() => expect(screen.getByTestId('save-tutor-offering-new')).toBeTruthy());
+  await fireEvent.press(screen.getByTestId('save-tutor-offering-new'));
+  await waitFor(() => expect(mockSaveOffering).toHaveBeenLastCalledWith(
+    expect.objectContaining({ title: '25-minute conversation lesson' }),
+    0,
+    '535516e3-6ab7-4de4-83ae-1ac7d6b76cdb',
+  ));
 });

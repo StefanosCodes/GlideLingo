@@ -72,8 +72,8 @@ class ReviewService:
         )
         self.reason: str | None = None
 
-    async def list_reviews(self, **kwargs: object) -> tuple[ReviewView, ...]:
-        return (self.review,)
+    async def list_reviews(self, **kwargs: object) -> tuple[tuple[ReviewView, ...], int | None]:
+        return (self.review,), None
 
     async def moderate_review(
         self,

@@ -49,6 +49,11 @@ describe('calendar and slot response boundaries', () => {
       tutor_id: '2382f687-0ca0-4340-8e78-21ba32912869',
       time_zone: 'America/Chicago', source: 'google-event', freshness: 'current', slots: [],
     })).toBeNull();
+    expect(parseTutorSlots({
+      tutor_id: '2382f687-0ca0-4340-8e78-21ba32912869',
+      offering_id: 'not-an-offering-id',
+      time_zone: 'America/Chicago', source: 'manual', freshness: 'current', slots: [],
+    })).toBeNull();
     expect(parseCalendarConnection({
       status: 'reconnect_required', freshness: 'reconnect_required',
       last_refreshed_at: null, safe_failure_code: 'revoked',
@@ -112,6 +117,7 @@ describe('booking response boundary', () => {
     tutor_amount_minor: 0, checkout_url: 'https://checkout.stripe.com/c/pay/reviewed123',
     meeting_url: null, ics: null, schedule_version: 1, money_state: null,
     dispute_deadline_at: null,
+    has_calendar_conflict: false,
   };
 
   test('accepts the participant projection without provider identifiers', () => {

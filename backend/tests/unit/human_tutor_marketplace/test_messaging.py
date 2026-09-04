@@ -1,6 +1,6 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import cast
+from typing import Literal, cast
 from uuid import UUID
 
 import pytest
@@ -21,7 +21,12 @@ from app.modules.human_tutor_marketplace.messaging import (
 
 
 class NotificationRepository:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        template: Literal["new_message", "calendar_conflict"] = "new_message",
+        preference: bool = True,
+    ) -> None:
         now = datetime.now(UTC)
         self.job: StoredNotificationJob | None = StoredNotificationJob(
             job_id=UUID("9948afe2-59ac-46f6-88cf-15c5f9994567"),
@@ -30,12 +35,17 @@ class NotificationRepository:
             attempt=1,
             lease_owner="worker-a",
             lease_expires_at=now + timedelta(seconds=60),
+            template=template,
         )
         self.finished: tuple[UUID, str] | None = None
+        self.preference = preference
 
     def claim_notification(self, **kwargs: object) -> StoredNotificationJob | None:
         job, self.job = self.job, None
         return job
+
+    def get_notification_preference(self, **kwargs: object) -> bool:
+        return self.preference
 
     def finish_notification(self, *, job_id: UUID, outcome: str, **kwargs: object) -> bool:
         self.finished = (job_id, outcome)
@@ -136,3 +146,20 @@ def test_notification_processor_uses_stable_identity_free_payload_and_records_re
         UUID("9948afe2-59ac-46f6-88cf-15c5f9994567"),
         "retryable",
     )
+
+
+def test_calendar_conflict_notification_ignores_casual_message_opt_out() -> None:
+    repository = NotificationRepository(template="calendar_conflict", preference=False)
+    provider = NotificationProvider()
+    service = MessagingService(
+        enabled=False,
+        system_notifications_enabled=True,
+        repository=cast(MessagingRepository, repository),
+        pseudonym_key=None,
+        actor_allowlist=(),
+        retention_days=None,
+        notification_provider=cast(MarketplaceNotificationProvider, provider),
+    )
+
+    assert asyncio.run(service.run_one_notification_job(worker="worker-a"))
+    assert provider.delivery is not None and provider.delivery[1] == "calendar_conflict"

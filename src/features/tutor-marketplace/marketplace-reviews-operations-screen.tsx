@@ -17,22 +17,24 @@ import { useTheme } from '@/hooks/use-theme';
 type State =
   | { kind: 'loading' }
   | { kind: 'forbidden' | 'error' }
-  | { kind: 'ready'; reviews: MarketplaceReview[] };
+  | { kind: 'ready'; reviews: MarketplaceReview[]; nextOffset: number | null };
 
 export function MarketplaceReviewsOperationsScreen() {
   const theme = useTheme();
   const sequence = useRef(0);
   const [retry, setRetry] = useState(0);
   const [working, setWorking] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [state, setState] = useState<State>({ kind: 'loading' });
 
   useEffect(() => {
     const controller = new AbortController();
     const current = ++sequence.current;
-    void listMarketplaceReviews(controller.signal).then((reviews) => {
+    setLoadingMore(false);
+    void listMarketplaceReviews(controller.signal).then((page) => {
       if (!controller.signal.aborted && current === sequence.current) {
-        setState({ kind: 'ready', reviews });
+        setState({ kind: 'ready', reviews: page.items, nextOffset: page.nextOffset });
       }
     }).catch((error: unknown) => {
       if (controller.signal.aborted || current !== sequence.current) return;
@@ -41,6 +43,19 @@ export function MarketplaceReviewsOperationsScreen() {
     });
     return () => controller.abort();
   }, [retry]);
+
+  const loadMore = async () => {
+    if (state.kind !== 'ready' || state.nextOffset === null || loadingMore) return;
+    const offset = state.nextOffset;
+    setLoadingMore(true); setActionError(null);
+    try {
+      const page = await listMarketplaceReviews(undefined, offset);
+      setState((current) => current.kind === 'ready' && current.nextOffset === offset ? {
+        kind: 'ready', reviews: [...current.reviews, ...page.items], nextOffset: page.nextOffset,
+      } : current);
+    } catch { setActionError('More reviews could not be loaded. Existing results are unchanged.'); }
+    finally { setLoadingMore(false); }
+  };
 
   const moderate = async (
     review: MarketplaceReview,
@@ -55,6 +70,7 @@ export function MarketplaceReviewsOperationsScreen() {
       setState((current) => current.kind === 'ready' ? {
         kind: 'ready',
         reviews: current.reviews.map((item) => item.reviewId === updated.reviewId ? updated : item),
+        nextOffset: current.nextOffset,
       } : current);
     } catch {
       setActionError('The moderation decision did not complete. The previous review state is unchanged.');
@@ -90,6 +106,11 @@ export function MarketplaceReviewsOperationsScreen() {
       review={review}
       working={working === review.reviewId}
     />) : null}
+    {state.kind === 'ready' && state.nextOffset !== null ? <GlideButton
+      disabled={loadingMore}
+      label={loadingMore ? 'Loading…' : 'Load more reviews'}
+      onPress={() => void loadMore()}
+      variant="secondary" /> : null}
     {actionError ? <GlideSurface accessible accessibilityRole="alert" padding="regular" style={styles.card}
       variant="tinted"><ThemedText type="body">{actionError}</ThemedText></GlideSurface> : null}
   </ScreenFrame>;

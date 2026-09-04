@@ -47,6 +47,7 @@ class MemoryCalendarRepository:
         self.refresh_attempt = 1
         self.refresh_claimed = False
         self.refresh_finished: tuple[str, str | None] | None = None
+        self.refresh_recovered = 0
 
     def get_approved_tutor_id(self, *, actor_ref: str) -> UUID | None:
         return TUTOR_ID if actor_ref == self.approved_actor else None
@@ -211,6 +212,12 @@ class MemoryCalendarRepository:
     ) -> bool:
         self.refresh_finished = (outcome, failure_code)
         return True
+
+    def recover_refresh(self, *, tutor_id: UUID, now: datetime) -> None:
+        assert tutor_id == TUTOR_ID
+        self.refresh_recovered += 1
+        self.refresh_attempt = 0
+        self.refresh_claimed = False
 
 
 class FakeCalendarProvider:
@@ -401,6 +408,17 @@ async def test_durable_refresh_job_reuses_encrypted_token_and_terminalizes_exhau
     provider.failure = "rate_limited"
     assert await service.run_one_refresh_job(worker="calendar-b")
     assert repository.refresh_finished == ("dead", "rate_limited")
+
+    provider.failure = None
+    manual_start = datetime.now(UTC)
+    recovered = await service.refresh(
+        principal=tutor_principal(),
+        starts_at=manual_start,
+        ends_at=manual_start + timedelta(days=1),
+    )
+    assert recovered.freshness == "current"
+    assert repository.refresh_recovered == 1
+    assert repository.refresh_attempt == 0
 
 
 @pytest.mark.anyio

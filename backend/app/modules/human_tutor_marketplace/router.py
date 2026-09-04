@@ -42,6 +42,7 @@ from app.modules.human_tutor_marketplace.schemas import (
     LearningContextResponse,
     ManualAvailabilityResponse,
     MarketplaceActionResponse,
+    MarketplaceOperatorCapabilitiesResponse,
     MarketplaceStripeWebhookResponse,
     MessageNotificationPreferenceRequest,
     MessageNotificationPreferenceResponse,
@@ -89,6 +90,19 @@ HumanTutorMarketplaceServiceDependency = Annotated[
     HumanTutorMarketplaceService,
     Depends(get_human_tutor_marketplace_service),
 ]
+
+
+@router.get(
+    "/marketplace/operator-capabilities",
+    operation_id="get_marketplace_operator_capabilities",
+    response_model=MarketplaceOperatorCapabilitiesResponse,
+)
+async def get_marketplace_operator_capabilities(
+    principal: CurrentClerkPrincipal,
+    service: HumanTutorMarketplaceServiceDependency,
+) -> MarketplaceOperatorCapabilitiesResponse:
+    capabilities = await service.operator_capabilities(principal=principal)
+    return MarketplaceOperatorCapabilitiesResponse(capabilities=list(capabilities))
 
 
 def get_marketplace_discovery_service(request: Request) -> MarketplaceDiscoveryService:
@@ -217,6 +231,7 @@ async def create_booking_checkout(
     booking = await service.create_checkout(
         principal=principal,
         tutor_id=request.tutor_id,
+        offering_id=request.offering_id,
         starts_at=request.starts_at,
         idempotency_key=request.idempotency_key,
     )
@@ -227,10 +242,15 @@ async def create_booking_checkout(
 async def list_bookings(
     principal: CurrentClerkPrincipal,
     service: MarketplaceBookingServiceDependency,
+    cursor: Annotated[str | None, Query(max_length=512)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> BookingListResponse:
-    bookings = await service.list_bookings(principal=principal)
+    bookings, next_cursor = await service.list_bookings(
+        principal=principal, cursor=cursor, limit=limit
+    )
     return BookingListResponse(
-        items=[BookingResponse.model_validate(item, from_attributes=True) for item in bookings]
+        items=[BookingResponse.model_validate(item, from_attributes=True) for item in bookings],
+        next_cursor=next_cursor,
     )
 
 
@@ -275,6 +295,7 @@ async def transition_marketplace_booking(
         action=request.action,
         reason=request.reason,
         new_starts_at=request.new_starts_at,
+        operation_id=request.operation_id,
     )
     return BookingResponse.model_validate(booking, from_attributes=True)
 
@@ -331,6 +352,44 @@ async def recover_marketplace_money_operation(
     return BookingResponse.model_validate(booking, from_attributes=True)
 
 
+@router.post(
+    "/marketplace-operations/bookings/{booking_id}/reconciliation-recovery",
+    operation_id="recover_marketplace_payment_reconciliation",
+    response_model=BookingResponse,
+)
+async def recover_marketplace_payment_reconciliation(
+    booking_id: UUID,
+    request: RecoverMoneyOperationRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceBookingServiceDependency,
+) -> BookingResponse:
+    booking = await service.recover_reconciliation(
+        principal=principal,
+        booking_id=booking_id,
+        reason=request.reason,
+    )
+    return BookingResponse.model_validate(booking, from_attributes=True)
+
+
+@router.post(
+    "/marketplace-operations/bookings/{booking_id}/delivery-recovery",
+    operation_id="recover_marketplace_delivery_jobs",
+    response_model=BookingResponse,
+)
+async def recover_marketplace_delivery_jobs(
+    booking_id: UUID,
+    request: RecoverMoneyOperationRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceLifecycleServiceDependency,
+) -> BookingResponse:
+    booking = await service.recover_delivery(
+        principal=principal,
+        booking_id=booking_id,
+        reason=request.reason,
+    )
+    return BookingResponse.model_validate(booking, from_attributes=True)
+
+
 @router.get(
     "/marketplace-operations/reviews",
     operation_id="list_marketplace_reviews_for_moderation",
@@ -339,13 +398,17 @@ async def recover_marketplace_money_operation(
 async def list_marketplace_reviews_for_moderation(
     principal: CurrentClerkPrincipal,
     service: MarketplaceLifecycleServiceDependency,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> BookingReviewListResponse:
-    reviews = await service.list_reviews(principal=principal, limit=limit)
+    reviews, next_offset = await service.list_reviews(
+        principal=principal, offset=offset, limit=limit
+    )
     return BookingReviewListResponse(
         items=[
             BookingReviewResponse.model_validate(review, from_attributes=True) for review in reviews
-        ]
+        ],
+        next_offset=next_offset,
     )
 
 
@@ -542,10 +605,15 @@ async def create_marketplace_conversation(
 async def list_marketplace_conversations(
     principal: CurrentClerkPrincipal,
     service: MarketplaceMessagingServiceDependency,
+    cursor: Annotated[str | None, Query(max_length=512)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> ConversationListResponse:
-    result = await service.list_conversations(principal=principal)
+    result, next_cursor = await service.list_conversations(
+        principal=principal, cursor=cursor, limit=limit
+    )
     return ConversationListResponse(
-        items=[ConversationResponse.model_validate(item, from_attributes=True) for item in result]
+        items=[ConversationResponse.model_validate(item, from_attributes=True) for item in result],
+        next_cursor=next_cursor,
     )
 
 
@@ -634,9 +702,14 @@ async def list_marketplace_message_reports(
     offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> MessageReportListResponse:
-    reports = await service.list_reports(principal=principal, offset=offset, limit=limit)
+    reports, next_offset = await service.list_reports(
+        principal=principal, offset=offset, limit=limit
+    )
     return MessageReportListResponse(
-        items=[MessageReportResponse.model_validate(item, from_attributes=True) for item in reports]
+        items=[
+            MessageReportResponse.model_validate(item, from_attributes=True) for item in reports
+        ],
+        next_offset=next_offset,
     )
 
 
@@ -669,6 +742,25 @@ async def resolve_marketplace_message_report(
         principal=principal, report_id=report_id, reason=request.reason
     )
     return MessageReportResponse.model_validate(report, from_attributes=True)
+
+
+@router.post(
+    "/marketplace-operations/conversations/{conversation_id}/notification-recovery",
+    operation_id="recover_marketplace_message_notifications",
+    response_model=MarketplaceActionResponse,
+)
+async def recover_marketplace_message_notifications(
+    conversation_id: UUID,
+    request: RecoverMoneyOperationRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceMessagingServiceDependency,
+) -> MarketplaceActionResponse:
+    await service.recover_notifications(
+        principal=principal,
+        conversation_id=conversation_id,
+        reason=request.reason,
+    )
+    return MarketplaceActionResponse(success=True)
 
 
 def _calendar_response(view: object) -> CalendarConnectionResponse:
@@ -780,6 +872,7 @@ async def preview_own_tutor_slots(
     ends_at: datetime,
     principal: CurrentClerkPrincipal,
     service: MarketplaceDiscoveryServiceDependency,
+    offering_id: UUID | None = None,
     limit: Annotated[int, Query(ge=1, le=256)] = 128,
 ) -> TutorSlotsResponse:
     _validate_slot_window(starts_at=starts_at, ends_at=ends_at)
@@ -788,6 +881,7 @@ async def preview_own_tutor_slots(
         starts_at=starts_at,
         ends_at=ends_at,
         limit=limit,
+        offering_id=offering_id,
     )
 
 
@@ -857,6 +951,7 @@ async def list_public_tutor_slots(
     ends_at: datetime,
     principal: CurrentClerkPrincipal,
     service: MarketplaceDiscoveryServiceDependency,
+    offering_id: UUID | None = None,
     limit: Annotated[int, Query(ge=1, le=256)] = 128,
 ) -> TutorSlotsResponse:
     _validate_slot_window(starts_at=starts_at, ends_at=ends_at)
@@ -866,6 +961,7 @@ async def list_public_tutor_slots(
         starts_at=starts_at,
         ends_at=ends_at,
         limit=limit,
+        offering_id=offering_id,
     )
 
 

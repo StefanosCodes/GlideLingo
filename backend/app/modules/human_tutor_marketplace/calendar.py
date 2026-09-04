@@ -182,6 +182,8 @@ class CalendarRepository(Protocol):
         failure_code: str | None,
     ) -> bool: ...
 
+    def recover_refresh(self, *, tutor_id: UUID, now: datetime) -> None: ...
+
 
 class CalendarTokenCipher:
     """AES-GCM boundary; ciphertext is bound to the tutor and actor pseudonym."""
@@ -280,10 +282,11 @@ class PostgresCalendarRepository:
                         text(
                             """
                             UPDATE marketplace_calendar_oauth_state
-                            SET consumed_at = :now
+                            SET consumed_at = GREATEST(CAST(:now AS timestamptz), created_at)
                             WHERE state_hash = :state_hash AND tutor_id = :tutor_id
                               AND actor_ref = :actor_ref AND redirect_uri = :redirect_uri
-                              AND consumed_at IS NULL AND expires_at >= :now
+                              AND consumed_at IS NULL
+                              AND expires_at >= CAST(:now AS timestamptz)
                             RETURNING 1
                             """
                         ),
@@ -454,6 +457,76 @@ class PostgresCalendarRepository:
                             for interval in intervals
                         ],
                     )
+                conflicts = (
+                    connection.execute(
+                        text(
+                            """
+                            INSERT INTO marketplace_calendar_booking_conflict
+                              (conflict_id, booking_id, cache_generation)
+                            SELECT gen_random_uuid(), booking.booking_id, :generation
+                            FROM marketplace_booking AS booking
+                            JOIN marketplace_calendar_busy_interval AS busy
+                              ON busy.tutor_id = booking.tutor_id
+                             AND busy.generation = :generation
+                             AND tstzrange(
+                                   booking.starts_at - make_interval(
+                                     mins => booking.buffer_before_minutes),
+                                   booking.ends_at + make_interval(
+                                     mins => booking.buffer_after_minutes), '[)'
+                                 ) && tstzrange(busy.starts_at, busy.ends_at, '[)')
+                            WHERE booking.tutor_id = :tutor_id
+                              AND booking.state IN (
+                                'held', 'payment_pending', 'payment_ambiguous', 'confirmed'
+                              )
+                            ON CONFLICT (booking_id) WHERE resolved_at IS NULL DO NOTHING
+                            RETURNING conflict_id, booking_id
+                            """
+                        ),
+                        {"tutor_id": tutor_id, "generation": generation},
+                    )
+                    .mappings()
+                    .all()
+                )
+                for conflict in conflicts:
+                    message_id = uuid4()
+                    inserted_message = connection.execute(
+                        text(
+                            """
+                            INSERT INTO marketplace_message
+                              (message_id, conversation_id, kind, body, client_message_id)
+                            SELECT :message_id, conversation_id, 'system',
+                              'A newly detected calendar conflict affects this lesson. '
+                              'Participants should reschedule or contact support.',
+                              :client_message_id
+                            FROM marketplace_conversation
+                            WHERE booking_id = :booking_id
+                            ON CONFLICT (conversation_id, client_message_id)
+                              WHERE client_message_id IS NOT NULL DO NOTHING
+                            RETURNING message_id
+                            """
+                        ),
+                        {
+                            "message_id": message_id,
+                            "booking_id": conflict["booking_id"],
+                            "client_message_id": conflict["conflict_id"],
+                        },
+                    ).scalar_one_or_none()
+                    if inserted_message is not None:
+                        connection.execute(
+                            text(
+                                """
+                                INSERT INTO marketplace_message_notification_job
+                                  (job_id, message_id, recipient_actor_ref, template)
+                                VALUES (:job_id, :message_id, :recipient, 'calendar_conflict')
+                                ON CONFLICT (message_id, recipient_actor_ref) DO NOTHING
+                                """
+                            ),
+                            {
+                                "job_id": uuid4(),
+                                "message_id": inserted_message,
+                                "recipient": row["actor_ref"],
+                            },
+                        )
                 connection.execute(
                     text(
                         "DELETE FROM marketplace_calendar_busy_interval "
@@ -534,37 +607,45 @@ class PostgresCalendarRepository:
             raise DependencyUnavailableError from error
 
     def get_busy_snapshot(self, *, tutor_id: UUID, now: datetime) -> CalendarBusySnapshot:
-        connection = self.get_connection_by_tutor(tutor_id=tutor_id)
-        if connection is None:
-            return CalendarBusySnapshot("not_connected", (), None)
-        if connection.status == "reconnect_required":
-            return CalendarBusySnapshot("reconnect_required", (), connection.last_refreshed_at)
-        if (
-            connection.status != "connected"
-            or connection.cache_expires_at is None
-            or connection.cache_expires_at <= now
-        ):
-            return CalendarBusySnapshot("stale", (), connection.last_refreshed_at)
         try:
             with self._engine.connect() as database:
-                intervals = tuple(
-                    TimeInterval(row.starts_at, row.ends_at)
-                    for row in database.execute(
+                rows = (
+                    database.execute(
                         text(
                             """
-                            SELECT busy.starts_at, busy.ends_at
-                            FROM marketplace_calendar_busy_interval AS busy
-                            JOIN marketplace_calendar_connection AS calendar
-                              ON calendar.tutor_id = busy.tutor_id
-                             AND calendar.cache_generation = busy.generation
-                            WHERE busy.tutor_id = :tutor_id
+                            SELECT calendar.status, calendar.last_refreshed_at,
+                                   calendar.cache_expires_at,
+                                   busy.starts_at, busy.ends_at
+                            FROM marketplace_calendar_connection AS calendar
+                            LEFT JOIN marketplace_calendar_busy_interval AS busy
+                              ON busy.tutor_id = calendar.tutor_id
+                             AND busy.generation = calendar.cache_generation
+                            WHERE calendar.tutor_id = :tutor_id
                             ORDER BY busy.starts_at, busy.ends_at
                             """
                         ),
                         {"tutor_id": tutor_id},
                     )
+                    .mappings()
+                    .all()
                 )
-            return CalendarBusySnapshot("current", intervals, connection.last_refreshed_at)
+            if not rows:
+                return CalendarBusySnapshot("not_connected", (), None)
+            first = rows[0]
+            if first["status"] == "reconnect_required":
+                return CalendarBusySnapshot("reconnect_required", (), first["last_refreshed_at"])
+            if (
+                first["status"] != "connected"
+                or first["cache_expires_at"] is None
+                or first["cache_expires_at"] <= now
+            ):
+                return CalendarBusySnapshot("stale", (), first["last_refreshed_at"])
+            intervals = tuple(
+                TimeInterval(row["starts_at"], row["ends_at"])
+                for row in rows
+                if row["starts_at"] is not None and row["ends_at"] is not None
+            )
+            return CalendarBusySnapshot("current", intervals, first["last_refreshed_at"])
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
@@ -573,6 +654,18 @@ class PostgresCalendarRepository:
     ) -> StoredCalendarRefreshJob | None:
         try:
             with self._engine.begin() as connection:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE marketplace_calendar_refresh_job
+                        SET status = 'dead', lease_owner = NULL, lease_expires_at = NULL,
+                            safe_failure_code = 'unavailable', updated_at = :now
+                        WHERE status = 'leased' AND attempt >= 8
+                          AND lease_expires_at <= :now
+                        """
+                    ),
+                    {"now": now},
+                )
                 row = (
                     connection.execute(
                         text(
@@ -673,6 +766,22 @@ class PostgresCalendarRepository:
                         },
                     ).scalar_one_or_none()
                     is not None
+                )
+        except SQLAlchemyError as error:
+            raise DependencyUnavailableError from error
+
+    def recover_refresh(self, *, tutor_id: UUID, now: datetime) -> None:
+        try:
+            with self._engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "UPDATE marketplace_calendar_refresh_job "
+                        "SET status = 'queued', attempt = 0, available_at = :now, "
+                        "lease_owner = NULL, lease_expires_at = NULL, "
+                        "safe_failure_code = NULL, updated_at = :now "
+                        "WHERE tutor_id = :tutor_id AND status = 'dead'"
+                    ),
+                    {"tutor_id": tutor_id, "now": now},
                 )
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
@@ -888,6 +997,11 @@ class CalendarService:
         )
         if updated is None:
             raise TutorApplicationConflictError
+        await asyncio.to_thread(
+            self._repository.recover_refresh,
+            tutor_id=connection.tutor_id,
+            now=now,
+        )
         return CalendarConnectionView("connected", "current", now, None)
 
     async def revoke(self, *, principal: ClerkPrincipal) -> CalendarConnectionView:
@@ -1121,7 +1235,8 @@ class GoogleCalendarHttpAdapter:
         calendars = payload.get("calendars")
         primary = calendars.get("primary") if isinstance(calendars, dict) else None
         busy = primary.get("busy") if isinstance(primary, dict) else None
-        if not isinstance(busy, list) or len(busy) > MAX_BUSY_INTERVALS:
+        errors = primary.get("errors") if isinstance(primary, dict) else None
+        if errors not in (None, []) or not isinstance(busy, list) or len(busy) > MAX_BUSY_INTERVALS:
             raise CalendarProviderError("invalid_response")
         intervals: list[TimeInterval] = []
         try:

@@ -203,6 +203,9 @@ def test_tutor_commerce_requires_environment_matched_server_configuration() -> N
         "clerk_jwks_url": "https://clerk.glidelingo.test/.well-known/jwks.json",
         "human_tutor_approved_meeting_hosts": ("meet.example.com",),
         "human_tutor_commerce_enabled": True,
+        "human_tutor_payment_database_url": (
+            "postgresql+psycopg://marketplace_payment@127.0.0.1:55433/glidelingo"
+        ),
     }
     with pytest.raises(ValidationError, match="secret key"):
         Settings(**common)

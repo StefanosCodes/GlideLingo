@@ -12,7 +12,9 @@ import { listMarketplaceBookings, type MarketplaceBooking } from '@/features/tut
 import { isHumanTutorCommerceEnabled, isHumanTutorMarketplaceAcquisitionEnabled } from '@/features/tutor-marketplace/config';
 import { useTheme } from '@/hooks/use-theme';
 
-type State = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; bookings: MarketplaceBooking[] };
+type State = { kind: 'loading' } | { kind: 'error' } | {
+  kind: 'ready'; bookings: MarketplaceBooking[]; nextCursor: string | null;
+};
 
 export function MarketplaceBookingsScreen() {
   const enabled = isHumanTutorCommerceEnabled();
@@ -20,13 +22,19 @@ export function MarketplaceBookingsScreen() {
   const theme = useTheme();
   const sequence = useRef(0);
   const [retry, setRetry] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [pageError, setPageError] = useState(false);
   const [state, setState] = useState<State>(enabled ? { kind: 'loading' } : { kind: 'error' });
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
     const current = ++sequence.current;
-    void listMarketplaceBookings(controller.signal).then((bookings) => {
-      if (!controller.signal.aborted && current === sequence.current) setState({ kind: 'ready', bookings });
+    setLoadingMore(false);
+    setPageError(false);
+    void listMarketplaceBookings(controller.signal).then((page) => {
+      if (!controller.signal.aborted && current === sequence.current) setState({
+        kind: 'ready', bookings: page.items, nextCursor: page.nextCursor,
+      });
     }).catch((error: unknown) => {
       if (controller.signal.aborted || current !== sequence.current) return;
       if (error instanceof ApiClientError && error.kind === 'cancelled') return;
@@ -34,6 +42,28 @@ export function MarketplaceBookingsScreen() {
     });
     return () => controller.abort();
   }, [enabled, retry]);
+
+  const loadMore = async () => {
+    if (state.kind !== 'ready' || state.nextCursor === null || loadingMore) return;
+    const cursor = state.nextCursor;
+    const request = ++sequence.current;
+    setLoadingMore(true);
+    setPageError(false);
+    try {
+      const page = await listMarketplaceBookings(undefined, cursor);
+      if (request !== sequence.current) return;
+      setState((current) => current.kind === 'ready' && current.nextCursor === cursor ? {
+        kind: 'ready',
+        bookings: [...current.bookings, ...page.items.filter((booking) =>
+          !current.bookings.some((existing) => existing.bookingId === booking.bookingId))],
+        nextCursor: page.nextCursor,
+      } : current);
+    } catch {
+      if (request === sequence.current) setPageError(true);
+    } finally {
+      if (request === sequence.current) setLoadingMore(false);
+    }
+  };
 
   return <ScreenFrame testID={enabled ? 'marketplace-bookings-screen' : 'marketplace-bookings-disabled'}>
     <View style={styles.header}><ThemedText type="eyebrow" themeColor="textSecondary">HUMAN TUTOR BOOKINGS</ThemedText>
@@ -51,9 +81,16 @@ export function MarketplaceBookingsScreen() {
     </GlideSurface> : null}
     {state.kind === 'ready' ? state.bookings.map((booking) => <GlideSurface key={booking.bookingId} padding="roomy" style={styles.card}>
       <ThemedText type="title2">{new Date(booking.startsAt).toLocaleString()}</ThemedText>
-      <ThemedText type="body" themeColor="textSecondary">{booking.role === 'tutor' ? 'Tutor' : 'Learner'} · {booking.state.replaceAll('_', ' ')} · ${(booking.amountMinor / 100).toFixed(2)} USD</ThemedText>
+      <ThemedText type="body" themeColor="textSecondary">{booking.role === 'tutor' ? 'Tutor' : booking.role === 'learner' ? 'Learner' : 'Operator'} · {booking.state.replaceAll('_', ' ')} · ${(booking.amountMinor / 100).toFixed(2)} USD</ThemedText>
       <GlideButton label="View booking" onPress={() => router.push(`/bookings/${booking.bookingId}`)} variant="secondary" />
     </GlideSurface>) : null}
+    {state.kind === 'ready' && state.nextCursor !== null ? <GlideButton
+      disabled={loadingMore}
+      label={loadingMore ? 'Loading more bookings…' : 'Load more bookings'}
+      onPress={() => void loadMore()}
+      variant="secondary"
+    /> : null}
+    {pageError ? <ThemedText accessibilityRole="alert" type="footnote">More bookings could not be loaded. Existing results are unchanged.</ThemedText> : null}
   </ScreenFrame>;
 }
 

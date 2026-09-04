@@ -25,6 +25,7 @@ export function TutorDiscoveryScreen() {
   const [specialty, setSpecialty] = useState('');
   const [maximumPrice, setMaximumPrice] = useState('');
   const [minimumRating, setMinimumRating] = useState('');
+  const [availableBefore, setAvailableBefore] = useState('');
   const [duration, setDuration] = useState<25 | 50 | undefined>();
   const [verifiedCredential, setVerifiedCredential] = useState(false);
   const [favorite, setFavorite] = useState(false);
@@ -38,6 +39,7 @@ export function TutorDiscoveryScreen() {
     if (!enabled) return;
     const controller = new AbortController();
     const current = ++sequence.current;
+    setLoadingMore(false);
     void listPublicTutors(filters, controller.signal)
       .then((result) => {
         if (!controller.signal.aborted && current === sequence.current) setState({ kind: 'ready', tutors: result.items, nextCursor: result.nextCursor });
@@ -53,7 +55,9 @@ export function TutorDiscoveryScreen() {
   const search = () => {
     const price = Number(maximumPrice);
     const rating = Number(minimumRating);
+    const availabilityDeadline = Date.parse(availableBefore);
     setState({ kind: 'loading' });
+    setLoadingMore(false);
     setPageError(false);
     setRetry((value) => value + 1);
     setFilters({
@@ -63,6 +67,9 @@ export function TutorDiscoveryScreen() {
       ...(duration ? { durationMinutes: duration } : {}),
       ...(maximumPrice && Number.isFinite(price) ? { maximumAmountMinor: Math.round(price * 100) } : {}),
       ...(minimumRating && Number.isFinite(rating) ? { minimumRating: rating } : {}),
+      ...(availableBefore && Number.isFinite(availabilityDeadline)
+        ? { availableBefore: new Date(availabilityDeadline).toISOString() }
+        : {}),
       ...(verifiedCredential ? { verifiedCredential: true } : {}),
       ...(favorite ? { favorite: true } : {}),
     });
@@ -112,6 +119,7 @@ export function TutorDiscoveryScreen() {
       <FilterInput label="Filter by specialty" value={specialty} onChangeText={setSpecialty} theme={theme} />
       <FilterInput label="Maximum price in USD" value={maximumPrice} onChangeText={setMaximumPrice} theme={theme} />
       <FilterInput label="Minimum rating from 1 to 5" value={minimumRating} onChangeText={setMinimumRating} theme={theme} />
+      <FilterInput label="Available before (ISO date and time)" value={availableBefore} onChangeText={setAvailableBefore} theme={theme} />
       <GlideButton label={duration ? `Duration: ${duration} minutes` : 'Duration: any'} onPress={() => setDuration((value) => value === undefined ? 25 : value === 25 ? 50 : undefined)} variant="secondary" />
       <GlideButton label={verifiedCredential ? 'Verified credential: required' : 'Verified credential: any'} onPress={() => setVerifiedCredential((value) => !value)} variant="secondary" />
       <GlideButton label={favorite ? 'Favorites only' : 'All tutors'} onPress={() => setFavorite((value) => !value)} variant="secondary" />

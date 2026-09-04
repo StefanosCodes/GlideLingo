@@ -90,3 +90,25 @@ test('calendar connection is explicit, minimal, and never blocks manual availabi
   await waitFor(() => expect(mockOpenUrl).toHaveBeenCalledTimes(1));
   expect(mockCalendarStart).toHaveBeenCalledWith('glidelingo:///tutor/availability');
 });
+
+test('tutor can set and clear an optional recurring-rule end date', async () => {
+  mockGet.mockResolvedValue(availability);
+  mockPreview.mockResolvedValue(preview);
+  mockReplace.mockResolvedValue(availability);
+  const screen = await render(<SafeAreaProvider initialMetrics={metrics}><TutorAvailabilityScreen /></SafeAreaProvider>);
+
+  await waitFor(() => expect(screen.getByText('Two-week preview')).toBeTruthy());
+  fireEvent.changeText(screen.getByLabelText('Rule 1 effective until (optional YYYY-MM-DD)'), '2026-12-31');
+  await waitFor(() => expect(screen.getByLabelText('Rule 1 effective until (optional YYYY-MM-DD)').props.value).toBe('2026-12-31'));
+  fireEvent.press(screen.getByText('Save availability'));
+  await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(expect.objectContaining({
+    rules: expect.arrayContaining([expect.objectContaining({ effectiveUntil: '2026-12-31' })]),
+  })));
+
+  fireEvent.changeText(screen.getByLabelText('Rule 1 effective until (optional YYYY-MM-DD)'), '');
+  await waitFor(() => expect(screen.getByLabelText('Rule 1 effective until (optional YYYY-MM-DD)').props.value).toBe(''));
+  fireEvent.press(screen.getByText('Save availability'));
+  await waitFor(() => expect(mockReplace).toHaveBeenLastCalledWith(expect.objectContaining({
+    rules: expect.arrayContaining([expect.objectContaining({ effectiveUntil: null })]),
+  })));
+});

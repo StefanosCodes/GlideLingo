@@ -142,6 +142,7 @@ function AppNavigation({ signedIn }: { signedIn: boolean }) {
           <Stack.Screen name="subscription" />
         </Stack.Protected>
         <Stack.Protected guard={signedIn && isHumanTutorMarketplaceEnabled()}>
+          <Stack.Screen name="marketplace-operations/index" />
           <Stack.Screen name="tutor/apply" />
           <Stack.Screen name="tutor/profile" />
           <Stack.Screen name="tutor/availability" />

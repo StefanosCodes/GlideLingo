@@ -35,6 +35,7 @@ from app.modules.human_tutor_marketplace.schemas import (
     AvailabilityExceptionResponse,
     AvailabilityRuleResponse,
     ManualAvailabilityResponse,
+    PublicTutorOfferingResponse,
     PublicTutorResponse,
     ReplaceManualAvailabilityRequest,
     TutorSearchResponse,
@@ -96,15 +97,25 @@ class StoredPublicTutor:
     rating: float | None
     rating_count: int
     is_favorite: bool
+    offerings: tuple["StoredPublicOffering", ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class StoredPublicOffering:
+    offering_id: UUID
+    title: str
+    duration_minutes: int
+    amount_minor: int
+    currency: str
 
 
 class DiscoveryRepository(Protocol):
     def get_manual_availability_by_actor(
-        self, *, actor_ref: str
+        self, *, actor_ref: str, offering_id: UUID | None = None
     ) -> StoredManualAvailability | None: ...
 
     def get_manual_availability_by_tutor(
-        self, *, tutor_id: UUID, require_public: bool
+        self, *, tutor_id: UUID, require_public: bool, offering_id: UUID | None = None
     ) -> StoredManualAvailability | None: ...
 
     def replace_manual_availability(
@@ -141,6 +152,8 @@ class BookingBusyReader(Protocol):
         tutor_id: UUID,
         starts_at: datetime,
         ends_at: datetime,
+        buffer_before_minutes: int = 0,
+        buffer_after_minutes: int = 0,
         exclude_booking_id: UUID | None = None,
     ) -> tuple[TimeInterval, ...]: ...
 
@@ -150,7 +163,7 @@ class PostgresDiscoveryRepository:
         self._engine = engine
 
     def get_manual_availability_by_actor(
-        self, *, actor_ref: str
+        self, *, actor_ref: str, offering_id: UUID | None = None
     ) -> StoredManualAvailability | None:
         try:
             with self._engine.connect() as connection:
@@ -165,13 +178,18 @@ class PostgresDiscoveryRepository:
                         FROM marketplace_tutor_profile AS profile
                         JOIN marketplace_tutor_application AS application
                           ON application.application_id = profile.application_id
-                        LEFT JOIN marketplace_tutor_offering AS offering
-                          ON offering.tutor_id = profile.tutor_id
+                        LEFT JOIN LATERAL (
+                          SELECT duration_minutes FROM marketplace_tutor_offering
+                          WHERE tutor_id = profile.tutor_id
+                            AND (CAST(:offering_id AS uuid) IS NULL
+                                 OR offering_id = CAST(:offering_id AS uuid))
+                          ORDER BY duration_minutes, amount_minor, offering_id LIMIT 1
+                        ) AS offering ON true
                         WHERE profile.actor_ref = :actor_ref
                           AND application.status = 'approved'
                         """
                         ),
-                        {"actor_ref": actor_ref},
+                        {"actor_ref": actor_ref, "offering_id": offering_id},
                     )
                     .mappings()
                     .one_or_none()
@@ -181,11 +199,11 @@ class PostgresDiscoveryRepository:
             raise DependencyUnavailableError from error
 
     def get_manual_availability_by_tutor(
-        self, *, tutor_id: UUID, require_public: bool
+        self, *, tutor_id: UUID, require_public: bool, offering_id: UUID | None = None
     ) -> StoredManualAvailability | None:
         eligibility = (
             "AND application.status = 'approved' AND profile.is_published "
-            "AND profile.payout_ready AND offering.state = 'active'"
+            "AND profile.payout_ready AND offering.duration_minutes IS NOT NULL"
             if require_public
             else ""
         )
@@ -202,13 +220,23 @@ class PostgresDiscoveryRepository:
                         FROM marketplace_tutor_profile AS profile
                         JOIN marketplace_tutor_application AS application
                           ON application.application_id = profile.application_id
-                        LEFT JOIN marketplace_tutor_offering AS offering
-                          ON offering.tutor_id = profile.tutor_id
+                        LEFT JOIN LATERAL (
+                          SELECT duration_minutes FROM marketplace_tutor_offering
+                          WHERE tutor_id = profile.tutor_id
+                            AND (CAST(:offering_id AS uuid) IS NULL
+                                 OR offering_id = CAST(:offering_id AS uuid))
+                            AND (NOT :require_public OR state = 'active')
+                          ORDER BY duration_minutes, amount_minor, offering_id LIMIT 1
+                        ) AS offering ON true
                         WHERE profile.tutor_id = :tutor_id
                         """
                             + eligibility
                         ),
-                        {"tutor_id": tutor_id},
+                        {
+                            "tutor_id": tutor_id,
+                            "offering_id": offering_id,
+                            "require_public": require_public,
+                        },
                     )
                     .mappings()
                     .one_or_none()
@@ -348,8 +376,11 @@ class PostgresDiscoveryRepository:
                                profile.buffer_before_minutes, profile.buffer_after_minutes,
                                offering.duration_minutes
                         FROM marketplace_tutor_profile AS profile
-                        LEFT JOIN marketplace_tutor_offering AS offering
-                          ON offering.tutor_id = profile.tutor_id
+                        LEFT JOIN LATERAL (
+                          SELECT duration_minutes FROM marketplace_tutor_offering
+                          WHERE tutor_id = profile.tutor_id
+                          ORDER BY duration_minutes, amount_minor, offering_id LIMIT 1
+                        ) AS offering ON true
                         WHERE profile.tutor_id = :tutor_id
                         """
                         ),
@@ -381,7 +412,8 @@ class PostgresDiscoveryRepository:
             "application.status = 'approved'",
             "profile.is_published",
             "profile.payout_ready",
-            "offering.state = 'active'",
+            "EXISTS (SELECT 1 FROM marketplace_tutor_offering AS offering "
+            "WHERE offering.tutor_id = profile.tutor_id AND offering.state = 'active')",
         ]
         parameters: dict[str, object] = {
             "learner_actor_ref": learner_actor_ref,
@@ -409,14 +441,28 @@ class PostgresDiscoveryRepository:
                 "AND lower(specialty.specialty) = lower(:specialty))"
             )
             parameters["specialty"] = specialty
-        if duration_minutes is not None:
-            conditions.append("offering.duration_minutes = :duration_minutes")
-            parameters["duration_minutes"] = duration_minutes
-        if maximum_amount_minor is not None:
-            conditions.append("offering.amount_minor <= :maximum_amount_minor")
-            parameters["maximum_amount_minor"] = maximum_amount_minor
+        if duration_minutes is not None or maximum_amount_minor is not None:
+            offering_predicates = [
+                "offering.tutor_id = profile.tutor_id",
+                "offering.state = 'active'",
+            ]
+            if duration_minutes is not None:
+                offering_predicates.append("offering.duration_minutes = :duration_minutes")
+                parameters["duration_minutes"] = duration_minutes
+            if maximum_amount_minor is not None:
+                offering_predicates.append("offering.amount_minor <= :maximum_amount_minor")
+                parameters["maximum_amount_minor"] = maximum_amount_minor
+            conditions.append(
+                "EXISTS (SELECT 1 FROM marketplace_tutor_offering AS offering WHERE "
+                + " AND ".join(offering_predicates)
+                + ")"
+            )
         if verified_credential:
-            conditions.append("credential.verification_status = 'verified'")
+            conditions.append(
+                "EXISTS (SELECT 1 FROM marketplace_tutor_credential AS credential "
+                "WHERE credential.tutor_id = profile.tutor_id "
+                "AND credential.verification_status = 'verified')"
+            )
         if minimum_rating is not None:
             conditions.append("review.rating >= :minimum_rating")
             parameters["minimum_rating"] = minimum_rating
@@ -432,9 +478,6 @@ class PostgresDiscoveryRepository:
                             """
                         SELECT profile.tutor_id, profile.headline, profile.biography,
                                profile.time_zone, profile.application_id,
-                               offering.offering_id, offering.title AS offering_title,
-                               offering.duration_minutes, offering.amount_minor, offering.currency,
-                               credential.title AS credential_title,
                                review.rating, review.rating_count,
                                EXISTS (
                                  SELECT 1 FROM marketplace_tutor_favorite favorite
@@ -444,11 +487,6 @@ class PostgresDiscoveryRepository:
                         FROM marketplace_tutor_profile AS profile
                         JOIN marketplace_tutor_application AS application
                           ON application.application_id = profile.application_id
-                        JOIN marketplace_tutor_offering AS offering
-                          ON offering.tutor_id = profile.tutor_id
-                        LEFT JOIN marketplace_tutor_credential AS credential
-                          ON credential.tutor_id = profile.tutor_id
-                         AND credential.verification_status = 'verified'
                         LEFT JOIN LATERAL (
                           SELECT avg(published.rating)::double precision AS rating,
                                  count(*)::integer AS rating_count
@@ -465,7 +503,15 @@ class PostgresDiscoveryRepository:
                     .mappings()
                     .all()
                 )
-                return [self._hydrate_public(connection, row) for row in rows]
+                return [
+                    self._hydrate_public(
+                        connection,
+                        row,
+                        duration_minutes=duration_minutes,
+                        maximum_amount_minor=maximum_amount_minor,
+                    )
+                    for row in rows
+                ]
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
 
@@ -480,9 +526,6 @@ class PostgresDiscoveryRepository:
                             """
                         SELECT profile.tutor_id, profile.headline, profile.biography,
                                profile.time_zone, profile.application_id,
-                               offering.offering_id, offering.title AS offering_title,
-                               offering.duration_minutes, offering.amount_minor, offering.currency,
-                               credential.title AS credential_title,
                                review.rating, review.rating_count,
                                EXISTS (
                                  SELECT 1 FROM marketplace_tutor_favorite favorite
@@ -492,11 +535,6 @@ class PostgresDiscoveryRepository:
                         FROM marketplace_tutor_profile AS profile
                         JOIN marketplace_tutor_application AS application
                           ON application.application_id = profile.application_id
-                        JOIN marketplace_tutor_offering AS offering
-                          ON offering.tutor_id = profile.tutor_id
-                        LEFT JOIN marketplace_tutor_credential AS credential
-                          ON credential.tutor_id = profile.tutor_id
-                         AND credential.verification_status = 'verified'
                         LEFT JOIN LATERAL (
                           SELECT avg(published.rating)::double precision AS rating,
                                  count(*)::integer AS rating_count
@@ -507,7 +545,11 @@ class PostgresDiscoveryRepository:
                         WHERE profile.tutor_id = :tutor_id
                           AND application.status = 'approved'
                           AND profile.is_published AND profile.payout_ready
-                          AND offering.state = 'active'
+                          AND EXISTS (
+                            SELECT 1 FROM marketplace_tutor_offering AS offering
+                            WHERE offering.tutor_id = profile.tutor_id
+                              AND offering.state = 'active'
+                          )
                         """
                         ),
                         {"learner_actor_ref": learner_actor_ref, "tutor_id": tutor_id},
@@ -529,12 +571,14 @@ class PostgresDiscoveryRepository:
                         FROM marketplace_tutor_profile AS profile
                         JOIN marketplace_tutor_application AS application
                           ON application.application_id = profile.application_id
-                        JOIN marketplace_tutor_offering AS offering
-                          ON offering.tutor_id = profile.tutor_id
                         WHERE profile.tutor_id = :tutor_id
                           AND application.status = 'approved'
                           AND profile.is_published AND profile.payout_ready
-                          AND offering.state = 'active'
+                          AND EXISTS (
+                            SELECT 1 FROM marketplace_tutor_offering AS offering
+                            WHERE offering.tutor_id = profile.tutor_id
+                              AND offering.state = 'active'
+                          )
                         """
                     ),
                     {"tutor_id": tutor_id},
@@ -572,6 +616,8 @@ class PostgresDiscoveryRepository:
         tutor_id: UUID,
         starts_at: datetime,
         ends_at: datetime,
+        buffer_before_minutes: int = 0,
+        buffer_after_minutes: int = 0,
         exclude_booking_id: UUID | None = None,
     ) -> tuple[TimeInterval, ...]:
         try:
@@ -587,13 +633,21 @@ class PostgresDiscoveryRepository:
                                      AS ends_at
                             FROM marketplace_booking
                             WHERE tutor_id = :tutor_id
-                              AND (:exclude_booking_id IS NULL
-                                   OR booking_id <> :exclude_booking_id)
+                                AND (CAST(:exclude_booking_id AS uuid) IS NULL
+                                     OR booking_id <> CAST(:exclude_booking_id AS uuid))
                               AND state IN (
                                 'held', 'payment_pending', 'payment_ambiguous', 'confirmed'
                               )
-                              AND tstzrange(starts_at, ends_at, '[)')
-                                  && tstzrange(:starts_at, :ends_at, '[)')
+                              AND tstzrange(
+                                    starts_at - make_interval(mins => buffer_before_minutes),
+                                    ends_at + make_interval(mins => buffer_after_minutes),
+                                    '[)'
+                                  )
+                                  && tstzrange(
+                                       :starts_at - make_interval(mins => :buffer_before_minutes),
+                                       :ends_at + make_interval(mins => :buffer_after_minutes),
+                                       '[)'
+                                     )
                             ORDER BY starts_at, ends_at, booking_id
                             """
                         ),
@@ -601,6 +655,8 @@ class PostgresDiscoveryRepository:
                             "tutor_id": tutor_id,
                             "starts_at": starts_at,
                             "ends_at": ends_at,
+                            "buffer_before_minutes": buffer_before_minutes,
+                            "buffer_after_minutes": buffer_after_minutes,
                             "exclude_booking_id": exclude_booking_id,
                         },
                     )
@@ -663,7 +719,14 @@ class PostgresDiscoveryRepository:
         )
 
     @classmethod
-    def _hydrate_public(cls, connection: Connection, row: RowMapping) -> StoredPublicTutor:
+    def _hydrate_public(
+        cls,
+        connection: Connection,
+        row: RowMapping,
+        *,
+        duration_minutes: int | None = None,
+        maximum_amount_minor: int | None = None,
+    ) -> StoredPublicTutor:
         application_id = row["application_id"]
         tutor_id = row["tutor_id"]
         languages = cls._ranked_values(
@@ -687,7 +750,56 @@ class PostgresDiscoveryRepository:
             "tutor_id",
             tutor_id,
         )
-        credentials = (row["credential_title"],) if row["credential_title"] is not None else ()
+        credentials = tuple(
+            connection.execute(
+                text(
+                    "SELECT DISTINCT title FROM marketplace_tutor_credential "
+                    "WHERE tutor_id = :tutor_id AND verification_status = 'verified' "
+                    "ORDER BY title"
+                ),
+                {"tutor_id": tutor_id},
+            ).scalars()
+        )
+        offering_conditions = ["tutor_id = :tutor_id", "state = 'active'"]
+        offering_parameters: dict[str, object] = {"tutor_id": tutor_id}
+        if duration_minutes is not None:
+            offering_conditions.append("duration_minutes = :duration_minutes")
+            offering_parameters["duration_minutes"] = duration_minutes
+        if maximum_amount_minor is not None:
+            offering_conditions.append("amount_minor <= :maximum_amount_minor")
+            offering_parameters["maximum_amount_minor"] = maximum_amount_minor
+        matching_offerings = tuple(
+            StoredPublicOffering(
+                offering_id=value["offering_id"],
+                title=value["title"],
+                duration_minutes=value["duration_minutes"],
+                amount_minor=value["amount_minor"],
+                currency=value["currency"],
+            )
+            for value in connection.execute(
+                text(
+                    "SELECT offering_id, title, duration_minutes, amount_minor, currency "
+                    "FROM marketplace_tutor_offering WHERE "
+                    + " AND ".join(offering_conditions)
+                    + " "
+                    "ORDER BY duration_minutes, amount_minor, lower(title), offering_id"
+                ),
+                offering_parameters,
+            ).mappings()
+        )
+        all_offerings = tuple(
+            StoredPublicOffering(**dict(value))
+            for value in connection.execute(
+                text(
+                    "SELECT offering_id, title, duration_minutes, amount_minor, currency "
+                    "FROM marketplace_tutor_offering WHERE tutor_id = :tutor_id "
+                    "AND state = 'active' "
+                    "ORDER BY duration_minutes, amount_minor, lower(title), offering_id"
+                ),
+                {"tutor_id": tutor_id},
+            ).mappings()
+        )
+        first = matching_offerings[0]
         return StoredPublicTutor(
             tutor_id=tutor_id,
             headline=row["headline"],
@@ -697,14 +809,15 @@ class PostgresDiscoveryRepository:
             dialects=dialects,
             specialties=specialties,
             verified_credentials=credentials,
-            offering_id=row["offering_id"],
-            offering_title=row["offering_title"],
-            duration_minutes=row["duration_minutes"],
-            amount_minor=row["amount_minor"],
-            currency=row["currency"],
+            offering_id=first.offering_id,
+            offering_title=first.title,
+            duration_minutes=first.duration_minutes,
+            amount_minor=first.amount_minor,
+            currency=first.currency,
             rating=row["rating"],
             rating_count=row["rating_count"],
             is_favorite=row["is_favorite"],
+            offerings=all_offerings,
         )
 
     @staticmethod
@@ -794,7 +907,15 @@ class MarketplaceDiscoveryService:
         now = datetime.now(UTC)
         selected: list[StoredPublicTutor] = []
         exhausted = False
-        while len(selected) <= limit and not exhausted:
+        scanned = 0
+        maximum_candidates = 500
+        last_scanned: StoredPublicTutor | None = None
+        while len(selected) <= limit and not exhausted and scanned < maximum_candidates:
+            batch_limit = min(
+                201,
+                maximum_candidates - scanned,
+                max(limit + 1, 50),
+            )
             tutors = await asyncio.to_thread(
                 self._repository.list_public_tutors,
                 learner_actor_ref=actor_ref,
@@ -807,12 +928,14 @@ class MarketplaceDiscoveryService:
                 verified_credential=verified_credential,
                 after_headline=after_headline,
                 after_tutor_id=after_tutor_id,
-                limit=min(201, max(limit + 1, 50)),
+                limit=batch_limit,
             )
-            exhausted = len(tutors) < min(201, max(limit + 1, 50))
+            exhausted = len(tutors) < batch_limit
             if not tutors:
                 break
             for tutor in tutors:
+                scanned += 1
+                last_scanned = tutor
                 after_headline, after_tutor_id = tutor.headline.casefold(), tutor.tutor_id
                 if favorite and not tutor.is_favorite:
                     continue
@@ -825,6 +948,7 @@ class MarketplaceDiscoveryService:
                     self._repository.get_manual_availability_by_tutor,
                     tutor_id=tutor.tutor_id,
                     require_public=True,
+                    offering_id=tutor.offering_id,
                 )
                 if schedule is not None and schedule.duration_minutes is not None:
                     calendar = await self._busy_snapshot(tutor_id=tutor.tutor_id, now=now)
@@ -838,7 +962,11 @@ class MarketplaceDiscoveryService:
                         limit=1,
                         busy_intervals=calendar.intervals
                         + await self._internal_busy(
-                            tutor_id=tutor.tutor_id, starts_at=now, ends_at=available_before
+                            tutor_id=tutor.tutor_id,
+                            starts_at=now,
+                            ends_at=available_before,
+                            buffer_before_minutes=schedule.buffer_before_minutes,
+                            buffer_after_minutes=schedule.buffer_after_minutes,
                         ),
                     )
                     if slots:
@@ -846,7 +974,12 @@ class MarketplaceDiscoveryService:
                         if len(selected) > limit:
                             break
         page = selected[:limit]
-        next_cursor = self._encode_cursor(page[-1]) if len(selected) > limit and page else None
+        if len(selected) > limit and page:
+            next_cursor = self._encode_cursor(page[-1])
+        elif not exhausted and last_scanned is not None:
+            next_cursor = self._encode_cursor(last_scanned)
+        else:
+            next_cursor = None
         return TutorSearchResponse(
             items=[self._public_response(tutor) for tutor in page],
             next_cursor=next_cursor,
@@ -893,6 +1026,7 @@ class MarketplaceDiscoveryService:
         starts_at: datetime,
         ends_at: datetime,
         limit: int,
+        offering_id: UUID | None = None,
     ) -> TutorSlotsResponse:
         self._require_acquisition()
         self._actor_ref(principal)
@@ -900,6 +1034,7 @@ class MarketplaceDiscoveryService:
             self._repository.get_manual_availability_by_tutor,
             tutor_id=tutor_id,
             require_public=True,
+            offering_id=offering_id,
         )
         if schedule is None or schedule.duration_minutes is None:
             raise TutorApplicationNotFoundError
@@ -908,6 +1043,7 @@ class MarketplaceDiscoveryService:
         if calendar.freshness in {"stale", "reconnect_required"}:
             return TutorSlotsResponse(
                 tutor_id=tutor_id,
+                offering_id=offering_id,
                 time_zone=schedule.time_zone,
                 source="manual+google",
                 freshness=cast(
@@ -922,10 +1058,17 @@ class MarketplaceDiscoveryService:
             ends_at=ends_at,
             limit=limit,
             busy_intervals=calendar.intervals
-            + await self._internal_busy(tutor_id=tutor_id, starts_at=starts_at, ends_at=ends_at),
+            + await self._internal_busy(
+                tutor_id=tutor_id,
+                starts_at=starts_at,
+                ends_at=ends_at,
+                buffer_before_minutes=schedule.buffer_before_minutes,
+                buffer_after_minutes=schedule.buffer_after_minutes,
+            ),
         )
         return TutorSlotsResponse(
             tutor_id=tutor_id,
+            offering_id=offering_id,
             time_zone=schedule.time_zone,
             source="manual+google" if calendar.freshness != "not_connected" else "manual",
             slots=[
@@ -941,6 +1084,7 @@ class MarketplaceDiscoveryService:
         booking_id: UUID,
         starts_at: datetime,
         ends_at: datetime,
+        offering_id: UUID | None = None,
     ) -> int | None:
         """Validate a participant reschedule without reopening acquisition.
 
@@ -954,6 +1098,7 @@ class MarketplaceDiscoveryService:
             self._repository.get_manual_availability_by_tutor,
             tutor_id=tutor_id,
             require_public=False,
+            offering_id=offering_id,
         )
         if schedule is None or schedule.duration_minutes is None:
             return None
@@ -974,6 +1119,8 @@ class MarketplaceDiscoveryService:
                 tutor_id=tutor_id,
                 starts_at=starts_at,
                 ends_at=ends_at,
+                buffer_before_minutes=schedule.buffer_before_minutes,
+                buffer_after_minutes=schedule.buffer_after_minutes,
                 exclude_booking_id=booking_id,
             ),
         )
@@ -990,16 +1137,19 @@ class MarketplaceDiscoveryService:
         starts_at: datetime,
         ends_at: datetime,
         limit: int,
+        offering_id: UUID | None = None,
     ) -> TutorSlotsResponse:
         schedule = await asyncio.to_thread(
             self._repository.get_manual_availability_by_actor,
             actor_ref=self._actor_ref(principal),
+            offering_id=offering_id,
         )
         if schedule is None:
             raise TutorApplicationNotFoundError
         if schedule.duration_minutes is None:
             return TutorSlotsResponse(
                 tutor_id=schedule.tutor_id,
+                offering_id=offering_id,
                 time_zone=schedule.time_zone,
                 slots=[],
             )
@@ -1023,11 +1173,16 @@ class MarketplaceDiscoveryService:
             limit=limit,
             busy_intervals=calendar.intervals
             + await self._internal_busy(
-                tutor_id=schedule.tutor_id, starts_at=starts_at, ends_at=ends_at
+                tutor_id=schedule.tutor_id,
+                starts_at=starts_at,
+                ends_at=ends_at,
+                buffer_before_minutes=schedule.buffer_before_minutes,
+                buffer_after_minutes=schedule.buffer_after_minutes,
             ),
         )
         return TutorSlotsResponse(
             tutor_id=schedule.tutor_id,
+            offering_id=offering_id,
             time_zone=schedule.time_zone,
             source="manual+google" if calendar.freshness != "not_connected" else "manual",
             slots=[
@@ -1094,6 +1249,8 @@ class MarketplaceDiscoveryService:
         tutor_id: UUID,
         starts_at: datetime,
         ends_at: datetime,
+        buffer_before_minutes: int = 0,
+        buffer_after_minutes: int = 0,
         exclude_booking_id: UUID | None = None,
     ) -> tuple[TimeInterval, ...]:
         if self._booking_busy_reader is None:
@@ -1103,6 +1260,8 @@ class MarketplaceDiscoveryService:
             tutor_id=tutor_id,
             starts_at=starts_at,
             ends_at=ends_at,
+            buffer_before_minutes=buffer_before_minutes,
+            buffer_after_minutes=buffer_after_minutes,
             exclude_booking_id=exclude_booking_id,
         )
 
@@ -1172,6 +1331,16 @@ class MarketplaceDiscoveryService:
             rating=tutor.rating,
             rating_count=tutor.rating_count,
             is_favorite=tutor.is_favorite,
+            offerings=[
+                PublicTutorOfferingResponse(
+                    offering_id=offering.offering_id,
+                    title=offering.title,
+                    duration_minutes=cast(Literal[25, 50], offering.duration_minutes),
+                    amount_minor=offering.amount_minor,
+                    currency=cast(Literal["USD"], offering.currency),
+                )
+                for offering in tutor.offerings
+            ],
         )
 
     @staticmethod

@@ -5,17 +5,51 @@
 **Last audited against `main`:** 2026-09-02  
 **Audience:** Product, design, engineering, curriculum, QA, and AI agents
 
-This file defines what GlideLingo is, how the complete product works, and the acceptance criteria for V1. It is a target contract, not a claim that every requirement is already implemented.
+This is the only V1 product document. It defines what GlideLingo is, how the complete product works,
+and the acceptance criteria for V1. It is a target contract, not a claim that every requirement is
+already implemented.
 
 When documents conflict, use this order:
 
 1. This file owns product scope, navigation, feature behavior, and release requirements.
 2. [`docs/learning/LEARNING-STANDARD.md`](docs/learning/LEARNING-STANDARD.md) owns evidence, pedagogy, and mastery claims.
 3. [`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) owns visual tokens and component styling.
-4. [`docs/voice/VOICE-AVATAR-PLATFORM.md`](docs/voice/VOICE-AVATAR-PLATFORM.md) owns the voice/avatar technical rollout.
+4. [`docs/voice/VOICE-AVATAR-PLATFORM.md`](docs/voice/VOICE-AVATAR-PLATFORM.md) owns the voice/avatar technical rollout within this product contract.
 5. [`docs/infra/README.md`](docs/infra/README.md) and linked records own infrastructure decisions.
 
 If implementation changes one of these contracts, update the relevant document in the same pull request.
+
+---
+
+## Intent and scope of this pull request
+
+This pull request establishes one unambiguous V1 product direction before implementation continues.
+It consolidates the product contract into this file and removes the competing product-level source.
+
+This pull request does:
+
+- make `PRODUCT.md` the single V1 product contract;
+- remove the duplicate V1 product-experience document;
+- require a direct OpenAI Realtime voice-only conversation path;
+- define LiveAvatar as the optional, user-selectable **Show tutor** presentation using the same
+  `VoiceSessionSpec` and a clean voice-only fallback;
+- keep curriculum, scoring, evidence, XP, entitlements, and unlocks under deterministic GlideLingo
+  authority;
+- separate session lifecycle, turn state, presentation state, and normalized provider events;
+- preserve the existing `/v1` API convention.
+
+This pull request does not:
+
+- implement voice, avatar, Speak screens, realtime transports, provider adapters, or persistence;
+- add or change runtime dependencies, routes, APIs, database schemas, workers, or infrastructure;
+- select or change production model, voice, pricing, allowance, or retention configuration;
+- enable lesson-tutor, RevenueCat, voice, avatar, or other dormant feature flags;
+- create, rotate, expose, or consume provider credentials or secrets;
+- deploy, release, migrate production data, or make any feature available to learners; or
+- authorize future scaffolding beyond the smallest separately reviewed implementation slice.
+
+The intended merge result is documentation clarity only. Runtime delivery begins in follow-up pull
+requests that satisfy the gates defined here and in the linked technical contracts.
 
 ---
 
@@ -97,8 +131,8 @@ This table prevents target requirements from being mistaken for shipped behavior
 | Learning state | Local persisted lesson/review state and evidence stages exist | Preserve evidence semantics, then add server-backed sync. |
 | Audio | Pre-generated Google TTS assets exist | Keep for authored content; do not confuse it with live conversation audio. |
 | AI tutor | Contextual text tutor exists behind feature flags and Pro gating | Reuse its curriculum grounding and safety boundaries in the live coach. |
-| Voice | No live microphone, streaming STT, or streaming TTS path | Build the staged live voice path defined below. |
-| Avatar | No learner-facing live avatar | Add a lightweight presentation layer after voice quality passes its gate. |
+| Voice | No live microphone or realtime conversation path | Build the direct OpenAI Realtime voice-only baseline defined below. |
+| Avatar | No learner-facing live avatar | Add optional Show tutor presentation without making voice depend on it. |
 | Motivation | Weekly rhythm exists; XP, stars, and achievements do not | Add explicit mechanics without weakening the learning standard. |
 | Progress | `/progress` redirects to Profile | Build a real Progress destination. |
 | Identity/billing | Clerk and RevenueCat foundations exist | Use them for account and entitlement enforcement; no client-only paywalls. |
@@ -366,6 +400,7 @@ Speak MUST show:
 - recent conversations and recap access;
 - Just Talk entry;
 - microphone/device readiness;
+- user-selectable Show tutor when optional avatar presentation is available;
 - clear entitlement status before session launch.
 
 ### 9.3 Guided scenario contract
@@ -385,19 +420,17 @@ Every scenario MUST define:
 
 Examples include greeting someone, ordering coffee, asking where something is, introducing yourself, and making a simple purchase.
 
-### 9.4 Live session states
+### 9.4 Live session, turn, and presentation states
 
-| State | UI meaning |
-|---|---|
-| `ready` | Scenario, goal, mic check, Start. |
-| `listening` | Learner may speak; waveform and stop control visible. |
-| `thinking` | Transcript is finalizing or coach response is being prepared. |
-| `speaking` | Coach audio/avatar response is playing; interrupt control follows mode policy. |
-| `needs_clarification` | Audio/transcript was insufficient; retry or text fallback. |
-| `paused` | Microphone/audio paused without ending evidence state. |
-| `reconnecting` | Transport recovery with visible timeout and safe retry. |
-| `complete` | Goal/evidence recap, corrections, XP, next action. |
-| `error` | Plain-language failure, retry, and safe exit. |
+The UI and durable model MUST keep three state domains separate:
+
+| Domain | States | UI meaning |
+|---|---|---|
+| Session lifecycle | `creating`, `connecting`, `active`, `reconnecting`, `ending`, `ended`, `failed` | Whether the application session is being admitted, connected, used, recovered, or closed. |
+| Turn state while active | `ready`, `listening`, `thinking`, `speaking`, `interrupted` | What the learner and coach are doing inside an active session. |
+| Presentation | `voice-only`, `avatar-connecting`, `avatar-active`, `avatar-failed` | Whether optional Show tutor media is being presented. |
+
+Transcript, response, audio, interruption, scenario-observation, warning, and failure messages are typed events. `needs-clarification`, `goal-observed`, and `needs-repeat` are outcomes/events, not session lifecycle states. Avatar presentation failure MUST NOT mark the session failed while voice remains healthy.
 
 ### 9.5 Conversation behavior
 
@@ -671,59 +704,110 @@ Every tutor/coach request MUST include only the needed context:
 
 ## 16. Voice and avatar platform
 
-### 16.1 Product decision
+### 16.1 Locked product decision
 
-Keep Google-generated static audio for authored lesson content. Add a separate low-latency live path for Speak. The avatar is a presentation layer; conversation quality comes from turn-taking, curriculum grounding, correction policy, and latency.
+GlideLingo has three separate audio concerns. They MUST remain separate because they solve different product problems:
 
-### 16.2 Target live path
+| Experience | Required pipeline | Why |
+|---|---|---|
+| Authored lesson audio | Authored text -> Google Text-to-Speech -> stored/cached audio asset | Deterministic, reusable, fast, inexpensive, and already implemented. |
+| Live AI conversation | Learner microphone <-> OpenAI Realtime audio | One consistent multilingual conversation engine that always works voice-only. |
+| Optional tutor presentation | OpenAI Realtime session -> LiveAvatar LITE -> synchronized tutor media | User-selectable Show tutor presentation over the same conversation contract. |
+| Pronunciation assessment | Learner recording -> separately validated audio evaluator | A transcript or successful conversation does not prove pronunciation quality. |
 
-`Learner microphone -> LiveKit/WebRTC -> Google streaming STT -> GlideLingo orchestration + OpenAI coach -> streaming TTS -> avatar/audio playback`
+Google-generated lesson audio remains the source for static course examples. It MUST NOT be replaced merely to make the live stack uniform.
 
-The complete technical rollout and gates are in [`docs/voice/VOICE-AVATAR-PLATFORM.md`](docs/voice/VOICE-AVATAR-PLATFORM.md).
+OpenAI Realtime is the required live conversation engine. It listens to the learner, manages the spoken turn, creates the response, and returns spoken audio. V1 MUST always provide a direct voice-only conversation path. GlideLingo supplies bounded course/scenario context and remains authoritative for curriculum, scoring, completion, evidence, XP, entitlements, unlocks, and safety policy.
 
-### 16.3 Provider roles
+HeyGen LiveAvatar LITE is the selected optional V1 avatar adapter. When the learner selects **Show tutor**, it may render a lip-synchronized tutor from the same `VoiceSessionSpec`. It is a presentation dependency only: voice MUST continue without it, and neither LiveAvatar nor OpenAI may own learning or entitlement state.
 
-| Layer | V1 role |
+The complete implementation contract, managed-connector path, custom-agent fallback, session lifecycle, security rules, rollout gates, and official sources are in [`docs/voice/VOICE-AVATAR-PLATFORM.md`](docs/voice/VOICE-AVATAR-PLATFORM.md).
+
+### 16.2 End-to-end live experience
+
+1. The learner chooses a guided scenario or Just Talk and may select Show tutor before starting.
+2. GlideLingo verifies access, resolves one authoritative `VoiceSessionSpec`, and supplies only the
+   bounded context required for the selected scenario.
+3. The direct voice-only conversation begins. If Show tutor is selected and available, the optional
+   avatar presentation uses the same session and learning contract.
+4. The UI shows session lifecycle separately from turn and presentation state.
+5. If avatar presentation is unavailable or fails, GlideLingo continues voice-only at a safe turn
+   boundary without duplicating effects.
+6. On end, GlideLingo applies deterministic scenario and evidence rules once, then returns the recap
+   and next action.
+
+OpenAI and LiveAvatar MUST NOT call progress APIs directly, award XP, unlock lessons, decide mastery, authorize entitlement, or silently alter the scenario.
+
+### 16.3 Provider and application ownership
+
+| Layer | Locked V1 responsibility |
 |---|---|
-| Existing Google TTS assets | Deterministic lesson examples and prompts. |
-| LiveKit/WebRTC | Low-latency room/media transport, reconnect, device changes, and session events. |
-| Google streaming STT | Partial/final transcript generation for live turns. |
-| GlideLingo orchestration | Scenario state, curriculum grounding, hints, evidence rules, safety, and provider abstraction. |
-| OpenAI coach model | Level-bounded response and recap generation. |
-| Streaming TTS | Low-latency coach speech; Google remains preferred if latency/quality gates pass. |
-| LiveAvatar LITE or owned renderer | Lip-synced presentation only; must not own tutoring state. |
+| Existing Google TTS assets | Generate and serve deterministic lesson examples and authored prompts. |
+| Expo / Electron client | Mic permission, realtime connection, optional avatar media, captions, learner controls, reconnect and fallback UI. |
+| Public FastAPI API | Authentication, entitlement, usage limits, session creation/end, context assembly, persistence, and authoritative outcomes. |
+| HeyGen LiveAvatar LITE | Optionally render the selected tutor and synchronize it to the OpenAI response when Show tutor is enabled. |
+| OpenAI Realtime | Required multilingual live listening, turn handling, conversation response, spoken output, and supported bounded tool calling. |
+| GlideLingo learning policy | Scenario goal, allowed content, learner level, hints, success rubric, correction rules, evidence, XP, and unlocks. |
+| Audio evaluator | Optional pronunciation/acoustic feedback only after per-language validation. |
 
-### 16.4 Voice requirements
+### 16.4 Platform contract
 
-| ID | Requirement | Release |
-|---|---|---|
-| VOICE-001 | V1 MUST ship a reliable audio-only or lightweight-avatar push-to-talk experience before full duplex. | V1 |
-| VOICE-002 | Provider APIs MUST be behind server-side adapters; secrets MUST never ship in clients. | V1 |
-| VOICE-003 | The system MUST use ephemeral room/session credentials and enforce entitlement/rate limits server-side. | V1 |
-| VOICE-004 | Partial transcript, final transcript, coach response, audio playback, and evidence writes MUST have separate event types. | V1 |
-| VOICE-005 | The learner MUST be able to interrupt/stop coach audio even if full conversational barge-in is not enabled. | V1 |
-| VOICE-006 | V1 latency targets are: visible listening feedback <=150 ms; final transcript after end-of-turn p95 <=1.2 s; first coach audio after final transcript p95 <=2.0 s; total perceived turn gap p95 <=3.0 s. | V1 |
-| VOICE-007 | If a provider misses gates, the adapter MAY change without changing lesson/scenario contracts. | V1 |
-| VOICE-008 | Raw audio retention MUST default off; any diagnostic retention requires consent, encryption, purpose, and deletion window. | V1 |
+The required direct voice path, optional presentation adapter, API shapes, transport, normalized
+events, security rules, and provider rollout gates belong to the subordinate
+[`docs/voice/VOICE-AVATAR-PLATFORM.md`](docs/voice/VOICE-AVATAR-PLATFORM.md) technical contract.
+Every voice API remains under the repository's existing `/v1` convention.
 
-### 16.5 Avatar requirements
+### 16.5 Voice requirements
 
 | ID | Requirement | Release |
 |---|---|---|
-| AVATAR-001 | V1 SHOULD use one owned, stylized coach avatar with idle, listening, thinking, speaking, success, and retry states. | V1 |
-| AVATAR-002 | Avatar rendering MUST degrade to audio + static portrait without ending the conversation. | V1 |
-| AVATAR-003 | Lip sync MAY be viseme/audio driven, but MUST not delay audio playback. | V1 |
-| AVATAR-004 | Avatar persona and voice MUST remain consistent across Home, lessons, and Speak. | V1 |
-| AVATAR-005 | A photoreal external avatar MAY be tested after audio-only turn quality, latency, and unit economics pass. | LATER |
+| VOICE-001 | OpenAI Realtime MUST power a direct voice-only conversation path for every released language; per-language release requires measured understanding, accent, dialect, latency, and safety gates. | V1 |
+| VOICE-002 | Google pre-generated audio MUST remain the authored lesson-audio path. | V1 |
+| VOICE-003 | Provider APIs and long-lived secrets MUST remain server-side; the client receives only short-lived, minimally scoped connection material. | V1 |
+| VOICE-004 | V1 MUST support explicit Start, mute/unmute, interrupt/stop response, End session, captions, and retry/reconnect controls. | V1 |
+| VOICE-005 | Session lifecycle (`creating`, `connecting`, `active`, `reconnecting`, `ending`, `ended`, `failed`) MUST be modeled separately from turn state (`ready`, `listening`, `thinking`, `speaking`, `interrupted`), presentation state, normalized provider events, and authoritative evidence writes. | V1 |
+| VOICE-006 | Raw production audio retention MUST default off. Any diagnostic retention requires explicit consent, encryption, purpose, access control, and deletion window. | V1 |
+| VOICE-007 | No released language may be assumed correct because the provider markets multilingual support; it MUST pass GlideLingo's language-specific evaluation set. | V1 |
+| VOICE-008 | A correct transcript MUST NOT be presented as pronunciation accuracy. | V1 |
+| VOICE-009 | A live-session failure MUST NOT affect authored lesson playback or completion. | V1 |
+| VOICE-010 | Full-duplex/barge-in MAY ship only after learner-pause and interruption tests pass; controlled turns remain the fallback. | V1 |
 
-### 16.6 Scale and cost controls
+### 16.6 Avatar requirements
 
-- Pre-generated course audio stays cacheable and does not consume live-session compute.
-- Live voice sessions MUST be metered by connected minute and active inference/audio second.
-- Rooms MUST terminate after explicit completion, idle timeout, entitlement expiry, or unrecoverable failure.
-- The service MUST enforce per-user concurrency, daily/plan usage, and abuse limits.
-- Cost telemetry MUST attribute STT, model, TTS, transport, and avatar costs per session.
-- A plan must remain margin-positive at its included usage; overage behavior must be explicit before broad launch.
+| ID | Requirement | Release |
+|---|---|---|
+| AVATAR-001 | HeyGen LiveAvatar LITE is the selected optional V1 adapter behind the user-selectable Show tutor control. | V1 |
+| AVATAR-002 | Show tutor MUST use the same `VoiceSessionSpec`, persona, voice, scenario, and learning policy as voice-only; it MUST NOT own course, scoring, evidence, XP, entitlement, or unlock state. | V1 |
+| AVATAR-003 | Show tutor availability and presentation state MUST be modeled separately from session lifecycle and turn state. | V1 |
+| AVATAR-004 | Avatar unavailability or failure MUST stop avatar usage and continue OpenAI voice + captions + static portrait without ending an otherwise healthy conversation. | V1 |
+| AVATAR-005 | Audio playback MUST take priority over video/lip-sync quality; avatar buffering MUST NOT delay the coach response. | V1 |
+| AVATAR-006 | The client MUST expose a pre-session Show tutor control plus reduced-motion, captions, volume, mute, and accessible state labels. | V1 |
+| AVATAR-007 | Avatar, voice, language, and persona IDs MUST be versioned server-side configuration, not hard-coded across screens. | V1 |
+| AVATAR-008 | Every session MUST have an explicit maximum duration and guaranteed provider cleanup. | V1 |
+
+### 16.7 Learning authority and realtime tools
+
+OpenAI may propose a scenario observation or call an allowlisted GlideLingo tool. Deterministic backend code MUST validate the request and remains the only authority that can:
+
+- load bounded learner/course/scenario context;
+- issue a hint or repeat request;
+- record support used;
+- mark an authored scenario goal observed;
+- propose a correction for recap;
+- end a scenario at an allowed transition;
+- create evidence or grant XP after completion rules pass.
+
+OpenAI and LiveAvatar MUST receive only the minimum context required for the current session. Neither provider receives raw Clerk/RevenueCat identity, unrelated history, unrestricted database access, or authority over curriculum, scoring, XP, evidence, entitlements, or unlocks.
+
+### 16.8 Scale, reliability, and cost controls
+
+- Static Google lesson audio remains cacheable and consumes no live-session minutes.
+- Live sessions MUST enforce plan allowance, one active session per learner by default, idle timeout, maximum duration, and server-side rate limits.
+- The provider session MUST stop after completion, cancel, disconnect timeout, allowance expiry, or unrecoverable error.
+- Cost telemetry MUST attribute direct OpenAI Realtime usage, optional LiveAvatar connected minutes/credits, transport, and any fallback provider cost separately to the application session.
+- Start, stop, reconnect, transcript processing, recap, evidence, and XP writes MUST be idempotent.
+- Provider failures MUST emit typed error codes and user-safe recovery actions.
+- A plan MUST remain margin-positive at its included minute allowance before broad rollout.
 
 ---
 
@@ -910,7 +994,7 @@ Before broad V1 launch:
 | Review redirect | Practice / Review | Replace redirect-only page with queue-backed session. |
 | Profile progress summary | Progress | Move learning evidence/activity; leave account/settings in Profile. |
 | Contextual text tutor | Lesson tutor + Speak coach foundation | Keep flags, grounding, and entitlement; separate lesson and live-session contracts. |
-| Pre-generated Google audio | Lesson audio | Keep and cache. Add separate streaming live adapters. |
+| Pre-generated Google audio | Lesson audio | Keep and cache. Live conversation uses a separate direct OpenAI Realtime path with optional LiveAvatar presentation. |
 
 Final route contract:
 
@@ -956,25 +1040,29 @@ Build vertical slices that are independently testable and useful.
 - implement XP ledger, weekly rhythm, achievements, and celebrations;
 - validate duplicate/offline/timezone behavior.
 
-### Slice 4 — Voice without avatar dependency
+### Slice 4 — Direct OpenAI Realtime voice vertical slice
 
-- implement room/session service and push-to-talk;
-- Google streaming STT, grounded coach, streaming TTS;
-- recap, privacy controls, latency/cost telemetry, usage entitlements.
+- implement the authenticated FastAPI session create/end/recap boundary;
+- freeze `VoiceSessionSpec` and separate session lifecycle, turn state, presentation state, and normalized events;
+- connect one Greek guided scenario directly to OpenAI Realtime voice-only;
+- inject bounded course/scenario context and preserve deterministic completion rules;
+- implement captions, controls, cleanup, entitlement, latency, and cost telemetry on physical mobile targets and Electron.
 
-### Slice 5 — Avatar presentation
+### Slice 5 — Optional Show tutor and learning-control gate
 
-- add owned stylized coach states and lip-sync adapter;
-- guarantee audio/static fallback;
-- test avatar value separately from conversation quality.
+- add the user-selectable Show tutor presentation using the same `VoiceSessionSpec`;
+- prove managed-connector tool calls, cancellation, dynamic context, observability, and clean voice-only fallback;
+- keep the LiveAvatar managed connector only if it satisfies the contract;
+- otherwise add the private `services/voice-agent` custom LiveKit participant without changing the client/product contract;
+- add recap, evidence, XP idempotency, transcript retention controls, and per-language evals.
 
 ### Slice 6 — Scale and polish
 
-- load/concurrency testing;
-- provider failover and operational dashboards;
-- accessibility, localization, notification, and subscription-state polish.
+- load/concurrency testing and maximum-duration enforcement;
+- operational dashboards, typed provider errors, and separately metered voice/avatar fallback paths;
+- accessibility, localization, notification, subscription-state, and avatar/persona configuration polish.
 
-Do not begin photoreal avatars, public leaderboards, social features, or additional languages before the complete Greek course + learning loop + reliable voice path meet their gates.
+Do not let optional avatar work delay the complete Greek course, learning loop, or reliable direct voice path. Do not begin public leaderboards, social features, or additional languages before those foundations meet their gates.
 
 ---
 
@@ -1000,13 +1088,17 @@ Do not begin photoreal avatars, public leaderboards, social features, or additio
 ### 24.3 Guided conversation
 
 1. Learner selects a scenario tied to learned capabilities.
-2. Entitlement, mic, and connection are checked before the room begins.
-3. The UI cycles accurately through listening, thinking, and speaking.
-4. The coach stays on level and scenario, honors repeat/slower/hint requests, and avoids constant interruption.
-5. A reconnect does not duplicate turns or XP.
-6. Completion is based on authored goals.
-7. Recap separates successful communication, corrections, support, evidence, and XP.
-8. Avatar failure falls back to audio/static presentation without losing the session.
+2. FastAPI validates identity, entitlement, allowance, scenario version, language configuration, and concurrency before resolving one `VoiceSessionSpec`.
+3. The client receives only expiring connection material and starts the direct OpenAI Realtime voice-only path.
+4. If the learner selects Show tutor and it is available, LiveAvatar renders the tutor without changing the application session, voice, scenario, or learning policy.
+5. The UI accurately presents session lifecycle separately from turn and presentation state.
+6. The coach stays on level and scenario, honors repeat/slower/hint requests, and avoids constant interruption.
+7. The learner can mute, interrupt/stop the coach response, view captions, and end the session.
+8. Show tutor being unselected or unavailable, or avatar failure, uses or returns to OpenAI audio + captions + static portrait without losing an otherwise healthy session or duplicating an applied event.
+9. Cancel, timeout, disconnect, allowance expiry, and normal completion all stop the provider session and prevent orphaned connected-minute cost.
+10. Reconnect, transcript processing, recap, evidence, and XP writes do not duplicate turns or rewards.
+11. Completion is based on authored goals validated by GlideLingo, never by elapsed time or avatar/model assertion alone.
+12. Recap separates successful communication, corrections, support, evidence, XP, and any pronunciation feedback that has independently valid audio evidence.
 
 ### 24.4 Cross-device/offline
 

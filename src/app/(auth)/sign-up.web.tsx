@@ -4,6 +4,7 @@ import { View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
+import { referralAuthReturnPath } from '@/features/affiliates/referral-session';
 import {
   AUTH_CODE_RESEND_SECONDS,
   codeValidationMessage,
@@ -58,7 +59,7 @@ export default function SignUpRoute() {
     setPassword('');
     setConfirmation('');
     setCode('');
-    router.replace('/');
+    router.replace(referralAuthReturnPath());
   };
 
   const createAccount = async () => {

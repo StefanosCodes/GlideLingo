@@ -6,6 +6,9 @@ const rootLayout = readFileSync(new URL('../../../app/_layout.tsx', import.meta.
 const legacyPath = readFileSync(new URL('../../../app/(app)/path.tsx', import.meta.url), 'utf8');
 const legacyReview = readFileSync(new URL('../../../app/(app)/review.tsx', import.meta.url), 'utf8');
 const legacyProgress = readFileSync(new URL('../../../app/(app)/progress.tsx', import.meta.url), 'utf8');
+const webSignIn = readFileSync(new URL('../../../app/(auth)/sign-in.web.tsx', import.meta.url), 'utf8');
+const webSignUp = readFileSync(new URL('../../../app/(auth)/sign-up.web.tsx', import.meta.url), 'utf8');
+const webCallback = readFileSync(new URL('../../../app/sso-callback.web.tsx', import.meta.url), 'utf8');
 
 test('signed-out direct navigation cannot enter any learning, profile, billing, or diagnostics route', () => {
   const protectedBlock = rootLayout.match(/<Stack\.Protected guard=\{signedIn\}>([\s\S]*?)<\/Stack\.Protected>/)?.[1];
@@ -22,6 +25,25 @@ test('root layout waits for Clerk before choosing signed-in or signed-out routes
   assert.match(rootLayout, /<AuthLoadingScreen \/>/);
   assert.match(rootLayout, /testID="auth-session-loading"/);
   assert.doesNotMatch(rootLayout, /const signedIn = isLoaded && isSignedIn && Boolean\(userId\)/);
+});
+
+test('the referral handoff route is public without weakening protected app routes', () => {
+  const signedInBlock = rootLayout.match(/<Stack\.Protected guard=\{signedIn\}>([\s\S]*?)<\/Stack\.Protected>/)?.[1];
+  const signedOutBlock = rootLayout.match(/<Stack\.Protected guard=\{!signedIn\}>([\s\S]*?)<\/Stack\.Protected>/)?.[1];
+  assert.ok(signedInBlock);
+  assert.ok(signedOutBlock);
+  assert.doesNotMatch(signedInBlock, /name=["']referral["']/);
+  assert.doesNotMatch(signedOutBlock, /name=["']referral["']/);
+  assert.match(rootLayout, /<Stack\.Screen name=["']referral["'] \/>/);
+});
+
+test('web sign-in resumes referral state without putting the handoff in an auth redirect', () => {
+  assert.match(webSignIn, /referralAuthReturnPath\(\)/);
+  assert.match(webSignUp, /referralAuthReturnPath\(\)/);
+  assert.match(webCallback, /referralAuthReturnPath\(\)/);
+  assert.doesNotMatch(webSignIn + webSignUp + webCallback, /handoff_token|#handoff=/);
+  assert.match(webSignIn, /router\.replace\(referralAuthReturnPath\(\)\)/);
+  assert.match(webSignUp, /router\.replace\(referralAuthReturnPath\(\)\)/);
 });
 
 test('previously distributed learning routes remain authenticated redirects', () => {

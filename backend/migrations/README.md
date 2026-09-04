@@ -99,3 +99,97 @@ Keep `GLIDELINGO_REVENUECAT_ENABLED=false` and `GLIDELINGO_LESSON_TUTOR_ENABLED=
 least-privileged app public SDK key used by the server's read-only Customer Info request, environment
 filter, and live sandbox evidence are all in place. The development Terraform contract must pin all
 four RevenueCat Secret Manager version numbers before the flag can be enabled.
+
+## Affiliate identity and attribution foundation
+
+`004_affiliate_identity_attribution.sql` is the additive, operator-run foundation for the affiliate
+program's server-owned identity, authorization, and attribution boundary. Apply it only after migrations
+`001`–`003`, with the same short-lived DDL operator pattern and `psql --set ON_ERROR_STOP=1`. The API
+does not run this migration at startup. The migration creates no creator, program, version, campaign,
+link, code, membership, offer, commission, ledger, transfer, or payout defaults and makes no provider
+call.
+
+The migration stores Clerk identities only as keyed `affusr_v1_` pseudonymous references. It creates
+explicit creator roles and individually scoped staff capabilities with validity and revocation fields;
+authorization reads those rows on each request, so revocation is effective immediately without waiting
+for the Clerk session to expire. The initial platform `membership_admin` capability must be inserted by
+an authorized migration operator after deriving the principal reference with the same environment-
+specific server key. The public API cannot bootstrap an administrator.
+
+Published program versions are immutable except for one concurrency-serialized transition from an
+open-ended interval to a closed interval; a closed interval cannot be changed again. Overlapping
+published effective intervals are rejected.
+There is no default policy document: an operator-created draft must contain explicit policy, and a
+published version must include every required policy section and a reviewed SHA-256 policy hash. Active
+traffic also requires an explicitly active program, published effective version, active campaign,
+active link, and active creator.
+
+Referral resolution stores only link/campaign/program references and timestamps. It does not store an
+IP address, user agent, email, phone, raw Clerk subject, or raw handoff token. Handoff tokens contain
+256 random bits, are stored only as SHA-256 digests, expire exactly 15 minutes after issuance, and can
+be consumed once. Locked attribution evidence is protected from identifier or lock mutation by a
+database trigger. Membership grants, revocations, attribution binds, and denied capability checks append
+audit records; the runtime role receives no `DELETE`, DDL, program-policy mutation, creator mutation, or
+audit-update privilege.
+
+All four server switches remain false by default:
+
+```dotenv
+GLIDELINGO_AFFILIATES_ENABLED=false
+GLIDELINGO_AFFILIATE_REFERRAL_RESOLUTION_ENABLED=false
+GLIDELINGO_AFFILIATE_ATTRIBUTION_BINDING_ENABLED=false
+GLIDELINGO_AFFILIATE_MEMBERSHIP_ADMIN_ENABLED=false
+GLIDELINGO_AFFILIATE_PRINCIPAL_PSEUDONYM_KEY=
+```
+
+Do not enable any switch until migration `004` is applied through the approved operator, the
+environment-specific pseudonym key is pinned through the server secret mechanism, the exact Clerk
+issuer is configured for authenticated routes, the bootstrap administrator is reviewed, privacy
+retention/rate controls are approved, and the authorization, expiry, replay, locking, and cross-principal
+negative tests pass in that environment. This migration does not authorize offers, discounts, financial
+intake, commission, ledger entries, provider credentials, transfers, or payouts.
+
+## Durable billing event intake
+
+`005_billing_event_intake.sql` is sequenced after affiliate foundation migration `004`. It is additive
+and operator-run; the API and worker never execute DDL. Apply it only through the versioned migration
+operator after `004`. The canonical production runner records both files in numeric order.
+
+The migration creates `billing_event_provider_actor`, `billing_event_inbox`, and
+`billing_event_delivery`. Provider actor identifiers required for a fresh entitlement read are stored
+only as authenticated ciphertext outside the inbox. Inbox identity is unique across provider,
+environment, provider app/account context, and provider event ID. Each reviewed consumer gets one
+delivery row with independent lease, retry, completion, and manual-review state. Inbox and delivery
+records are durable; this slice intentionally adds no deletion or retention procedure.
+
+`glidelingo_app` receives `SELECT`/`INSERT` on the provider-actor and inbox tables plus
+`SELECT`/`INSERT`/`UPDATE` on deliveries. It receives no `DELETE`, ownership, schema `CREATE`, or DDL
+capability. Both the request process and `npm run worker:billing` use that bounded contract. Keep
+`GLIDELINGO_BILLING_EVENT_INTAKE_ENABLED=false` everywhere until migration `005`, provider app/account
+configuration, duplicate/out-of-order/lease/concurrency tests, worker deployment, metrics, alerting,
+and recovery operations are reviewed. Enabling the flag without running the worker durably accepts
+events but leaves deliveries pending.
+
+## Disabled affiliate commission ledger
+
+`007_affiliate_commission_ledger.sql` intentionally leaves migration number `006` available for the
+Tutor lane. It must be inserted into the canonical production runner only after migration `006` is
+merged, so production still applies the complete numeric sequence. The migration is additive, creates
+no policy defaults, and grants the public runtime only `SELECT` on the minimized commission projection.
+Accepted financial facts and commission entries are immutable. Active policy economics and rules are
+immutable; only the same one-way interval closure is permitted so a new policy version can begin at
+the exact half-open boundary and delayed facts still select the historical version. A future
+authenticated and reconciled
+finance worker must receive a separate, narrowly scoped writer role in a later migration before this
+ledger can consume Stripe marketplace facts; the public API identity cannot manufacture money.
+
+Before `GLIDELINGO_AFFILIATE_COMMISSIONS_ENABLED=true`, an operator must create a draft policy and its
+explicit product rules, review each rate in basis points, the half-up rounding rule, and effective
+interval, then activate that immutable version. A future authenticated and reconciled Stripe boundary
+must supply the actual settled currency and minor-unit amount; RevenueCat lifecycle events remain on
+the no-side-effect reconciliation placeholder and cannot create ledger entries. Purchase facts lock
+existing attribution before accruing; refund and refund-reversal facts append exact, chronological
+negations of their named source entries. Contradictory event, transaction, amount, sequence, and
+chronology facts fail for manual review instead of being treated as duplicate success. This slice does
+not create Stripe networking, checkout, static provider pricing, commission policy values, balances,
+transfer instructions, payouts, or provider mutations.

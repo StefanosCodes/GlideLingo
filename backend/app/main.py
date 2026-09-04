@@ -12,7 +12,13 @@ from app.auth.clerk import ClerkTokenVerifier
 from app.auth.router import router as auth_router
 from app.core.config import Settings
 from app.core.errors import (
+    AffiliateConflictError,
+    AffiliateForbiddenError,
+    AffiliateReferralNotFoundError,
+    AffiliateResourceNotFoundError,
+    AffiliateUnavailableError,
     AuthenticationUnavailableError,
+    BillingEventConflictError,
     BillingUnavailableError,
     DependencyUnavailableError,
     InternalErrorMiddleware,
@@ -22,7 +28,13 @@ from app.core.errors import (
     LessonTutorTimeoutError,
     LessonTutorUnavailableError,
     ProRequiredError,
+    affiliate_conflict_handler,
+    affiliate_forbidden_handler,
+    affiliate_referral_not_found_handler,
+    affiliate_resource_not_found_handler,
+    affiliate_unavailable_handler,
     authentication_unavailable_handler,
+    billing_event_conflict_handler,
     billing_unavailable_handler,
     dependency_unavailable_handler,
     lesson_context_not_found_handler,
@@ -37,9 +49,16 @@ from app.core.request_id import REQUEST_ID_HEADER, RequestIdMiddleware
 from app.db.engine import create_database_engine, create_database_probe
 from app.integrations.lesson_tutor.client import GoogleIdentityTokenProvider, LessonTutorHttpClient
 from app.integrations.revenuecat.client import RevenueCatHttpClient
+from app.modules.affiliates.api import admin_router as affiliate_admin_router
+from app.modules.affiliates.api import router as affiliate_router
+from app.modules.affiliates.commission_repository import PostgresAffiliateCommissionRepository
+from app.modules.affiliates.repository import PostgresAffiliateRepository
+from app.modules.affiliates.service import AffiliateService
 from app.modules.billing.repository import PostgresEntitlementRepository
 from app.modules.billing.router import router as billing_router
 from app.modules.billing.service import BillingService
+from app.modules.billing_events.crypto import ProviderActorCipher
+from app.modules.billing_events.repository import PostgresBillingEventRepository
 from app.modules.lesson_tutor.guard import GuardLimits, PostgresLessonTutorGuard
 from app.modules.lesson_tutor.router import router as lesson_tutor_router
 from app.modules.lesson_tutor.service import LessonTutorService
@@ -50,6 +69,7 @@ def create_app(
     *,
     lesson_tutor_service: LessonTutorService | None = None,
     billing_service: BillingService | None = None,
+    affiliate_service: AffiliateService | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings.log_level)
@@ -127,6 +147,30 @@ def create_app(
         webhook_signature_tolerance_seconds=(
             settings.revenuecat_webhook_signature_tolerance_seconds
         ),
+        event_intake_enabled=settings.billing_event_intake_enabled,
+        event_repository=PostgresBillingEventRepository(engine=database_engine),
+        event_provider_account_ref=settings.revenuecat_webhook_app_id,
+        provider_actor_cipher=(
+            ProviderActorCipher(
+                secret=settings.revenuecat_pseudonym_key.get_secret_value().encode()
+            )
+            if settings.revenuecat_pseudonym_key is not None
+            else None
+        ),
+    )
+    application.state.affiliate_service = affiliate_service or AffiliateService(
+        repository=PostgresAffiliateRepository(engine=database_engine),
+        affiliates_enabled=settings.affiliates_enabled,
+        referral_resolution_enabled=settings.affiliate_referral_resolution_enabled,
+        attribution_binding_enabled=settings.affiliate_attribution_binding_enabled,
+        membership_admin_enabled=settings.affiliate_membership_admin_enabled,
+        principal_pseudonym_key=(
+            settings.affiliate_principal_pseudonym_key.get_secret_value().encode()
+            if settings.affiliate_principal_pseudonym_key is not None
+            else None
+        ),
+        commissions_enabled=settings.affiliate_commissions_enabled,
+        commission_repository=PostgresAffiliateCommissionRepository(engine=database_engine),
     )
     application.state.lesson_tutor_service = lesson_tutor_service or LessonTutorService(
         enabled=settings.lesson_tutor_enabled,
@@ -181,7 +225,17 @@ def create_app(
     application.add_exception_handler(LessonTutorConflictError, lesson_tutor_conflict_handler)
     application.add_exception_handler(LessonTutorLimitedError, lesson_tutor_limited_handler)
     application.add_exception_handler(ProRequiredError, pro_required_handler)
+    application.add_exception_handler(BillingEventConflictError, billing_event_conflict_handler)
     application.add_exception_handler(BillingUnavailableError, billing_unavailable_handler)
+    application.add_exception_handler(AffiliateUnavailableError, affiliate_unavailable_handler)
+    application.add_exception_handler(AffiliateForbiddenError, affiliate_forbidden_handler)
+    application.add_exception_handler(
+        AffiliateReferralNotFoundError, affiliate_referral_not_found_handler
+    )
+    application.add_exception_handler(
+        AffiliateResourceNotFoundError, affiliate_resource_not_found_handler
+    )
+    application.add_exception_handler(AffiliateConflictError, affiliate_conflict_handler)
     application.add_middleware(InternalErrorMiddleware)
     application.add_middleware(
         CORSMiddleware,
@@ -196,6 +250,8 @@ def create_app(
     application.include_router(desktop_update_router)
     application.include_router(lesson_tutor_router)
     application.include_router(billing_router)
+    application.include_router(affiliate_router)
+    application.include_router(affiliate_admin_router)
     application.include_router(auth_router)
     return application
 

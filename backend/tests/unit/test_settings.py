@@ -67,6 +67,48 @@ def test_revenuecat_server_authorization_is_disabled_by_default() -> None:
     assert settings.revenuecat_environment == "SANDBOX"
     assert settings.revenuecat_api_key is None
     assert settings.revenuecat_entitlement_freshness_seconds == 900
+    assert settings.billing_event_intake_enabled is False
+
+
+def test_affiliate_foundation_is_fully_disabled_by_default() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.affiliates_enabled is False
+    assert settings.affiliate_referral_resolution_enabled is False
+    assert settings.affiliate_attribution_binding_enabled is False
+    assert settings.affiliate_membership_admin_enabled is False
+    assert settings.affiliate_commissions_enabled is False
+    assert settings.affiliate_principal_pseudonym_key is None
+
+
+def test_affiliate_route_flags_require_the_master_flag() -> None:
+    with pytest.raises(ValidationError, match="master affiliate flag"):
+        Settings(_env_file=None, affiliate_referral_resolution_enabled=True)
+
+
+def test_authenticated_affiliate_routes_require_key_and_clerk() -> None:
+    with pytest.raises(ValidationError, match="pseudonym key"):
+        Settings(_env_file=None, affiliates_enabled=True)
+
+    with pytest.raises(ValidationError, match="Clerk authentication"):
+        Settings(
+            _env_file=None,
+            affiliates_enabled=True,
+            affiliate_attribution_binding_enabled=True,
+            affiliate_principal_pseudonym_key="p" * 32,
+        )
+
+    settings = Settings(
+        _env_file=None,
+        affiliates_enabled=True,
+        affiliate_referral_resolution_enabled=True,
+        affiliate_attribution_binding_enabled=True,
+        affiliate_membership_admin_enabled=True,
+        affiliate_principal_pseudonym_key="p" * 32,
+        clerk_issuer="https://clerk.glidelingo.test",
+        clerk_jwks_url="https://clerk.glidelingo.test/.well-known/jwks.json",
+    )
+    assert settings.affiliates_enabled is True
 
 
 def test_desktop_minimum_supported_version_defaults_to_zero() -> None:
@@ -116,6 +158,54 @@ def test_enabled_revenuecat_accepts_complete_fail_closed_configuration() -> None
 
     assert settings.revenuecat_enabled is True
     assert settings.revenuecat_environment == "PRODUCTION"
+
+
+def test_billing_event_intake_requires_revenuecat_and_scoped_app_id() -> None:
+    with pytest.raises(ValidationError, match="RevenueCat must be enabled"):
+        Settings(_env_file=None, billing_event_intake_enabled=True)
+
+    with pytest.raises(ValidationError, match="webhook app ID"):
+        Settings(
+            _env_file=None,
+            revenuecat_enabled=True,
+            revenuecat_api_key="rcb_public-web-key",
+            revenuecat_pseudonym_key="p" * 32,
+            revenuecat_webhook_authorization="Bearer webhook-secret-value",
+            revenuecat_webhook_signing_secret="s" * 32,
+            billing_event_intake_enabled=True,
+        )
+
+
+def test_billing_event_intake_accepts_complete_scoped_configuration() -> None:
+    settings = Settings(
+        _env_file=None,
+        revenuecat_enabled=True,
+        revenuecat_api_key="rcb_public-web-key",
+        revenuecat_pseudonym_key="p" * 32,
+        revenuecat_webhook_app_id="app_test",
+        revenuecat_webhook_authorization="Bearer webhook-secret-value",
+        revenuecat_webhook_signing_secret="s" * 32,
+        billing_event_intake_enabled=True,
+    )
+
+    assert settings.billing_event_intake_enabled is True
+    assert settings.revenuecat_webhook_app_id == "app_test"
+
+
+def test_affiliate_commissions_require_every_disabled_foundation_gate() -> None:
+    with pytest.raises(ValidationError, match="master affiliate flag"):
+        Settings(_env_file=None, affiliate_commissions_enabled=True)
+
+    settings = Settings(
+        _env_file=None,
+        affiliates_enabled=True,
+        affiliate_commissions_enabled=True,
+        affiliate_principal_pseudonym_key="a" * 32,
+        clerk_issuer="https://clerk.glidelingo.test",
+        clerk_jwks_url="https://clerk.glidelingo.test/.well-known/jwks.json",
+    )
+    assert settings.affiliate_commissions_enabled is True
+    assert settings.billing_event_intake_enabled is False
 
 
 def test_enabled_revenuecat_rejects_overprivileged_project_secret_key() -> None:

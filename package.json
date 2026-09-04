@@ -63,6 +63,7 @@
     "db:down": "docker compose -f infra/compose.yaml down",
     "db:logs": "docker compose -f infra/compose.yaml logs -f db",
     "api": "uv run --directory backend --locked fastapi dev --host 0.0.0.0 --port 8123",
+    "worker:billing": "uv run --directory backend --locked python -m app.workers.billing_events",
     "api:lint": "uv run --directory backend --locked ruff check . && uv run --directory backend --locked ruff format --check .",
     "api:typecheck": "uv run --directory backend --locked mypy app tests",
     "api:test": "uv run --directory backend --locked pytest -m \"not integration and not live_agent\"",

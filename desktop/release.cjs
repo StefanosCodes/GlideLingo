@@ -144,10 +144,12 @@ function validateReleaseEnvironment(environment, platform = process.platform) {
   const apiOrigin = resolveProductionApiOrigin(environment.EXPO_PUBLIC_API_BASE_URL);
   const clerkOrigin = resolveProductionClerkOrigin(environment.GLIDELINGO_CLERK_ORIGIN);
   const { billingMode } = validatePublicBuildConfiguration(environment);
+  const affiliateReferralsEnabled =
+    environment.EXPO_PUBLIC_AFFILIATE_REFERRALS_ENABLED === 'true';
   validateNotarizationCredentials(environment);
   validateReleaseTag(environment.GLIDELINGO_DESKTOP_RELEASE_TAG);
 
-  return { apiOrigin, billingMode, clerkOrigin };
+  return { affiliateReferralsEnabled, apiOrigin, billingMode, clerkOrigin };
 }
 
 function runCommand(command, args, environment) {
@@ -170,7 +172,12 @@ function buildDesktopRelease(
   commandRunner = runCommand,
   platform = process.platform,
 ) {
-  const { apiOrigin, billingMode, clerkOrigin } = validateReleaseEnvironment(environment, platform);
+  const {
+    affiliateReferralsEnabled,
+    apiOrigin,
+    billingMode,
+    clerkOrigin,
+  } = validateReleaseEnvironment(environment, platform);
 
   commandRunner('npm', ['run', 'desktop:export'], environment);
   commandRunner(
@@ -186,6 +193,7 @@ function buildDesktopRelease(
       '--publish',
       'never',
       '--config.forceCodeSigning=true',
+      `--config.extraMetadata.glidelingoAffiliateReferralsEnabled=${affiliateReferralsEnabled}`,
       `--config.extraMetadata.glidelingoApiOrigin=${apiOrigin}`,
       `--config.extraMetadata.glidelingoBillingMode=${billingMode}`,
       `--config.extraMetadata.glidelingoClerkOrigin=${clerkOrigin}`,

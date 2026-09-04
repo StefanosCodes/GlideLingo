@@ -20,8 +20,8 @@ migration_file=""
 command_sql=""
 for argument in "$@"; do
   case "${argument}" in
-    --set=migration_version=*) version="${argument#*=}" ;;
-    --set=migration_checksum=*) checksum="${argument#*=}" ;;
+    --set=migration_version=*) version="${argument#--set=migration_version=}" ;;
+    --set=migration_checksum=*) checksum="${argument#--set=migration_checksum=}" ;;
     --file=*) migration_file="${argument#*=}" ;;
     --command=*) command_sql="${argument#*=}" ;;
   esac
@@ -77,7 +77,8 @@ if find "${state_dir}" -name '*.applied' -print -quit | grep -q .; then
 fi
 
 run_fixture >/dev/null
-test "$(wc -l < "${state_dir}/apply-log" | tr -d ' ')" = "3"
+test "$(wc -l < "${state_dir}/apply-log" | tr -d ' ')" = "5"
+test "$(< "${state_dir}/apply-log")" = $'1\n2\n3\n4\n5'
 before="$(< "${state_dir}/apply-log")"
 run_fixture >/dev/null
 test "$(< "${state_dir}/apply-log")" = "${before}"

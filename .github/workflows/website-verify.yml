@@ -52,6 +52,8 @@ jobs:
           PUBLIC_MAC_CHECKSUM_URL: https://github.com/StefanosCodes/GlideLingo/releases/download/desktop-v0.1.0/SHA256SUMS.txt
           PUBLIC_MAC_VERSION: "0.1.0"
           PUBLIC_MAC_RELEASE_DATE: "2026-08-31"
+          PUBLIC_AFFILIATE_REFERRALS_ENABLED: "true"
+          PUBLIC_REFERRAL_APP_URL: https://app.glidelingo.com/referral
         run: npm run build
       - name: Exercise active production output
         run: npm run test:e2e:built

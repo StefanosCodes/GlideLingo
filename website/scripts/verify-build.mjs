@@ -25,16 +25,18 @@ await Promise.all([
   access(new URL('images/blog/weekly-rhythm-gradient.jpg', root)),
   access(new URL('images/blog/calm-momentum-gradient.jpg', root)),
   access(new URL('images/blog/speaking-confidence-gradient.jpg', root)),
+  access(new URL('referral/index.html', root)),
   access(new URL('_headers', root)),
   access(new URL('robots.txt', root)),
   access(new URL('sitemap-index.xml', root)),
 ]);
 
-const [home, notFound, blog, article, headers, robots] = await Promise.all([
+const [home, notFound, blog, article, referral, headers, robots] = await Promise.all([
   read('index.html'),
   read('404.html'),
   read('blog/index.html'),
   read('blog/why-learning-words-isnt-enough/index.html'),
+  read('referral/index.html'),
   read('_headers'),
   read('robots.txt'),
 ]);
@@ -96,9 +98,16 @@ assert.match(article, /rel="canonical" href="https:\/\/glidelingo\.com\/blog\/wh
 assert.match(article, /Knowing is not yet using/);
 assert.match(article, /The goal is participation/);
 assert.doesNotMatch(blog + article, /https?:\/\/(?!glidelingo\.com|github\.com)/);
+assert.match(referral, /<title>Continue to GlideLingo<\/title>/);
+assert.match(referral, /rel="canonical" href="https:\/\/glidelingo\.com\/referral\/"/);
+assert.match(referral, /content="noindex"/);
+assert.match(referral, /data-referral-enabled="(?:true|false)"/);
+assert.match(referral, /\/scripts\/referral-offer\.js/);
+assert.doesNotMatch(referral, /15%|three monthly|\$\d/);
 assert.match(headers, /Content-Security-Policy:/);
 assert.match(headers, /script-src 'self'/);
 assert.match(headers, /Permissions-Policy:/);
+assert.match(headers, /\/referral\/\*[\s\S]*Referrer-Policy: no-referrer/);
 assert.match(robots, /Sitemap: https:\/\/glidelingo\.com\/sitemap-index\.xml/);
 
 if (active) {

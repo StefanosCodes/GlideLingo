@@ -27,4 +27,4 @@ class RevenueCatWebhookResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    status: Literal["applied", "duplicate", "out_of_order", "ignored"]
+    status: Literal["accepted", "applied", "duplicate", "out_of_order", "ignored"]

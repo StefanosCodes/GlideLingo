@@ -10,6 +10,8 @@ const PRODUCTION_CLERK_ORIGIN = 'https://clerk.glidelingo.com';
 const REVENUECAT_WEB_SDK_ORIGIN = 'https://sdk.revenuecat-static.com';
 const REVENUECAT_BRANDING_ORIGIN = 'https://da08ctfrofx1b.cloudfront.net';
 const AUTH_CALLBACK_PATHS = new Set(['/sign-in', '/sso-callback']);
+const REFERRAL_PATH = '/referral';
+const REFERRAL_HANDOFF_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const AUTH_CALLBACK_DESTINATIONS = new Set([
   `${APP_SCHEME}://${APP_HOST}/sign-in`,
   `${APP_SCHEME}://${APP_HOST}/sso-callback`,
@@ -266,6 +268,118 @@ function mapAuthCallbackToRendererUrl(
   return translated.toString();
 }
 
+function parseReferralAppUrl(targetUrl) {
+  if (typeof targetUrl !== 'string' || targetUrl.length > 128) return null;
+  const match = targetUrl.match(
+    /^glidelingo:\/\/app\/referral\?handoff=([A-Za-z0-9_-]{43})$/,
+  );
+  if (!match) return null;
+
+  let url;
+  try {
+    url = new URL(targetUrl);
+  } catch {
+    return null;
+  }
+  if (
+    !isExactAppUrl(url) ||
+    url.pathname !== REFERRAL_PATH ||
+    url.hash ||
+    !REFERRAL_HANDOFF_PATTERN.test(match[1])
+  ) return null;
+  return url.toString();
+}
+
+function mapReferralAppUrlToRendererUrl(
+  targetUrl,
+  rendererOrigin = PACKAGED_RENDERER_ORIGIN,
+) {
+  const accepted = parseReferralAppUrl(targetUrl);
+  if (!accepted) return null;
+
+  let renderer;
+  try {
+    renderer = new URL(rendererOrigin);
+  } catch {
+    return null;
+  }
+  const isPackagedRenderer = isExactPackagedRendererUrl(renderer);
+  let isDevelopmentRenderer = false;
+  try {
+    isDevelopmentRenderer = Boolean(validateDevelopmentUrl(rendererOrigin));
+  } catch {
+    isDevelopmentRenderer = false;
+  }
+  if (!isPackagedRenderer && !isDevelopmentRenderer) return null;
+
+  const referral = new URL(accepted);
+  const translated = new URL(REFERRAL_PATH, renderer);
+  translated.hash = `handoff=${referral.searchParams.get('handoff')}`;
+  return translated.toString();
+}
+
+function parseSupportedAppUrl(targetUrl, { referralsEnabled = false } = {}) {
+  const authUrl = parseAuthCallbackUrl(targetUrl);
+  if (authUrl) return { kind: 'auth', url: authUrl };
+  if (!referralsEnabled) return null;
+  const referralUrl = parseReferralAppUrl(targetUrl);
+  return referralUrl ? { kind: 'referral', url: referralUrl } : null;
+}
+
+function resolveAffiliateReferralsEnabled({ developmentUrl, environmentValue, packagedValue }) {
+  return developmentUrl
+    ? environmentValue === 'true'
+    : packagedValue === true || packagedValue === 'true';
+}
+
+function findSupportedAppUrl(argv, options) {
+  for (const argument of argv) {
+    const appUrl = parseSupportedAppUrl(argument, options);
+    if (appUrl) return appUrl;
+  }
+  return null;
+}
+
+function mapSupportedAppUrlToRendererUrl(appUrl, rendererOrigin = PACKAGED_RENDERER_ORIGIN) {
+  if (!appUrl || typeof appUrl !== 'object') return null;
+  if (appUrl.kind === 'auth') return mapAuthCallbackToRendererUrl(appUrl.url, rendererOrigin);
+  if (appUrl.kind === 'referral') return mapReferralAppUrlToRendererUrl(appUrl.url, rendererOrigin);
+  return null;
+}
+
+function dispatchSupportedAppUrl(targetUrl, {
+  activateWindow,
+  hasWindow,
+  loadRendererUrl,
+  referralsEnabled = false,
+  rendererOrigin = PACKAGED_RENDERER_ORIGIN,
+  storePendingUrl,
+}) {
+  const acceptedAppUrl = typeof targetUrl === 'string'
+    ? parseSupportedAppUrl(targetUrl, { referralsEnabled })
+    : targetUrl;
+  const rendererUrl = mapSupportedAppUrlToRendererUrl(acceptedAppUrl, rendererOrigin);
+  if (!acceptedAppUrl || !rendererUrl) return false;
+
+  if (!hasWindow()) {
+    storePendingUrl(acceptedAppUrl);
+    return true;
+  }
+
+  activateWindow();
+  loadRendererUrl(rendererUrl);
+  return true;
+}
+
+function redactUrlForLogging(value) {
+  try {
+    const url = new URL(value);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return '[invalid-url]';
+  }
+}
+
 function isSafeExternalUrl(targetUrl) {
   try {
     return new URL(targetUrl).protocol === 'https:';
@@ -427,6 +541,7 @@ module.exports = {
   REVENUECAT_BRANDING_ORIGIN,
   REVENUECAT_WEB_SDK_ORIGIN,
   buildContentSecurityPolicy,
+  dispatchSupportedAppUrl,
   findAuthCallbackUrl,
   isAllowedAuthPopupNavigation,
   isAllowedAuthWindowUrl,
@@ -436,8 +551,15 @@ module.exports = {
   isSafeExternalUrl,
   installAuthPopupNavigationSecurity,
   mapAuthCallbackToRendererUrl,
+  mapReferralAppUrlToRendererUrl,
+  mapSupportedAppUrlToRendererUrl,
   parseAuthCallbackUrl,
+  parseReferralAppUrl,
+  parseSupportedAppUrl,
+  findSupportedAppUrl,
+  redactUrlForLogging,
   resolveRendererPath,
+  resolveAffiliateReferralsEnabled,
   validateDevelopmentUrl,
   validateProductionApiOrigin,
   validateProductionClerkOrigin,

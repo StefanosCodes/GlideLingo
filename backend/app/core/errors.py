@@ -22,6 +22,12 @@ type ErrorCode = Literal[
     "lesson_tutor_limited",
     "pro_required",
     "billing_unavailable",
+    "billing_event_conflict",
+    "affiliate_unavailable",
+    "affiliate_forbidden",
+    "affiliate_referral_not_found",
+    "affiliate_resource_not_found",
+    "affiliate_conflict",
 ]
 
 
@@ -73,6 +79,30 @@ class ProRequiredError(Exception):
 
 class BillingUnavailableError(Exception):
     """Billing cannot currently establish a fresh authorization decision."""
+
+
+class BillingEventConflictError(Exception):
+    """A provider event identity was reused for a conflicting payload."""
+
+
+class AffiliateUnavailableError(Exception):
+    """The affiliate foundation is disabled or cannot safely serve requests."""
+
+
+class AffiliateForbiddenError(Exception):
+    """The authenticated principal lacks an active server-owned capability."""
+
+
+class AffiliateReferralNotFoundError(Exception):
+    """A referral is unknown, inactive, or ineligible for handoff issuance."""
+
+
+class AffiliateResourceNotFoundError(Exception):
+    """An administrative affiliate resource could not be found."""
+
+
+class AffiliateConflictError(Exception):
+    """An affiliate mutation conflicts with active server-owned state."""
 
 
 def error_response(
@@ -163,6 +193,60 @@ async def billing_unavailable_handler(request: Request, _error: Exception) -> JS
         status_code=503,
         code="billing_unavailable",
         message="Billing authorization is unavailable.",
+        request_id=request.state.request_id,
+    )
+
+
+async def billing_event_conflict_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=409,
+        code="billing_event_conflict",
+        message="The provider event identifier conflicts with an earlier payload.",
+        request_id=request.state.request_id,
+    )
+
+
+async def affiliate_unavailable_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=503,
+        code="affiliate_unavailable",
+        message="Affiliate features are unavailable.",
+        request_id=request.state.request_id,
+    )
+
+
+async def affiliate_forbidden_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=403,
+        code="affiliate_forbidden",
+        message="The requested affiliate action is not permitted.",
+        request_id=request.state.request_id,
+    )
+
+
+async def affiliate_referral_not_found_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=404,
+        code="affiliate_referral_not_found",
+        message="The affiliate referral is unavailable.",
+        request_id=request.state.request_id,
+    )
+
+
+async def affiliate_resource_not_found_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=404,
+        code="affiliate_resource_not_found",
+        message="The affiliate resource could not be found.",
+        request_id=request.state.request_id,
+    )
+
+
+async def affiliate_conflict_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=409,
+        code="affiliate_conflict",
+        message="The affiliate request conflicts with active state.",
         request_id=request.state.request_id,
     )
 

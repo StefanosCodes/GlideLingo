@@ -9,6 +9,7 @@ import {
   rotatingTokenNonceFromSsoCallback,
   wasSsoCallbackCancelled,
 } from '@/features/auth/sso-callback-recovery';
+import { referralAuthReturnPath } from '@/features/affiliates/referral-session';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth, useClerk } from '@/providers/clerk-runtime';
 
@@ -39,9 +40,10 @@ export default function SsoCallbackRoute() {
         }
         await signIn.reload({ rotatingTokenNonce });
       }
+      const fallbackRedirectUrl = referralAuthReturnPath();
       await clerk.handleRedirectCallback({
-        signInFallbackRedirectUrl: '/',
-        signUpFallbackRedirectUrl: '/',
+        signInFallbackRedirectUrl: fallbackRedirectUrl,
+        signUpFallbackRedirectUrl: fallbackRedirectUrl,
       });
     };
 

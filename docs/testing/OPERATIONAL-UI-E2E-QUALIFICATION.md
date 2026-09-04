@@ -2,14 +2,14 @@
 
 ## Qualification identity
 
-- As of: 2026-09-04T12:00:10-05:00
+- As of: 2026-09-04T14:35:47-05:00
 - Branch: feat/operational-ui-e2e-stress
 - Base: origin/main at f9de28c922cbfb6ec690a195da5e3081e99df3b3
 - Target: the commit containing this report
 - Target OS: macOS 26.2, Apple Silicon
 - Runtime: Node 24.19.0, Expo 57.0.20, Electron 44, Playwright 1.62.1
 - Local qualification: level 3, operationally qualified
-- CI qualification: job defined; first remote run and branch-protection requirement remain pending
+- CI qualification: level 4, merge-gate enforced
 
 ## Acceptance graph
 
@@ -54,6 +54,8 @@ verify the committed preload, URL, CSP, navigation, and packaged security contra
 | Secure Electron reload remained in session loading | Test configuration | A cached export still embedded the localhost development Clerk origin, which the production CSP correctly blocked | Clear Expo's transform cache whenever switching to the production Electron key |
 | Production key stalled Expo web on localhost | Test configuration | Clerk production keys only accept their production domain, while the web lane runs on localhost | Split the web test key from the production Electron export key and fail preflight when either is absent |
 | Electron logged a missing desktop-update IPC handler after current-main integration | Product lifecycle defect | The preload exposed the update bridge for the production renderer, but main registered handlers only when the macOS updater initialized | Register the same sender-validated IPC contract with a no-effect idle coordinator whenever updating is unavailable |
+| Electron failed to launch on a clean CI runner | Dependency contract | Clerk storage requires electron-store, but the root app received it only as an optional peer dependency | Declare the already-pinned desktop runtime dependency at the root and assert the contract |
+| Clean install rejected the first dependency lock update | Cross-version lock metadata | Local npm 11.6 removed optional native records still required by CI npm 11.19 | Preserve the cross-platform records and prove a full isolated install with CI's exact npm version |
 | Expo export warned before force exit | Upstream tool warning | Expo exit diagnostics showed one remaining MessagePort; the command returned zero and no child process or listener remained | Preserved and documented; matches Expo issue 43890 |
 
 The Expo warning corresponds to the upstream
@@ -78,11 +80,12 @@ uses `E2E_ELECTRON_CLERK_PUBLISHABLE_KEY` only to create a cache-cleared product
 then removes it from the test-process environment. Values are never written to this repository or
 its reports.
 
-## Remaining enforcement step
+## Remote enforcement
 
-The macOS functional job now runs the combined Expo web/Electron command and uploads artifacts on
-failure. It deliberately requires both `GLIDELINGO_CLERK_TEST_PUBLISHABLE_KEY` for localhost and the
-existing production `GLIDELINGO_CLERK_PUBLISHABLE_KEY` for Electron. Both repository variables are
-provisioned without committing their values. A successful remote job has not yet been observed and
-the job is not yet a required branch-protection check. Until both happen, the accurate claim is
-locally operationally qualified, not merge-gate enforced.
+The macOS functional job runs the combined Expo web/Electron command and uploads artifacts on
+failure. It requires both `GLIDELINGO_CLERK_TEST_PUBLISHABLE_KEY` for localhost and the existing
+production `GLIDELINGO_CLERK_PUBLISHABLE_KEY` for Electron; both repository variables are
+provisioned without committing their values. The exact job passed in
+[GitHub Actions run 33909237645](https://github.com/StefanosCodes/GlideLingo/actions/runs/33909237645),
+and `Expo web and Electron functional` is a strict required status check on `main`. No review rule
+or administrator restriction was added as part of that protection.

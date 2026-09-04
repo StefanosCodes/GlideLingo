@@ -161,6 +161,7 @@ test('nested choice and scenario observation IDs reject their exact second locat
     (item) => item.id === 'portable-symbol-choice',
   ).choices;
   choices[1].id = choices[0].id;
+  choices[1].text = choices[0].text;
   await writeFile(missionPath, `${JSON.stringify(mission, null, 2)}\n`);
   const scenarioPath = path.join(packageDirectory, 'scenarios', 'portable-service-scenario.json');
   const scenario = JSON.parse(await readFile(scenarioPath, 'utf8'));
@@ -180,6 +181,10 @@ test('nested choice and scenario observation IDs reject their exact second locat
   assert.ok(duplicateLocations.includes(
     'portability/scenarios/portable-service-scenario.json/successObservations/1/id',
   ));
+  const duplicateChoiceText = result.diagnostics.find((item) =>
+    item.code === 'duplicate-choice'
+    && item.pointer === '/lessons/0/activities/1/choices/1/text');
+  assert.ok(duplicateChoiceText, result.diagnostics.map(formatDiagnostic).join('\n'));
 });
 
 test('an asset path cannot escape the package through an intermediate symlink', async (t) => {
@@ -304,6 +309,26 @@ test('the universal schema set covers every logical record in section 6', async 
   ];
   const available = new Set(await readdir(schemaDirectory));
   for (const name of requiredSchemas) assert.equal(available.has(name), true, `missing ${name}`);
+});
+
+test('precompiled runtime validators are current and contain no runtime code generation', async () => {
+  const generator = path.join(workspaceRoot, 'scripts', 'course-content', 'generate-runtime-validators.mjs');
+  const result = spawnSync(process.execPath, [generator, '--check'], {
+    cwd: workspaceRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  const generated = await readFile(path.join(
+    workspaceRoot,
+    'src/features/course-catalog/loader/course-schema-validators.generated.js',
+  ), 'utf8');
+  const runtimeBoundary = await readFile(path.join(
+    workspaceRoot,
+    'src/features/course-catalog/loader/course-schema-validator.ts',
+  ), 'utf8');
+  const runtimeCompiler = /new Function|ajv\/dist\/(?:2020|core|compile|standalone)/;
+  assert.doesNotMatch(generated, runtimeCompiler);
+  assert.doesNotMatch(runtimeBoundary, runtimeCompiler);
 });
 
 test('the authored scenario is provider-neutral and delegates only by conversationProfileId', async () => {

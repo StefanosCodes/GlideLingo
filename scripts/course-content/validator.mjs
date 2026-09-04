@@ -440,10 +440,14 @@ function checkActivityAnswerContract(activity, diagnostics) {
   const { record, file, pointer } = activity;
   if (record.acceptedChoiceIds) {
     const choiceIds = new Set();
+    const choiceTexts = new Set();
     record.choices.forEach((choice, index) => {
       if (choiceIds.has(choice.id)) {
         diagnostics.push(diagnostic(file, `${pointer}/choices/${index}/id`, 'duplicate-id', `choice ID ${JSON.stringify(choice.id)} is duplicated in this activity`));
       } else choiceIds.add(choice.id);
+      if (choiceTexts.has(choice.text)) {
+        diagnostics.push(diagnostic(file, `${pointer}/choices/${index}/text`, 'duplicate-choice', `choice text ${JSON.stringify(choice.text)} is duplicated in this activity`));
+      } else choiceTexts.add(choice.text);
     });
     record.acceptedChoiceIds.forEach((id, index) => {
       if (choiceIds.has(id)) return;

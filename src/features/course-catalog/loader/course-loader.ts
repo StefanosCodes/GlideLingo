@@ -184,12 +184,15 @@ function parseActivity(value: unknown, path: string): ActivityRecord {
   if (rendererType === 'listen_choose' || rendererType === 'script_recognition') {
     const choices = array(item.choices, `${path}/choices`);
     const choiceIds = new Set<string>();
+    const choiceTexts = new Set<string>();
     choices.forEach((choice, index) => {
       const parsed = record(choice, `${path}/choices/${index}`);
       const choiceId = string(parsed.id, `${path}/choices/${index}/id`);
       if (choiceIds.has(choiceId)) fail(`${path}/choices/${index}/id`, `duplicate choice ID ${JSON.stringify(choiceId)}`);
       choiceIds.add(choiceId);
-      string(parsed.text, `${path}/choices/${index}/text`);
+      const choiceText = string(parsed.text, `${path}/choices/${index}/text`);
+      if (choiceTexts.has(choiceText)) fail(`${path}/choices/${index}/text`, `duplicate choice text ${JSON.stringify(choiceText)}`);
+      choiceTexts.add(choiceText);
     });
     stringArray(item.acceptedChoiceIds, `${path}/acceptedChoiceIds`);
   }

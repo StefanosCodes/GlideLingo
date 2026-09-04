@@ -114,6 +114,28 @@ test('the loader rejects duplicate IDs and unresolved references before exposing
     /choices\/1\/id: duplicate choice ID/,
   );
 
+  const duplicateChoiceTextSource = structuredClone(enElGrPackageSource);
+  const duplicateChoiceTexts = (duplicateChoiceTextSource.missions[0] as {
+    lessons: { activities: { choices?: { text: string }[] }[] }[];
+  }).lessons[0].activities.find((activity) => activity.choices)?.choices;
+  expect(duplicateChoiceTexts).toBeDefined();
+  if (!duplicateChoiceTexts) return;
+  duplicateChoiceTexts[1].text = duplicateChoiceTexts[0].text;
+  expect(() => loadCoursePackage(duplicateChoiceTextSource, { publicationPolicy: 'include-drafts' })).toThrow(
+    /choices\/1\/text: duplicate choice text/,
+  );
+
+  const multipleAnswersSource = structuredClone(enElGrPackageSource);
+  const multipleAnswers = (multipleAnswersSource.missions[0] as {
+    lessons: { activities: { acceptedChoiceIds?: string[] }[] }[];
+  }).lessons[0].activities.find((activity) => activity.acceptedChoiceIds)?.acceptedChoiceIds;
+  expect(multipleAnswers).toBeDefined();
+  if (!multipleAnswers) return;
+  multipleAnswers.push('choice-epsilon');
+  expect(() => loadCoursePackage(multipleAnswersSource, { publicationPolicy: 'include-drafts' })).toThrow(
+    /acceptedChoiceIds: must NOT have more than 1 items/,
+  );
+
   const missingReferenceSource = structuredClone(enElGrPackageSource);
   const missingReferenceMission = missingReferenceSource.missions[0] as {
     lessons: { activities: { audioId?: string }[] }[];

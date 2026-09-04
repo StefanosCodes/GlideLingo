@@ -39,16 +39,15 @@ AI may help create course packages during authoring. AI must not invent the offi
 
 ## 3. Current repository reality
 
-The existing repository proves important pieces but is not yet the complete skeleton:
+The consolidated Course MVP now implements the deterministic package and runtime boundary, while later content population and publication remain incomplete:
 
 - `src/constants/catalog.ts` contains Greek, Spanish, and French language metadata plus one Greek A0–A1 catalog with 12 modules and 26 lesson records.
-- Only `content/courses/en-el-GR/missions/el-letters-1.json` contains a substantially authored lesson package.
-- Most remaining lesson records contain only ID, title, and duration.
+- `content/courses/en-el-GR/` contains one schema-valid authored golden lesson; all catalog-only lesson records are explicit unavailable placeholders.
 - `src/features/learning-session/` renders the current lesson blocks/beats and provides saved audio playback.
 - `src/features/learning-progress/` contains early deterministic evidence and rhythm policies.
 - `content/courses/en-el-GR/` already has audio profiles, manifest, lock file, and generated-asset flow.
-- Course definitions are still split between TypeScript constants and one loosely coupled mission JSON file.
-- There is no universal schema set, publication manifest, capability graph validator, generic content loader, or complete mission/checkpoint/scenario package.
+- Canonical Course v1 schemas, publication metadata, exact validation, a precompiled runtime schema boundary, and typed lookup maps are implemented.
+- The compatibility catalog still supplies placeholder roadmap metadata around the single authored package; additional authored packages require explicit static registration.
 
 A lesson title in the catalog is a placeholder, not a releasable lesson.
 
@@ -599,7 +598,7 @@ The skill invokes deterministic scripts. It must not duplicate validator logic i
 
 ## 12. Proposed implementation locations
 
-No runtime code is added by this documentation PR. The implementation should use these boundaries:
+The Course MVP implements these runtime and authoring boundaries; later slices should extend them without bypassing validation:
 
 ~~~text
 content/

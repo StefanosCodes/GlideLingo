@@ -1,16 +1,21 @@
 """Typed application configuration loaded from the process environment."""
 
 import re
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 from urllib.parse import urlsplit
 
-from pydantic import AliasChoices, Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, SecretStr, StringConstraints, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_DATABASE_URL = (
     "postgresql+psycopg://glidelingo:glidelingo_dev_only@127.0.0.1:55433/glidelingo"
 )
 DESKTOP_APP_ORIGIN = "https://desktop.glidelingo.com"
+NUMERIC_SEMVER_PATTERN = r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
+NumericSemVer = Annotated[
+    str,
+    StringConstraints(max_length=64, pattern=NUMERIC_SEMVER_PATTERN),
+]
 
 
 class Settings(BaseSettings):
@@ -31,6 +36,7 @@ class Settings(BaseSettings):
         DESKTOP_APP_ORIGIN,
     )
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    desktop_minimum_supported_version: NumericSemVer = "0.0.0"
     database_pool_size: int = Field(default=5, ge=1, le=20)
     database_max_overflow: int = Field(default=5, ge=0, le=20)
     database_pool_timeout_seconds: float = Field(default=3.0, gt=0, le=30)

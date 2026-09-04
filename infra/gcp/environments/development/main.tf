@@ -348,6 +348,11 @@ resource "google_cloud_run_v2_service" "api" {
       }
 
       env {
+        name  = "GLIDELINGO_DESKTOP_MINIMUM_SUPPORTED_VERSION"
+        value = var.desktop_minimum_supported_version
+      }
+
+      env {
         name  = "GLIDELINGO_LESSON_TUTOR_SERVICE_URL"
         value = google_cloud_run_v2_service.tutor.uri
       }

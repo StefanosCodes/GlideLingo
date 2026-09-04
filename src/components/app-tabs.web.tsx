@@ -1,5 +1,6 @@
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { Image } from 'expo-image';
+import { usePathname } from 'expo-router';
 import { Tabs, TabList, TabTrigger, TabSlot, type TabListProps, type TabTriggerSlotProps } from 'expo-router/ui';
 import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
@@ -17,6 +18,9 @@ import {
 
 import { Fonts, Radii } from '@/constants/theme';
 import { useTheme, useThemeController } from '@/hooks/use-theme';
+import { useDesktopUpdate } from '@/features/desktop-update/context';
+import { DesktopUpdateSidebarStatus } from '@/features/desktop-update/desktop-update-view.web';
+import { useLearning } from '@/providers/learning-provider';
 
 const RAIL_WIDTH = 288;
 const COLLAPSED_RAIL_WIDTH = 52;
@@ -25,6 +29,10 @@ const COLLAPSE_BREAKPOINT = 760;
 type PressState = { pressed: boolean; hovered?: boolean };
 
 const CollapsedContext = createContext(false);
+
+export function isVisibleLessonActive(activeLessonId: string | null, pathname: string) {
+  return Boolean(activeLessonId && pathname === '/');
+}
 
 export default function AppTabs() {
   return (
@@ -99,6 +107,15 @@ function Sidebar(props: TabListProps) {
   const collapsed = narrow || userCollapsed;
   const switchingToDark = scheme === 'light';
   const sidebarBg = scheme === 'dark' ? theme.surfaceElevated : theme.backgroundElement;
+  const desktopUpdate = useDesktopUpdate();
+  const reportLessonActive = desktopUpdate?.setLessonActive;
+  const { activeLessonId } = useLearning();
+  const pathname = usePathname();
+
+  useEffect(() => {
+    reportLessonActive?.(isVisibleLessonActive(activeLessonId, pathname));
+    return () => reportLessonActive?.(false);
+  }, [activeLessonId, pathname, reportLessonActive]);
 
   return (
     <CollapsedContext.Provider value={collapsed}>
@@ -152,6 +169,8 @@ function Sidebar(props: TabListProps) {
         <ScrollView showsVerticalScrollIndicator={false} style={styles.nav} contentContainerStyle={styles.navContent}>
           {props.children}
         </ScrollView>
+
+        <DesktopUpdateSidebarStatus collapsed={collapsed} />
 
         <Pressable
           accessibilityLabel={`Switch to ${switchingToDark ? 'dark' : 'light'} mode`}

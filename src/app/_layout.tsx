@@ -25,6 +25,7 @@ import { BillingProvider } from '@/providers/billing-provider';
 import { GlideLingoClerkProvider } from '@/providers/clerk-provider';
 import { useAuth } from '@/providers/clerk-runtime';
 import { LearningProvider } from '@/providers/learning-provider';
+import { DesktopUpdateProvider } from '@/features/desktop-update/desktop-update-provider';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -39,13 +40,15 @@ export default function RootLayout() {
   const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim();
   return (
     <AppThemeProvider>
-      {publishableKey ? (
-        <GlideLingoClerkProvider publishableKey={publishableKey}>
-          <ClerkApp />
-        </GlideLingoClerkProvider>
-      ) : (
-        <MissingClerkConfiguration />
-      )}
+      <DesktopUpdateProvider>
+        {publishableKey ? (
+          <GlideLingoClerkProvider publishableKey={publishableKey}>
+            <ClerkApp />
+          </GlideLingoClerkProvider>
+        ) : (
+          <MissingClerkConfiguration />
+        )}
+      </DesktopUpdateProvider>
     </AppThemeProvider>
   );
 }

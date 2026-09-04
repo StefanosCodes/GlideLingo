@@ -363,6 +363,10 @@ resource "google_cloud_run_v2_service" "api" {
         value = "false"
       }
       env {
+        name  = "GLIDELINGO_DESKTOP_MINIMUM_SUPPORTED_VERSION"
+        value = var.desktop_minimum_supported_version
+      }
+      env {
         name  = "GLIDELINGO_CLERK_ISSUER"
         value = var.clerk_issuer
       }

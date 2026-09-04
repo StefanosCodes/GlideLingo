@@ -13,7 +13,7 @@ function event(sequence: number, type: VoiceSessionEvent['type']): VoiceSessionE
   };
 }
 
-test('keeps lifecycle, turn, and presentation state independent', () => {
+test('keeps lifecycle and turn state independent', () => {
   let state = initialVoiceSessionState();
   expect(state.muted).toBe(true);
   state = voiceSessionReducer(state, { type: 'admitted' });
@@ -22,7 +22,6 @@ test('keeps lifecycle, turn, and presentation state independent', () => {
 
   expect(state.lifecycle).toBe('active');
   expect(state.turn).toBe('speaking');
-  expect(state.presentation).toBe('voice-only');
 
   state = voiceSessionReducer(state, { type: 'connection-lost' });
   expect(state.lifecycle).toBe('reconnecting');

@@ -195,7 +195,7 @@ export class VoiceSessionController {
     try {
       const recap = await this.dependencies.end(
         admission.session_id,
-        { reason, events: this.state.events },
+        { reason, events: transcriptEvents(this.state.events) },
         makeIdempotencyKey('voice-end'),
       );
       this.dispatch({ type: 'ended' });
@@ -268,7 +268,7 @@ export class VoiceSessionController {
     try {
       await this.dependencies.end(
         admission.session_id,
-        { reason, events: this.state.events },
+        { reason, events: transcriptEvents(this.state.events) },
         makeIdempotencyKey('voice-cleanup'),
       );
     } catch {
@@ -289,7 +289,7 @@ function makeIdempotencyKey(prefix: string): string {
 }
 
 export function transcriptEvents(events: VoiceSessionEvent[]): VoiceSessionEvent[] {
-  return events.filter((event) => event.type === 'transcript.final');
+  return events.filter((event) => event.type === 'transcript.final').slice(-256);
 }
 
 async function retryAmbiguousRequest<T>(

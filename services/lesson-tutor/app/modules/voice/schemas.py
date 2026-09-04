@@ -8,11 +8,6 @@ Identifier = Annotated[str, StringConstraints(strip_whitespace=True, min_length=
 SessionDescription = Annotated[str, StringConstraints(min_length=20, max_length=65536)]
 
 
-class VoicePresentationSpec(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    show_tutor: Literal[False] = False
-
-
 class VoiceSessionSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
     course_id: Identifier
@@ -29,7 +24,6 @@ class VoiceSessionSpec(BaseModel):
     correction_policy_version: Identifier
     evidence_policy_version: Identifier
     maximum_duration_seconds: int = Field(default=300, ge=60, le=600)
-    presentation: VoicePresentationSpec = Field(default_factory=VoicePresentationSpec)
 
 
 class CreatePrivateVoiceSessionRequest(BaseModel):
@@ -41,6 +35,7 @@ class CreatePrivateVoiceSessionRequest(BaseModel):
     source_locale: Literal["en"]
     target_locale: Literal["el-GR"]
     conversation_mode: Literal["guided"]
+    captions_enabled: bool
     offer_sdp: SessionDescription
 
     @model_validator(mode="after")

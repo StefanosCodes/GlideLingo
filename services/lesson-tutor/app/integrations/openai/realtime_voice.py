@@ -4,8 +4,13 @@ from typing import Any
 
 from app.modules.voice.schemas import VoiceSessionSpec
 from openai import AsyncOpenAI, NotFoundError
+from openai.types.realtime.realtime_audio_config_param import RealtimeAudioConfigParam
+from openai.types.realtime.realtime_session_create_request_param import (
+    RealtimeSessionCreateRequestParam,
+)
 
 _CALL_LOCATION = re.compile(r"(?:https://api\.openai\.com)?/v1/realtime/calls/([A-Za-z0-9_-]+)$")
+_ACTOR_REF = re.compile(r"^vusr_v1_[A-Za-z0-9_-]{43}$")
 _COMPENSATION_RETRY_DELAYS = (0.0, 0.05, 0.2)
 
 
@@ -28,20 +33,38 @@ class OpenAIRealtimeVoiceAdapter:
         )
 
     async def create_call(
-        self, *, offer_sdp: str, spec: VoiceSessionSpec, instructions: str
+        self,
+        *,
+        actor_ref: str,
+        captions_enabled: bool,
+        offer_sdp: str,
+        spec: VoiceSessionSpec,
+        instructions: str,
     ) -> tuple[str, str, VoiceSessionSpec]:
+        if _ACTOR_REF.fullmatch(actor_ref) is None:
+            raise ValueError("actor_ref must be a voice-scoped pseudonym")
+        audio: RealtimeAudioConfigParam = {"output": {"voice": spec.voice_id}}
+        if captions_enabled:
+            audio["input"] = {
+                "transcription": {
+                    "model": "gpt-4o-mini-transcribe",
+                    "language": spec.target_locale.partition("-")[0],
+                }
+            }
+        session: RealtimeSessionCreateRequestParam = {
+            "type": "realtime",
+            "model": self._model,
+            "instructions": instructions,
+            "max_output_tokens": 300,
+            "output_modalities": ["audio"],
+            "audio": audio,
+            "tracing": None,
+        }
         create_task = asyncio.create_task(
             self._client.realtime.calls.create(
                 sdp=offer_sdp,
-                session={
-                    "type": "realtime",
-                    "model": self._model,
-                    "instructions": instructions,
-                    "max_output_tokens": 300,
-                    "output_modalities": ["audio"],
-                    "audio": {"output": {"voice": spec.voice_id}},
-                    "tracing": None,
-                },
+                session=session,
+                extra_headers={"OpenAI-Safety-Identifier": actor_ref},
             )
         )
         try:

@@ -43,9 +43,18 @@ class VoiceSessionRecord:
     actor_ref: str
     admission: VoiceSessionAdmission
     provider_call_id: str
+    captions_enabled: bool
     cleanup_pending: bool = False
     recap: VoiceSessionRecap | None = None
     expiry_task: asyncio.Task[None] | None = None
+    retained_until: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayEntry[ReplayValue]:
+    fingerprint: str
+    value: ReplayValue
+    expires_at: datetime
 
 
 class VoiceSessionService:
@@ -59,18 +68,27 @@ class VoiceSessionService:
         pseudonym_key: bytes | None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
         cleanup_retry_delays: tuple[float, ...] = (0.0, 0.25, 1.0),
+        retention_seconds: int = 900,
+        maximum_session_records: int = 256,
+        maximum_replay_entries: int = 512,
     ) -> None:
+        if retention_seconds <= 0 or maximum_session_records <= 0 or maximum_replay_entries <= 0:
+            raise ValueError("Voice session retention limits must be positive")
         self._enabled = enabled
         self._gateway = gateway
         self._pseudonym_key = pseudonym_key
         self._now = now
         self._cleanup_retry_delays = cleanup_retry_delays
+        self._retention = timedelta(seconds=retention_seconds)
+        self._maximum_session_records = maximum_session_records
+        self._maximum_replay_entries = maximum_replay_entries
+        self._pending_creates = 0
         self._actor_locks: dict[str, asyncio.Lock] = {}
         self._records: dict[UUID, VoiceSessionRecord] = {}
         self._active_by_actor: dict[str, UUID] = {}
-        self._create_replays: dict[tuple[str, str], tuple[str, VoiceSessionAdmission]] = {}
-        self._reconnect_replays: dict[tuple[UUID, str], tuple[str, VoiceSessionAdmission]] = {}
-        self._end_replays: dict[tuple[UUID, str], tuple[str, VoiceSessionRecap]] = {}
+        self._create_replays: dict[tuple[str, str], ReplayEntry[VoiceSessionAdmission]] = {}
+        self._reconnect_replays: dict[tuple[UUID, str], ReplayEntry[VoiceSessionAdmission]] = {}
+        self._end_replays: dict[tuple[UUID, str], ReplayEntry[VoiceSessionRecap]] = {}
 
     def ensure_available(self) -> None:
         if not self._enabled or self._gateway is None or self._pseudonym_key is None:
@@ -86,28 +104,34 @@ class VoiceSessionService:
     ) -> VoiceSessionAdmission:
         self.ensure_available()
         assert self._gateway is not None and self._pseudonym_key is not None
+        self._prune_state()
         actor_ref = derive_voice_actor_ref(key=self._pseudonym_key, principal=principal)
         fingerprint = self._fingerprint(request)
         async with self._actor_lock(actor_ref):
             replay = self._create_replays.get((actor_ref, idempotency_key))
             if replay is not None:
-                if replay[0] != fingerprint:
+                if replay.fingerprint != fingerprint:
                     raise VoiceSessionConflictError
-                return replay[1]
+                return replay.value
             if actor_ref in self._active_by_actor:
                 raise VoiceSessionConflictError
-            session_id = uuid4()
-            private = PrivateVoiceSessionRequest(
-                actor_ref=actor_ref,
-                application_session_id=session_id,
-                course_id=request.course_id,
-                scenario_id=request.scenario_id,
-                source_locale=request.source_locale,
-                target_locale=request.target_locale,
-                conversation_mode=request.conversation_mode,
-                offer_sdp=request.offer_sdp,
-            )
-            provider = await self._gateway.create(private, request_id=request_id)
+            self._reserve_record_slot()
+            try:
+                session_id = uuid4()
+                private = PrivateVoiceSessionRequest(
+                    actor_ref=actor_ref,
+                    application_session_id=session_id,
+                    course_id=request.course_id,
+                    scenario_id=request.scenario_id,
+                    source_locale=request.source_locale,
+                    target_locale=request.target_locale,
+                    conversation_mode=request.conversation_mode,
+                    captions_enabled=request.captions_enabled,
+                    offer_sdp=request.offer_sdp,
+                )
+                provider = await self._gateway.create(private, request_id=request_id)
+            finally:
+                self._pending_creates -= 1
             if provider.application_session_id != session_id:
                 await self._safe_stop(actor_ref, session_id, provider.provider_call_id, request_id)
                 raise VoiceSessionUnavailableError
@@ -118,10 +142,17 @@ class VoiceSessionService:
                 spec=provider.spec,
                 connection=VoiceConnection(answer_sdp=provider.answer_sdp),
             )
-            record = VoiceSessionRecord(actor_ref, admission, provider.provider_call_id)
+            record = VoiceSessionRecord(
+                actor_ref=actor_ref,
+                admission=admission,
+                provider_call_id=provider.provider_call_id,
+                captions_enabled=request.captions_enabled,
+            )
             self._records[session_id] = record
             self._active_by_actor[actor_ref] = session_id
-            self._create_replays[(actor_ref, idempotency_key)] = (fingerprint, admission)
+            self._store_replay(
+                self._create_replays, (actor_ref, idempotency_key), fingerprint, admission
+            )
             record.expiry_task = asyncio.create_task(self._expire(session_id))
             return admission
 
@@ -136,15 +167,16 @@ class VoiceSessionService:
     ) -> VoiceSessionAdmission:
         self.ensure_available()
         assert self._gateway is not None and self._pseudonym_key is not None
+        self._prune_state()
         actor_ref = derive_voice_actor_ref(key=self._pseudonym_key, principal=principal)
         fingerprint = hashlib.sha256(offer_sdp.encode()).hexdigest()
         async with self._actor_lock(actor_ref):
             record = self._owned_active(session_id, actor_ref)
             replay = self._reconnect_replays.get((session_id, idempotency_key))
             if replay is not None:
-                if replay[0] != fingerprint:
+                if replay.fingerprint != fingerprint:
                     raise VoiceSessionConflictError
-                return replay[1]
+                return replay.value
             private = PrivateVoiceSessionRequest(
                 actor_ref=actor_ref,
                 application_session_id=session_id,
@@ -153,6 +185,7 @@ class VoiceSessionService:
                 source_locale=record.admission.spec.source_locale,
                 target_locale=record.admission.spec.target_locale,
                 conversation_mode=record.admission.spec.conversation_mode,
+                captions_enabled=record.captions_enabled,
                 offer_sdp=offer_sdp,
             )
             replacement = await self._gateway.create(private, request_id=request_id)
@@ -180,7 +213,9 @@ class VoiceSessionService:
             )
             record.admission = admission
             record.provider_call_id = replacement.provider_call_id
-            self._reconnect_replays[(session_id, idempotency_key)] = (fingerprint, admission)
+            self._store_replay(
+                self._reconnect_replays, (session_id, idempotency_key), fingerprint, admission
+            )
             return admission
 
     async def end(
@@ -194,15 +229,16 @@ class VoiceSessionService:
     ) -> VoiceSessionRecap:
         self.ensure_available()
         assert self._gateway is not None and self._pseudonym_key is not None
+        self._prune_state()
         actor_ref = derive_voice_actor_ref(key=self._pseudonym_key, principal=principal)
         fingerprint = self._fingerprint(request)
         async with self._actor_lock(actor_ref):
             record = self._owned(session_id, actor_ref)
             replay = self._end_replays.get((session_id, idempotency_key))
             if replay is not None:
-                if replay[0] != fingerprint:
+                if replay.fingerprint != fingerprint:
                     raise VoiceSessionConflictError
-                return replay[1]
+                return replay.value
             if any(event.session_id != session_id for event in request.events):
                 raise VoiceSessionConflictError
             if record.recap is not None and not record.cleanup_pending:
@@ -223,15 +259,19 @@ class VoiceSessionService:
                     transcript=transcript,
                 )
             record.cleanup_pending = False
+            record.retained_until = self._now() + self._retention
             self._active_by_actor.pop(actor_ref, None)
             if record.expiry_task is not asyncio.current_task():
                 record.expiry_task and record.expiry_task.cancel()
-            self._end_replays[(session_id, idempotency_key)] = (fingerprint, record.recap)
+            self._store_replay(
+                self._end_replays, (session_id, idempotency_key), fingerprint, record.recap
+            )
             return record.recap
 
     async def recap(self, session_id: UUID, *, principal: ClerkPrincipal) -> VoiceSessionRecap:
         self.ensure_available()
         assert self._pseudonym_key is not None
+        self._prune_state()
         actor_ref = derive_voice_actor_ref(key=self._pseudonym_key, principal=principal)
         async with self._actor_lock(actor_ref):
             record = self._owned(session_id, actor_ref)
@@ -264,6 +304,7 @@ class VoiceSessionService:
                         record.recap = VoiceSessionRecap(
                             session_id=session_id, end_reason="timeout", transcript=[]
                         )
+                        record.retained_until = self._now() + self._retention
                         self._active_by_actor.pop(record.actor_ref, None)
                         return
                     record.cleanup_pending = True
@@ -319,6 +360,82 @@ class VoiceSessionService:
 
     def _actor_lock(self, actor_ref: str) -> asyncio.Lock:
         return self._actor_locks.setdefault(actor_ref, asyncio.Lock())
+
+    def _reserve_record_slot(self) -> None:
+        required = len(self._records) + self._pending_creates + 1 - self._maximum_session_records
+        if required > 0:
+            evictable = sorted(
+                (
+                    record
+                    for record in self._records.values()
+                    if record.recap is not None and not record.cleanup_pending
+                ),
+                key=lambda record: record.retained_until or datetime.min.replace(tzinfo=UTC),
+            )
+            for record in evictable[:required]:
+                self._evict_record(record.admission.session_id)
+        if len(self._records) + self._pending_creates >= self._maximum_session_records:
+            raise VoiceSessionUnavailableError
+        self._pending_creates += 1
+
+    def _prune_state(self) -> None:
+        now = self._now()
+        self._prune_replay_map(self._create_replays, now)
+        self._prune_replay_map(self._reconnect_replays, now)
+        self._prune_replay_map(self._end_replays, now)
+        expired = [
+            session_id
+            for session_id, record in self._records.items()
+            if record.recap is not None
+            and not record.cleanup_pending
+            and record.retained_until is not None
+            and record.retained_until <= now
+        ]
+        for session_id in expired:
+            self._evict_record(session_id)
+        retained_actors = {record.actor_ref for record in self._records.values()}
+        retained_actors.update(actor_ref for actor_ref, _key in self._create_replays)
+        for actor_ref, lock in tuple(self._actor_locks.items()):
+            if actor_ref not in retained_actors and not lock.locked():
+                self._actor_locks.pop(actor_ref, None)
+
+    def _evict_record(self, session_id: UUID) -> None:
+        record = self._records.pop(session_id, None)
+        if record is None:
+            return
+        self._active_by_actor.pop(record.actor_ref, None)
+        for create_key, replay in tuple(self._create_replays.items()):
+            if replay.value.session_id == session_id:
+                self._create_replays.pop(create_key, None)
+        for reconnect_key in tuple(self._reconnect_replays):
+            if reconnect_key[0] == session_id:
+                self._reconnect_replays.pop(reconnect_key, None)
+        for end_key in tuple(self._end_replays):
+            if end_key[0] == session_id:
+                self._end_replays.pop(end_key, None)
+
+    def _store_replay[ReplayKey, ReplayValue](
+        self,
+        replays: dict[ReplayKey, ReplayEntry[ReplayValue]],
+        key: ReplayKey,
+        fingerprint: str,
+        value: ReplayValue,
+    ) -> None:
+        now = self._now()
+        replays[key] = ReplayEntry(fingerprint, value, now + self._retention)
+        self._prune_replay_map(replays, now)
+
+    def _prune_replay_map[ReplayKey, ReplayValue](
+        self, replays: dict[ReplayKey, ReplayEntry[ReplayValue]], now: datetime
+    ) -> None:
+        for key, replay in tuple(replays.items()):
+            if replay.expires_at <= now:
+                replays.pop(key, None)
+        overflow = len(replays) - self._maximum_replay_entries
+        if overflow > 0:
+            oldest = sorted(replays, key=lambda key: replays[key].expires_at)[:overflow]
+            for key in oldest:
+                replays.pop(key, None)
 
     @staticmethod
     def _fingerprint(request: CreateVoiceSessionRequest | EndVoiceSessionRequest) -> str:

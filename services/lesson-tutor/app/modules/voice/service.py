@@ -14,7 +14,13 @@ from app.modules.voice.schemas import (
 
 class VoiceRealtimeAdapter(Protocol):
     async def create_call(
-        self, *, offer_sdp: str, spec: VoiceSessionSpec, instructions: str
+        self,
+        *,
+        actor_ref: str,
+        captions_enabled: bool,
+        offer_sdp: str,
+        spec: VoiceSessionSpec,
+        instructions: str,
     ) -> tuple[str, str, VoiceSessionSpec]: ...
 
     async def hangup(self, *, provider_call_id: str) -> None: ...
@@ -71,6 +77,8 @@ class VoiceRealtimeService:
                 resolved = self._scenario_resolver.resolve(request, voice_id=self._voice_id)
                 self._validate_resolution(request, resolved)
                 call_id, answer_sdp, spec = await self._adapter.create_call(
+                    actor_ref=request.actor_ref,
+                    captions_enabled=request.captions_enabled,
                     offer_sdp=request.offer_sdp,
                     spec=resolved.spec,
                     instructions=resolved.instructions,

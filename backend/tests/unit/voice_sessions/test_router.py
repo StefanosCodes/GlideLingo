@@ -24,7 +24,6 @@ PAYLOAD = {
     "target_locale": "el-GR",
     "captions_enabled": True,
     "retain_transcript": False,
-    "show_tutor": False,
     "offer_sdp": "v=0\r\na=offer-data-for-router-test",
     "client_capabilities": ["audio", "captions", "interrupt", "reconnect"],
 }
@@ -58,11 +57,13 @@ class Gateway:
     def __init__(self) -> None:
         self.creates = 0
         self.ends = 0
+        self.last_create: PrivateVoiceSessionRequest | None = None
 
     async def create(
         self, payload: PrivateVoiceSessionRequest, *, request_id: str
     ) -> PrivateVoiceSessionResponse:
         self.creates += 1
+        self.last_create = payload
         return PrivateVoiceSessionResponse(
             application_session_id=payload.application_session_id,
             provider_call_id="call_router_1",
@@ -82,7 +83,6 @@ class Gateway:
                 correction_policy_version="gentle-recast-v1",
                 evidence_policy_version="conversation-observation-v1",
                 maximum_duration_seconds=300,
-                presentation={"show_tutor": False},
             ),
         )
 
@@ -129,6 +129,10 @@ def test_entitlement_is_admission_only_and_cannot_block_cleanup_or_recap() -> No
     assert recap.json() == ended.json()
     assert gateway.creates == 1
     assert gateway.ends == 1
+    assert gateway.last_create is not None
+    assert gateway.last_create.captions_enabled is True
+    assert gateway.last_create.actor_ref.startswith("vusr_v1_")
+    assert "user_voice_router" not in gateway.last_create.actor_ref
     assert billing.calls == 1
 
 
@@ -158,7 +162,7 @@ def test_disabled_flag_fails_before_billing_or_provider() -> None:
     assert gateway.creates == 0
 
 
-def test_malformed_sdp_and_transcript_retention_are_rejected() -> None:
+def test_malformed_sdp_retention_and_removed_presentation_fields_are_rejected() -> None:
     application, gateway, _billing = make_app()
     with TestClient(application) as client:
         bad_sdp = client.post(
@@ -171,6 +175,12 @@ def test_malformed_sdp_and_transcript_retention_are_rejected() -> None:
             json={**PAYLOAD, "retain_transcript": True},
             headers=HEADERS,
         )
+        removed_presentation = client.post(
+            "/v1/voice-sessions",
+            json={**PAYLOAD, "show_tutor": False},
+            headers=HEADERS,
+        )
     assert bad_sdp.status_code == 422
     assert retention.status_code == 422
+    assert removed_presentation.status_code == 422
     assert gateway.creates == 0

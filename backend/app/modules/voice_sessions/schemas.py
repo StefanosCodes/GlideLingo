@@ -26,11 +26,6 @@ type VoiceEventType = Literal[
 ]
 
 
-class VoicePresentationSpec(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    show_tutor: Literal[False] = False
-
-
 class VoiceSessionSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
     course_id: Identifier
@@ -47,7 +42,6 @@ class VoiceSessionSpec(BaseModel):
     correction_policy_version: Identifier
     evidence_policy_version: Identifier
     maximum_duration_seconds: int = Field(ge=60, le=600)
-    presentation: VoicePresentationSpec
 
 
 class CreateVoiceSessionRequest(BaseModel):
@@ -59,7 +53,6 @@ class CreateVoiceSessionRequest(BaseModel):
     target_locale: Literal["el-GR"]
     captions_enabled: bool
     retain_transcript: Literal[False]
-    show_tutor: Literal[False]
     offer_sdp: SessionDescription
     client_capabilities: Annotated[
         list[Literal["audio", "captions", "interrupt", "reconnect"]],

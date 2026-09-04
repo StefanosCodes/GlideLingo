@@ -21,6 +21,7 @@ def request() -> CreatePrivateVoiceSessionRequest:
         source_locale="en",
         target_locale="el-GR",
         conversation_mode="guided",
+        captions_enabled=True,
         offer_sdp="v=0\r\na=offer-data-for-service-test",
     )
 
@@ -30,8 +31,16 @@ class Adapter:
         self.hangups: list[str] = []
 
     async def create_call(
-        self, *, offer_sdp: str, spec: VoiceSessionSpec, instructions: str
+        self,
+        *,
+        actor_ref: str,
+        captions_enabled: bool,
+        offer_sdp: str,
+        spec: VoiceSessionSpec,
+        instructions: str,
     ) -> tuple[str, str, VoiceSessionSpec]:
+        assert actor_ref == request().actor_ref
+        assert captions_enabled is True
         assert offer_sdp.startswith("v=0")
         assert instructions == "course-owned bounded Greek prompt"
         return "call_service_1", "v=0\r\na=answer-data-for-service-test", spec
@@ -123,7 +132,13 @@ def test_request_rejects_malformed_sdp() -> None:
 def test_provider_cancellation_is_not_reclassified_or_retried() -> None:
     class CancelledAdapter(Adapter):
         async def create_call(
-            self, *, offer_sdp: str, spec: VoiceSessionSpec, instructions: str
+            self,
+            *,
+            actor_ref: str,
+            captions_enabled: bool,
+            offer_sdp: str,
+            spec: VoiceSessionSpec,
+            instructions: str,
         ) -> tuple[str, str, VoiceSessionSpec]:
             raise asyncio.CancelledError
 

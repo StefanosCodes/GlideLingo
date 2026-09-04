@@ -14,8 +14,6 @@ export type VoiceTurnState =
   | 'speaking'
   | 'interrupted';
 
-export type VoicePresentationState = 'voice-only';
-
 export type VoiceSessionSpec = {
   course_id: string;
   course_version: string;
@@ -31,7 +29,6 @@ export type VoiceSessionSpec = {
   correction_policy_version: string;
   evidence_policy_version: string;
   maximum_duration_seconds: number;
-  presentation: { show_tutor: false };
 };
 
 export type VoiceSessionEventType =

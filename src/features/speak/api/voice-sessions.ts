@@ -15,7 +15,6 @@ export type StartVoiceSession = {
   target_locale: 'el-GR';
   captions_enabled: boolean;
   retain_transcript: false;
-  show_tutor: false;
   offer_sdp: string;
   client_capabilities: ('audio' | 'captions' | 'interrupt' | 'reconnect')[];
 };
@@ -144,7 +143,6 @@ function parseAdmission(value: unknown): VoiceSessionAdmission | null {
 }
 
 function parseSpec(value: Record<string, unknown>): VoiceSessionSpec | null {
-  if (!isRecord(value.presentation) || value.presentation.show_tutor !== false) return null;
   const strings = [
     'course_id',
     'course_version',

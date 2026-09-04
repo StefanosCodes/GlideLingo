@@ -20,6 +20,7 @@ SPEC = VoiceSessionSpec(
     evidence_policy_version="conversation-observation-v1",
 )
 INSTRUCTIONS = "course-owned bounded prompt that never claims mastery"
+ACTOR_REF = "vusr_v1_" + "a" * 43
 
 
 class FakeCalls:
@@ -65,6 +66,8 @@ def test_creates_audio_only_call_and_retains_cleanup_reference() -> None:
     async def run() -> None:
         subject, client = adapter()
         call_id, answer, spec = await subject.create_call(
+            actor_ref=ACTOR_REF,
+            captions_enabled=True,
             offer_sdp="v=0\r\na=offer-data-for-private-test",
             spec=SPEC,
             instructions=INSTRUCTIONS,
@@ -78,8 +81,15 @@ def test_creates_audio_only_call_and_retains_cleanup_reference() -> None:
         assert session["model"] == "configured-realtime-model"
         assert session["output_modalities"] == ["audio"]
         assert session["tracing"] is None
-        assert "extra_headers" not in client.calls.create_kwargs
-        assert "vusr_v1_" not in str(client.calls.create_kwargs)
+        assert client.calls.create_kwargs["extra_headers"] == {
+            "OpenAI-Safety-Identifier": ACTOR_REF
+        }
+        assert "user_voice" not in str(client.calls.create_kwargs)
+        audio = session["audio"]
+        assert isinstance(audio, dict)
+        assert audio["input"] == {
+            "transcription": {"model": "gpt-4o-mini-transcribe", "language": "el"}
+        }
         assert "mastery" in str(session["instructions"])
 
     asyncio.run(run())
@@ -98,6 +108,8 @@ def test_rejects_call_response_without_a_cleanup_location() -> None:
         client.calls.create = missing_location  # type: ignore[method-assign]
         with pytest.raises(ValueError, match="invalid Realtime call response"):
             await subject.create_call(
+                actor_ref=ACTOR_REF,
+                captions_enabled=True,
                 offer_sdp="v=0\r\na=offer-data-for-private-test",
                 spec=SPEC,
                 instructions=INSTRUCTIONS,
@@ -120,6 +132,8 @@ def test_malformed_answer_hangs_up_a_call_with_a_known_reference() -> None:
         client.calls.hangup_failures = 1
         with pytest.raises(ValueError, match="invalid Realtime call response"):
             await subject.create_call(
+                actor_ref=ACTOR_REF,
+                captions_enabled=True,
                 offer_sdp="v=0\r\na=offer-data-for-private-test",
                 spec=SPEC,
                 instructions=INSTRUCTIONS,
@@ -143,6 +157,8 @@ def test_exhausted_compensation_is_retained_and_retried_on_close() -> None:
         client.calls.hangup_failures = 3
         with pytest.raises(ValueError, match="invalid Realtime call response"):
             await subject.create_call(
+                actor_ref=ACTOR_REF,
+                captions_enabled=True,
                 offer_sdp="v=0\r\na=offer-data-for-private-test",
                 spec=SPEC,
                 instructions=INSTRUCTIONS,
@@ -180,6 +196,8 @@ def test_cancellation_after_provider_creation_performs_compensating_hangup() -> 
         client.realtime.calls = calls
         operation = asyncio.create_task(
             subject.create_call(
+                actor_ref=ACTOR_REF,
+                captions_enabled=True,
                 offer_sdp="v=0\r\na=offer-data-for-private-test",
                 spec=SPEC,
                 instructions=INSTRUCTIONS,
@@ -202,6 +220,38 @@ def test_hangup_uses_only_the_provider_call_reference() -> None:
         assert client.calls.hangups == ["call_private_1"]
 
     asyncio.run(run())
+
+
+def test_disabled_captions_omit_input_transcription() -> None:
+    async def run() -> None:
+        subject, client = adapter()
+        await subject.create_call(
+            actor_ref=ACTOR_REF,
+            captions_enabled=False,
+            offer_sdp="v=0\r\na=offer-data-for-private-test",
+            spec=SPEC,
+            instructions=INSTRUCTIONS,
+        )
+        assert client.calls.create_kwargs is not None
+        session = client.calls.create_kwargs["session"]
+        assert isinstance(session, dict)
+        assert session["audio"] == {"output": {"voice": "configured-voice"}}
+
+    asyncio.run(run())
+
+
+def test_rejects_raw_identity_at_the_openai_boundary() -> None:
+    subject, _client = adapter()
+    with pytest.raises(ValueError, match="voice-scoped pseudonym"):
+        asyncio.run(
+            subject.create_call(
+                actor_ref="user_voice_test",
+                captions_enabled=True,
+                offer_sdp="v=0\r\na=offer-data-for-private-test",
+                spec=SPEC,
+                instructions=INSTRUCTIONS,
+            )
+        )
 
 
 def test_close_reports_exhausted_pending_cleanup() -> None:

@@ -24,7 +24,6 @@ const ADMISSION: VoiceSessionAdmission = {
     correction_policy_version: 'gentle-recast-v1',
     evidence_policy_version: 'conversation-observation-v1',
     maximum_duration_seconds: 300,
-    presentation: { show_tutor: false },
   },
   connection: { type: 'openai-webrtc-sdp', answer_sdp: 'v=0\r\na=answer' },
 };
@@ -37,7 +36,6 @@ const REQUEST = {
   target_locale: 'el-GR' as const,
   captions_enabled: true,
   retain_transcript: false as const,
-  show_tutor: false as const,
   client_capabilities: ['audio', 'captions', 'interrupt', 'reconnect'] as const,
 };
 
@@ -373,9 +371,58 @@ test('interrupt, mute, event normalization, and end cleanup stay independently o
   expect(setMuted).toHaveBeenCalledWith(true);
   expect(close).toHaveBeenCalledTimes(1);
   const endEvents = end.mock.calls[0]?.[1].events ?? [];
-  expect(endEvents.map((event) => event.type)).toEqual([
-    'transcript.final',
-    'response.interrupted',
-  ]);
+  expect(endEvents.map((event) => event.type)).toEqual(['transcript.final']);
   expect(controller.snapshot.lifecycle).toBe('ended');
+});
+
+test('end drops partial transcripts and sends at most 256 final events', async () => {
+  const media = mediaFakes();
+  let rawEvent: ((event: unknown) => void) | undefined;
+  const end = jest.fn(async (_sessionId: string, request: { events: VoiceSessionEvent[] }) => ({
+    session_id: ADMISSION.session_id,
+    lifecycle: 'ended' as const,
+    end_reason: 'cancelled' as const,
+    scenario_completed: false as const,
+    transcript: request.events,
+    evidence: { applied: false as const, reason: 'authored_scenario_evidence_not_integrated' },
+  }));
+  const controller = new VoiceSessionController(jest.fn(), true, {
+    requestMicrophone: jest.fn(async () => media.stream),
+    prepare: jest.fn(async () => media.prepared),
+    create: jest.fn(async () => ADMISSION),
+    connect: jest.fn(async (options: ConnectRealtimeOptions) => {
+      rawEvent = options.onEvent;
+      options.onConnected();
+      return {
+        admission: ADMISSION,
+        close: jest.fn(),
+        interrupt: jest.fn(() => false),
+        setMuted: jest.fn(),
+      };
+    }),
+    reconnect: jest.fn(),
+    end,
+  } as never);
+
+  await controller.start({ ...REQUEST, client_capabilities: [...REQUEST.client_capabilities] });
+  for (let index = 0; index < 300; index += 1) {
+    rawEvent?.({
+      type: 'conversation.item.input_audio_transcription.delta',
+      event_id: `evt_partial_${index}`,
+      delta: 'γ',
+    });
+  }
+  for (let index = 0; index < 300; index += 1) {
+    rawEvent?.({
+      type: 'conversation.item.input_audio_transcription.completed',
+      event_id: `evt_final_${index}`,
+      transcript: `τελικό ${index}`,
+    });
+  }
+  await controller.end('cancelled');
+
+  const sent = end.mock.calls[0]?.[1].events ?? [];
+  expect(sent).toHaveLength(256);
+  expect(sent.every((event) => event.type === 'transcript.final')).toBe(true);
+  expect(sent[0]?.text).toBe('τελικό 44');
 });

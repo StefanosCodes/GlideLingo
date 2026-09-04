@@ -21,7 +21,6 @@ const SPEC = {
   correction_policy_version: 'gentle-recast-v1',
   evidence_policy_version: 'conversation-observation-v1',
   maximum_duration_seconds: 300,
-  presentation: { show_tutor: false },
 };
 
 let cleanupTokenProvider: () => void = () => {};
@@ -61,7 +60,6 @@ test('creates an authenticated SDP session with an idempotency key', async () =>
       target_locale: 'el-GR',
       captions_enabled: true,
       retain_transcript: false,
-      show_tutor: false,
       offer_sdp: 'v=0\r\na=offer-data-for-test',
       client_capabilities: ['audio', 'captions', 'interrupt', 'reconnect'],
     },

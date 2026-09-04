@@ -30,6 +30,7 @@ class PrivateVoiceSessionRequest(BaseModel):
     source_locale: str
     target_locale: str
     conversation_mode: str
+    captions_enabled: bool
     offer_sdp: str
 
 

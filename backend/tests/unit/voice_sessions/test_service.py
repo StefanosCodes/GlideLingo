@@ -5,7 +5,11 @@ from uuid import UUID
 import pytest
 
 from app.auth.clerk import ClerkPrincipal
-from app.core.errors import VoiceSessionConflictError, VoiceSessionNotFoundError
+from app.core.errors import (
+    VoiceSessionConflictError,
+    VoiceSessionNotFoundError,
+    VoiceSessionUnavailableError,
+)
 from app.integrations.voice_realtime.client import (
     PrivateVoiceEndRequest,
     PrivateVoiceSessionRequest,
@@ -24,16 +28,17 @@ PRINCIPAL = ClerkPrincipal(user_id="user_voice_test", issuer="https://clerk.test
 OTHER_PRINCIPAL = ClerkPrincipal(user_id="other_voice_test", issuer="https://clerk.test")
 
 
-def request(offer: str = "v=0\r\na=offer-data-for-voice-test") -> CreateVoiceSessionRequest:
+def request(
+    offer: str = "v=0\r\na=offer-data-for-voice-test", *, captions_enabled: bool = True
+) -> CreateVoiceSessionRequest:
     return CreateVoiceSessionRequest(
         course_id="el-from-zero",
         scenario_id="el-greeting-introduction-v1",
         conversation_mode="guided",
         source_locale="en",
         target_locale="el-GR",
-        captions_enabled=True,
+        captions_enabled=captions_enabled,
         retain_transcript=False,
-        show_tutor=False,
         offer_sdp=offer,
         client_capabilities=["audio", "captions", "interrupt", "reconnect"],
     )
@@ -55,7 +60,6 @@ def spec() -> VoiceSessionSpec:
         correction_policy_version="gentle-recast-v1",
         evidence_policy_version="conversation-observation-v1",
         maximum_duration_seconds=300,
-        presentation={"show_tutor": False},
     )
 
 
@@ -118,6 +122,9 @@ def test_create_is_idempotent_and_enforces_one_active_session() -> None:
         )
         assert replay == first
         assert len(gateway.creates) == 1
+        assert gateway.creates[0].captions_enabled is True
+        assert gateway.creates[0].actor_ref.startswith("vusr_v1_")
+        assert PRINCIPAL.user_id not in gateway.creates[0].actor_ref
         with pytest.raises(VoiceSessionConflictError):
             await subject.create(
                 request("v=0\r\na=different-offer-data"),
@@ -135,7 +142,7 @@ def test_reconnect_replaces_and_cleans_up_the_previous_provider_call() -> None:
         gateway = FakeGateway()
         subject = service(gateway)
         first = await subject.create(
-            request(),
+            request(captions_enabled=False),
             principal=PRINCIPAL,
             idempotency_key="voice-create-key-0003",
             request_id="req_" + "4" * 32,
@@ -151,6 +158,7 @@ def test_reconnect_replaces_and_cleans_up_the_previous_provider_call() -> None:
         assert replacement.spec == first.spec
         assert replacement.connection.answer_sdp.endswith("2")
         assert [item.provider_call_id for item in gateway.ends] == ["call_1"]
+        assert [item.captions_enabled for item in gateway.creates] == [False, False]
         replay = await subject.reconnect(
             first.session_id,
             "v=0\r\na=reconnect-offer-data",
@@ -351,6 +359,83 @@ def test_slow_admission_does_not_block_an_unrelated_actor() -> None:
         assert second.session_id is not None
         release.set()
         await first
+        await subject.close()
+
+    asyncio.run(run())
+
+
+def test_terminal_records_and_replays_are_size_and_ttl_bounded() -> None:
+    async def run() -> None:
+        clock = [NOW]
+        gateway = FakeGateway()
+        subject = VoiceSessionService(
+            enabled=True,
+            gateway=gateway,
+            pseudonym_key=b"voice-test-pseudonym-key-at-least-32-bytes",
+            now=lambda: clock[0],
+            cleanup_retry_delays=(0.0,),
+            retention_seconds=10,
+            maximum_session_records=2,
+            maximum_replay_entries=2,
+        )
+        admissions = []
+        for index in range(3):
+            admission = await subject.create(
+                request(f"v=0\r\na=bounded-offer-{index}"),
+                principal=PRINCIPAL,
+                idempotency_key=f"voice-create-bounded-{index:04d}",
+                request_id="req_" + str(index) * 32,
+            )
+            admissions.append(admission)
+            await subject.end(
+                admission.session_id,
+                EndVoiceSessionRequest(reason="cancelled", events=[]),
+                principal=PRINCIPAL,
+                idempotency_key=f"voice-end-bounded-{index:04d}",
+                request_id="req_" + str(index + 3) * 32,
+            )
+
+        assert len(subject._records) == 2
+        assert len(subject._create_replays) <= 2
+        assert len(subject._end_replays) <= 2
+        with pytest.raises(VoiceSessionNotFoundError):
+            await subject.recap(admissions[0].session_id, principal=PRINCIPAL)
+
+        clock[0] += timedelta(seconds=11)
+        with pytest.raises(VoiceSessionNotFoundError):
+            await subject.recap(admissions[-1].session_id, principal=PRINCIPAL)
+        assert subject._records == {}
+        assert subject._create_replays == {}
+        assert subject._end_replays == {}
+        await subject.close()
+
+    asyncio.run(run())
+
+
+def test_capacity_never_evicts_an_active_provider_reference() -> None:
+    async def run() -> None:
+        gateway = FakeGateway()
+        subject = VoiceSessionService(
+            enabled=True,
+            gateway=gateway,
+            pseudonym_key=b"voice-test-pseudonym-key-at-least-32-bytes",
+            maximum_session_records=1,
+        )
+        await subject.create(
+            request(),
+            principal=PRINCIPAL,
+            idempotency_key="voice-create-capacity-0001",
+            request_id="req_" + "7" * 32,
+        )
+        with pytest.raises(VoiceSessionUnavailableError):
+            await subject.create(
+                request("v=0\r\na=second-capacity-offer"),
+                principal=OTHER_PRINCIPAL,
+                idempotency_key="voice-create-capacity-0002",
+                request_id="req_" + "8" * 32,
+            )
+        assert len(subject._records) == 1
+        assert len(gateway.creates) == 1
         await subject.close()
 
     asyncio.run(run())

@@ -1,5 +1,4 @@
 import type {
-  VoicePresentationState,
   VoiceSessionEvent,
   VoiceSessionLifecycle,
   VoiceTurnState,
@@ -8,7 +7,6 @@ import type {
 export type VoiceSessionState = {
   lifecycle: VoiceSessionLifecycle;
   turn: VoiceTurnState;
-  presentation: VoicePresentationState;
   muted: boolean;
   captionsEnabled: boolean;
   events: VoiceSessionEvent[];
@@ -32,7 +30,6 @@ export function initialVoiceSessionState(captionsEnabled = true): VoiceSessionSt
   return {
     lifecycle: 'creating',
     turn: 'ready',
-    presentation: 'voice-only',
     muted: true,
     captionsEnabled,
     events: [],

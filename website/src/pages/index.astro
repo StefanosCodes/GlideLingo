@@ -20,7 +20,7 @@ const productVideoReady =
   existsSync(resolve('public/videos/glidelingo-product-walkthrough.vtt'));
 const releaseFallbackUrl = 'https://github.com/StefanosCodes/GlideLingo/releases';
 const startHref = download.available ? download.downloadUrl : releaseFallbackUrl;
-const primaryDownloadLabel = download.available ? 'Download for macOS' : 'View releases';
+const primaryDownloadLabel = download.available ? 'Download for macOS' : 'Get started on macOS';
 const platformAvailability = download.available
   ? 'Universal for Apple silicon and Intel Macs'
   : 'Available for macOS';

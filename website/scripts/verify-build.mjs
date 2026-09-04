@@ -113,7 +113,7 @@ if (active) {
   assert.ok(home.includes(downloadUrl), 'Active output must contain the configured DMG URL.');
 } else {
   assert.match(home, /data-download-state="unavailable"/);
-  assert.match(home, />\s*View releases\s*<svg[^>]+button-apple-icon/);
+  assert.match(home, />\s*Get started on macOS\s*<svg[^>]+button-apple-icon/);
   assert.match(home, /Available for macOS/);
   assert.doesNotMatch(home, /aria-label="Product announcement"/);
   assert.doesNotMatch(home, /releases\/download/);

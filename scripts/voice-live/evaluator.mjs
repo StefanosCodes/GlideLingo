@@ -227,7 +227,6 @@ function validateGrades(value, expectedIds) {
         throw new Error('Grader returned an invalid ' + field + ' score.');
       }
     }
-    if (typeof grade.hardViolation !== 'boolean') throw new Error('Grader omitted hardViolation.');
     if (!Array.isArray(grade.failureCodes) || grade.failureCodes.length === 0 ||
         grade.failureCodes.some((code) => !FAILURE_CODES.includes(code))) {
       throw new Error('Grader returned an invalid failure code.');
@@ -239,10 +238,12 @@ function validateGrades(value, expectedIds) {
       throw new Error('Grader mixed none with failure codes.');
     }
     const derivedHardViolation = grade.failureCodes.some((code) => HARD_FAILURE_CODES.has(code));
-    if (grade.hardViolation !== derivedHardViolation) {
-      throw new Error('Grader returned an inconsistent hard violation result.');
-    }
-    return grade;
+    return {
+      caseId: grade.caseId,
+      ...Object.fromEntries(SCORE_FIELDS.map((field) => [field, grade[field]])),
+      hardViolation: derivedHardViolation,
+      failureCodes: [...grade.failureCodes],
+    };
   });
   if (new Set(grades.map((grade) => grade.caseId)).size !== expectedIds.length) {
     throw new Error('Grader returned duplicate case IDs.');
@@ -316,7 +317,7 @@ function gradingSchema() {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: [...SCORE_FIELDS, 'caseId', 'hardViolation', 'failureCodes'],
+          required: [...SCORE_FIELDS, 'caseId', 'failureCodes'],
           properties: {
             caseId: { type: 'string' },
             lessonGrounding: score,
@@ -324,7 +325,6 @@ function gradingSchema() {
             correctiveHelpfulness: score,
             naturalness: score,
             brevity: score,
-            hardViolation: { type: 'boolean' },
             failureCodes: {
               type: 'array',
               maxItems: 4,

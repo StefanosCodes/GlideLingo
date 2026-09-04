@@ -155,7 +155,7 @@ test('candidate generation rejects duplicate and baseline-equivalent candidates'
   );
 });
 
-test('grader rejects empty, duplicate, and contradictory failure results', async () => {
+test('grader rejects invalid codes and deterministically derives hard violations', async () => {
   const run = (grade) => gradeConversationBatch({
     apiKey: 'secret',
     projectId: 'proj_test',
@@ -167,14 +167,10 @@ test('grader rejects empty, duplicate, and contradictory failure results', async
     run({ ...passingGrade('alpha'), failureCodes: ['too_long', 'too_long'] }),
     /duplicate failure codes/,
   );
-  await assert.rejects(
-    run({ ...passingGrade('alpha'), failureCodes: ['progress_claim'] }),
-    /inconsistent hard violation/,
-  );
-  await assert.rejects(
-    run({ ...passingGrade('alpha'), hardViolation: true, failureCodes: ['too_long'] }),
-    /inconsistent hard violation/,
-  );
+  const hard = await run({ ...passingGrade('alpha'), hardViolation: false, failureCodes: ['progress_claim'] });
+  assert.equal(hard[0].hardViolation, true);
+  const soft = await run({ ...passingGrade('alpha'), hardViolation: true, failureCodes: ['too_long'] });
+  assert.equal(soft[0].hardViolation, false);
 });
 
 test('selection requires a measurable gain and no hard violations', () => {

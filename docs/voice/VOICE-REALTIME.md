@@ -115,3 +115,42 @@ be deployed or enabled until all of these pass independently:
 A fake/local browser smoke proves browser lifecycle and UI wiring without vendor credentials. It
 does not prove OpenAI availability, model behavior, audio quality, latency, cost, quota, policy, or
 the production identity and entitlement journey.
+
+## Opt-in live provider smoke
+
+`npm run voice:test:live` is a local-only, paid acceptance check. It feeds the existing authored
+Greek course audio into the production browser WebRTC adapter, resolves an isolated temporary
+published Course fixture through the private tutor, opens a real OpenAI Realtime call, confirms
+provider transcription and returned audio, explicitly hangs up, and prints only bounded metadata.
+It never changes the checked-in draft publication and is not part of normal CI.
+
+The command deliberately does not auto-load `.env`. It fails closed unless all four values are
+explicitly supplied in the environment of that one invocation:
+
+```text
+GLIDELINGO_VOICE_LIVE_TEST=true
+GLIDELINGO_VOICE_TEST_CONFIRM_SPEND=I_ACCEPT_BOUNDED_OPENAI_TEST_SPEND
+GLIDELINGO_VOICE_TEST_OPENAI_PROJECT_ID=<dedicated-test-project-id>
+GLIDELINGO_VOICE_TEST_OPENAI_API_KEY=<dedicated-test-project-key>
+```
+
+The evaluation uses `gpt-realtime-2.1`, the `marin` voice, a hard limit of sixteen serial Realtime
+sessions, and a 45-second deadline per conversation. Four fixed tuning clips establish the
+baseline and evaluate two bounded authored-scenario candidates; two separate holdout clips compare
+the baseline with only a candidate that clears the tuning threshold. It also makes at most six paid
+Responses API requests for candidate generation and grading. A `gpt-5.6-terra` grader receives
+transcripts only in memory with `store=false`. The candidate generator may propose changes only to
+the scenario's persona, opening, and safe exits. It cannot modify source files, allowed vocabulary,
+tools, grading, progress, or production flags.
+
+The credential remains server-side. Child environments are scrubbed before Chrome and compilation;
+only the private tutor receives it as `OPENAI_API_KEY`, while the runner uses it for grader requests.
+Raw audio and transcript text are not written to the report and are discarded with the temporary
+browser profile and process. The ignored `.voice-live/latest.json` report contains transport
+counts, rubric summaries, the bounded candidate fields, and the exact Git head. OpenAI's own API
+data controls still apply to the dedicated provider project.
+
+This smoke proves the real browser-to-provider media path and private provider configuration. It
+uses synthetic local admission and therefore does not prove deployed IAM, Clerk, RevenueCat,
+multi-instance ownership, rate/cost enforcement, or the final human microphone experience. Those
+remain separate activation gates.

@@ -191,6 +191,17 @@ test('selection requires a measurable gain and no hard violations', () => {
   assert.equal(selected.candidate.id, 'winner');
 });
 
+test('selection prioritizes removing baseline hard violations above score gain', () => {
+  const selected = selectCandidate(
+    { averageScore: 10, minimumScore: 10, hardViolationCount: 4 },
+    [
+      { candidate: { id: 'still-unsafe' }, summary: { averageScore: 10, minimumScore: 10, hardViolationCount: 1 } },
+      { candidate: { id: 'safe' }, summary: { averageScore: 8, minimumScore: 6, hardViolationCount: 0 } },
+    ],
+  );
+  assert.equal(selected.candidate.id, 'safe');
+});
+
 test('privacy-safe report never contains source transcripts or audio', () => {
   const baselineSummary = summarizeGrades([passingGrade('alpha')]);
   const report = privacySafeEvaluationReport({

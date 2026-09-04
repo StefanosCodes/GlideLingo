@@ -133,12 +133,13 @@ export function summarizeGrades(grades) {
 }
 
 export function selectCandidate(baselineSummary, evaluatedCandidates) {
+  const baselineHasHardViolations = baselineSummary.hardViolationCount > 0;
   const eligible = evaluatedCandidates
     .filter(({ summary }) =>
       summary.hardViolationCount === 0 &&
       summary.minimumScore >= 6 &&
       summary.averageScore >= 8 &&
-      summary.averageScore >= baselineSummary.averageScore + 0.5)
+      (baselineHasHardViolations || summary.averageScore >= baselineSummary.averageScore + 0.5))
     .sort((left, right) => right.summary.averageScore - left.summary.averageScore);
   return eligible[0] || null;
 }

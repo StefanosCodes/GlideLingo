@@ -1,7 +1,10 @@
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
+from threading import Barrier
 from typing import Any, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import Engine, create_engine, text
@@ -11,6 +14,7 @@ from app.core.config import Settings
 from app.modules.human_tutor_marketplace.identity import derive_marketplace_actor_ref
 from app.modules.human_tutor_marketplace.repository import (
     PostgresTutorApplicationRepository,
+    StoredTutorProfile,
 )
 from app.modules.human_tutor_marketplace.schemas import (
     ChangeTutorStatusRequest,
@@ -24,6 +28,7 @@ from app.modules.human_tutor_marketplace.schemas import (
 MIGRATION = (
     Path(__file__).resolve().parents[2] / "migrations" / "006_human_tutor_marketplace_core.sql"
 )
+SAFE_SEARCH_PATH = "pg_catalog, public, pg_temp"
 TUTOR_ACTOR = derive_marketplace_actor_ref(
     key=b"marketplace-integration-pseudonym-key-32-bytes",
     clerk_user_id="user_tutor_integration",
@@ -75,7 +80,11 @@ def marketplace_engine() -> Generator[Engine]:
         try:
             cursor.execute("SET ROLE cloudsqlsuperuser")
             cursor.execute(f'SET search_path TO "{schema}", public')
-            cursor.execute(MIGRATION.read_text(encoding="utf-8"))
+            migration_sql = MIGRATION.read_text(encoding="utf-8").replace(
+                f"SET search_path = {SAFE_SEARCH_PATH}",
+                f'SET search_path = pg_catalog, "{schema}", public, pg_temp',
+            )
+            cursor.execute(migration_sql)
             cursor.execute("RESET ROLE")
             cursor.execute(f'SET search_path TO "{schema}", public')
             cursor.executemany(
@@ -115,6 +124,62 @@ def application_request() -> CreateTutorApplicationRequest:
         languages=["en", "el-GR"],
         specialties=["Conversation", "Travel"],
     )
+
+
+def create_approved_tutor(
+    repository: PostgresTutorApplicationRepository,
+) -> tuple[UUID, StoredTutorProfile]:
+    application_id = uuid4()
+    draft = repository.create_draft(
+        application_id=application_id,
+        actor_ref=TUTOR_ACTOR,
+        request=application_request(),
+    )
+    submitted = repository.submit(actor_ref=TUTOR_ACTOR, expected_version=draft.version)
+    assert submitted is not None
+    review = repository.start_review(
+        application_id=application_id,
+        operator_actor_ref=OPERATOR_ACTOR,
+        expected_version=submitted.version,
+    )
+    assert review is not None
+    approved = repository.decide(
+        application_id=application_id,
+        operator_actor_ref=OPERATOR_ACTOR,
+        decision="approved",
+        reason="Identity and application review passed.",
+        expected_version=review.version,
+    )
+    assert approved is not None
+    profile = repository.get_profile_by_actor(actor_ref=TUTOR_ACTOR)
+    assert profile is not None
+    return application_id, profile
+
+
+@pytest.mark.integration
+def test_marketplace_functions_pin_a_trusted_search_path(
+    marketplace_engine: Engine,
+) -> None:
+    with marketplace_engine.connect() as connection:
+        expected_schema = cast(
+            str, connection.execute(text("SELECT current_schema()")).scalar_one()
+        )
+        expected_setting = f"search_path=pg_catalog, {expected_schema}, public, pg_temp"
+        functions = connection.execute(
+            text(
+                """
+                SELECT routine.proname, routine.proconfig
+                FROM pg_proc AS routine
+                JOIN pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+                WHERE namespace.nspname = current_schema()
+                  AND routine.proname LIKE 'marketplace_%'
+                ORDER BY routine.proname
+                """
+            )
+        ).all()
+
+    assert len(functions) == 8
+    assert all(config == [expected_setting] for _, config in functions)
 
 
 @pytest.mark.integration
@@ -206,6 +271,7 @@ def test_runtime_role_cannot_grant_capabilities_mutate_audit_or_run_ddl(
             with pytest.raises(DBAPIError):
                 connection.execute(text(statement))
             nested.rollback()
+        connection.execute(text("RESET ROLE"))
 
 
 @pytest.mark.integration
@@ -502,3 +568,399 @@ def test_policy_snapshots_and_payout_readiness_are_not_runtime_mutable(
             with pytest.raises(DBAPIError):
                 connection.execute(text(statement))
             nested.rollback()
+        connection.execute(text("RESET ROLE"))
+
+
+@pytest.mark.integration
+def test_database_prevents_active_offering_bypass_and_preserves_runtime_draft_insert(
+    marketplace_engine: Engine,
+) -> None:
+    repository = PostgresTutorApplicationRepository(engine=marketplace_engine)
+    application_id, profile = create_approved_tutor(repository)
+    parameters = {
+        "offering_id": uuid4(),
+        "application_id": application_id,
+        "tutor_id": profile.tutor_id,
+        "title": "25-minute conversation lesson",
+        "duration_minutes": 25,
+        "amount_minor": 2500,
+        "currency": "USD",
+        "commission_policy_id": UUID("10000000-0000-4000-8000-000000000001"),
+        "cancellation_policy_id": UUID("20000000-0000-4000-8000-000000000001"),
+    }
+    verified_credential_parameters = {
+        "credential_id": uuid4(),
+        "application_id": application_id,
+        "tutor_id": profile.tutor_id,
+        "operator_actor_ref": OPERATOR_ACTOR,
+    }
+    verified_credential_insert = text(
+        """
+        INSERT INTO marketplace_tutor_credential
+          (credential_id, application_id, tutor_id, credential_type, title, issuer,
+           verification_status, verified_by_actor_ref, verification_reason, reviewed_at)
+        VALUES
+          (:credential_id, :application_id, :tutor_id, 'certificate',
+           'Adult language teaching certificate', 'Example Institute', 'verified',
+           :operator_actor_ref, 'Unauthorized verified credential insert.', now())
+        """
+    )
+    active_insert = text(
+        """
+        INSERT INTO marketplace_tutor_offering
+          (offering_id, application_id, tutor_id, title, duration_minutes, amount_minor,
+           currency, state, commission_policy_id, cancellation_policy_id)
+        VALUES
+          (:offering_id, :application_id, :tutor_id, :title, :duration_minutes, :amount_minor,
+           :currency, 'active', :commission_policy_id, :cancellation_policy_id)
+        """
+    )
+
+    with marketplace_engine.connect() as connection:
+        connection.execute(text("SET ROLE glidelingo_app"))
+        with pytest.raises(DBAPIError):
+            connection.execute(active_insert, parameters)
+        connection.rollback()
+        connection.execute(text("RESET ROLE"))
+        connection.commit()
+
+    with marketplace_engine.connect() as connection:
+        connection.execute(text("SET ROLE glidelingo_app"))
+        with pytest.raises(DBAPIError):
+            connection.execute(verified_credential_insert, verified_credential_parameters)
+        connection.rollback()
+        connection.execute(text("RESET ROLE"))
+        connection.commit()
+
+    with marketplace_engine.connect() as connection:
+        with pytest.raises(DBAPIError):
+            connection.execute(verified_credential_insert, verified_credential_parameters)
+        connection.rollback()
+
+    with marketplace_engine.connect() as connection:
+        with pytest.raises(DBAPIError):
+            connection.execute(active_insert, parameters)
+        connection.rollback()
+
+    unsupported_currency_parameters = {**parameters, "currency": "EUR"}
+    with marketplace_engine.connect() as connection:
+        with pytest.raises(DBAPIError):
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO marketplace_tutor_offering
+                      (offering_id, application_id, tutor_id, title, duration_minutes,
+                       amount_minor, currency, commission_policy_id, cancellation_policy_id)
+                    VALUES
+                      (:offering_id, :application_id, :tutor_id, :title, :duration_minutes,
+                       :amount_minor, :currency, :commission_policy_id,
+                       :cancellation_policy_id)
+                    """
+                ),
+                unsupported_currency_parameters,
+            )
+        connection.rollback()
+
+    with marketplace_engine.begin() as connection:
+        connection.execute(text("SET ROLE glidelingo_app"))
+        state = connection.execute(
+            text(
+                """
+                INSERT INTO marketplace_tutor_offering
+                  (offering_id, application_id, tutor_id, title, duration_minutes, amount_minor,
+                   currency, commission_policy_id, cancellation_policy_id)
+                VALUES
+                  (:offering_id, :application_id, :tutor_id, :title, :duration_minutes,
+                   :amount_minor, :currency, :commission_policy_id, :cancellation_policy_id)
+                RETURNING state
+                """
+            ),
+            parameters,
+        ).scalar_one()
+        connection.execute(text("RESET ROLE"))
+    assert state == "draft"
+
+
+@pytest.mark.integration
+def test_database_rejects_status_profile_and_currency_insert_bypasses(
+    marketplace_engine: Engine,
+) -> None:
+    repository = PostgresTutorApplicationRepository(engine=marketplace_engine)
+    draft = repository.create_draft(
+        application_id=uuid4(),
+        actor_ref=TUTOR_ACTOR,
+        request=application_request(),
+    )
+
+    runtime_denied = [
+        text(
+            """
+            INSERT INTO marketplace_tutor_application
+              (application_id, actor_ref, status, headline, biography, time_zone,
+               reviewer_actor_ref, submitted_at, reviewed_at, decision_reason)
+            VALUES
+              (:new_application_id, :new_actor_ref, 'approved', 'Unauthorized tutor profile',
+               'This application must never begin in an approved marketplace state.', 'UTC',
+               :operator_actor_ref, now(), now(), 'Unauthorized direct approval attempt.')
+            """
+        ),
+        text(
+            """
+            INSERT INTO marketplace_tutor_profile
+              (tutor_id, application_id, actor_ref, headline, biography, time_zone, is_published)
+            VALUES
+              (:tutor_id, :application_id, :actor_ref, 'Unauthorized tutor profile',
+               'This profile must never be published through a direct runtime insert.', 'UTC', true)
+            """
+        ),
+    ]
+    parameters = {
+        "new_application_id": uuid4(),
+        "new_actor_ref": derive_marketplace_actor_ref(
+            key=b"marketplace-integration-pseudonym-key-32-bytes",
+            clerk_user_id="unauthorized_direct_insert",
+        ),
+        "operator_actor_ref": OPERATOR_ACTOR,
+        "tutor_id": uuid4(),
+        "application_id": draft.application_id,
+        "actor_ref": TUTOR_ACTOR,
+    }
+    with marketplace_engine.connect() as connection:
+        connection.execute(text("SET ROLE glidelingo_app"))
+        for statement in runtime_denied:
+            nested = connection.begin_nested()
+            with pytest.raises(DBAPIError):
+                connection.execute(statement, parameters)
+            nested.rollback()
+
+        nested = connection.begin_nested()
+        with pytest.raises(DBAPIError):
+            connection.execute(
+                text(
+                    """
+                    UPDATE marketplace_tutor_application
+                    SET status = 'approved', reviewer_actor_ref = :operator_actor_ref,
+                        submitted_at = now(), reviewed_at = now(),
+                        decision_reason = 'Unauthorized direct approval attempt.',
+                        version = version + 1, updated_at = now()
+                    WHERE application_id = :application_id
+                    """
+                ),
+                parameters,
+            )
+        nested.rollback()
+        connection.execute(text("RESET ROLE"))
+
+    with marketplace_engine.connect() as connection:
+        with pytest.raises(DBAPIError):
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO marketplace_tutor_profile
+                      (tutor_id, application_id, actor_ref, headline, biography, time_zone)
+                    VALUES
+                      (:tutor_id, :application_id, :actor_ref, 'Unauthorized tutor profile',
+                       'A draft application must not create an approved tutor profile.', 'UTC')
+                    """
+                ),
+                parameters,
+            )
+        connection.rollback()
+
+
+@pytest.mark.integration
+def test_first_credential_and_offering_writes_serialize_without_dependency_failures(
+    marketplace_engine: Engine,
+) -> None:
+    repository = PostgresTutorApplicationRepository(engine=marketplace_engine)
+    create_approved_tutor(repository)
+
+    credential_request = SaveTutorCredentialRequest(
+        expected_version=0,
+        credential_type="certificate",
+        title="Adult language teaching certificate",
+        issuer="Example Institute",
+    )
+    credential_barrier = Barrier(2)
+
+    def save_first_credential() -> StoredTutorProfile | None:
+        credential_barrier.wait()
+        return repository.save_credential(actor_ref=TUTOR_ACTOR, request=credential_request)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        credential_results = list(executor.map(lambda _: save_first_credential(), range(2)))
+    assert sum(result is not None for result in credential_results) == 1
+
+    offering_request = SaveTutorOfferingRequest(
+        expected_version=0,
+        title="25-minute conversation lesson",
+        duration_minutes=25,
+        amount_minor=2500,
+        currency="USD",
+    )
+    offering_barrier = Barrier(2)
+
+    def save_first_offering() -> StoredTutorProfile | None:
+        offering_barrier.wait()
+        return repository.save_offering(actor_ref=TUTOR_ACTOR, request=offering_request)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        offering_results = list(executor.map(lambda _: save_first_offering(), range(2)))
+    assert sum(result is not None for result in offering_results) == 1
+
+
+@pytest.mark.integration
+def test_suspension_lock_prevents_concurrent_publication(
+    marketplace_engine: Engine,
+) -> None:
+    repository = PostgresTutorApplicationRepository(engine=marketplace_engine)
+    application_id, profile = create_approved_tutor(repository)
+    with_offering = repository.save_offering(
+        actor_ref=TUTOR_ACTOR,
+        request=SaveTutorOfferingRequest(
+            expected_version=0,
+            title="25-minute conversation lesson",
+            duration_minutes=25,
+            amount_minor=2500,
+            currency="USD",
+        ),
+    )
+    assert with_offering is not None
+    assert with_offering.offering is not None
+    offering_version = with_offering.offering.version
+    with marketplace_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE marketplace_tutor_profile SET payout_ready = true "
+                "WHERE application_id = :application_id"
+            ),
+            {"application_id": application_id},
+        )
+
+    suspension_connection = marketplace_engine.connect()
+    suspension_transaction = suspension_connection.begin()
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        suspension_connection.execute(
+            text(
+                """
+                UPDATE marketplace_tutor_application
+                SET status = 'suspended', reviewer_actor_ref = :operator_actor_ref,
+                    reviewed_at = now(), decision_reason = :reason,
+                    version = version + 1, updated_at = now()
+                WHERE application_id = :application_id
+                """
+            ),
+            {
+                "application_id": application_id,
+                "operator_actor_ref": OPERATOR_ACTOR,
+                "reason": "Concurrent publication was stopped by a safety suspension.",
+            },
+        )
+
+        def publish_as_runtime() -> UUID | None:
+            with marketplace_engine.begin() as connection:
+                connection.execute(text("SET ROLE glidelingo_app"))
+                result = cast(
+                    UUID | None,
+                    connection.execute(
+                        text(
+                            "SELECT marketplace_set_tutor_publication(:actor_ref, "
+                            ":profile_version, :offering_version, true)"
+                        ),
+                        {
+                            "actor_ref": TUTOR_ACTOR,
+                            "profile_version": profile.version,
+                            "offering_version": offering_version,
+                        },
+                    ).scalar_one(),
+                )
+                connection.execute(text("RESET ROLE"))
+                return result
+
+        publication = executor.submit(publish_as_runtime)
+        with pytest.raises(FutureTimeoutError):
+            publication.result(timeout=0.2)
+        suspension_transaction.commit()
+        assert publication.result(timeout=2) is None
+    finally:
+        if suspension_transaction.is_active:
+            suspension_transaction.rollback()
+        suspension_connection.close()
+        executor.shutdown(wait=True)
+
+    final_profile = repository.get_profile_by_actor(actor_ref=TUTOR_ACTOR)
+    assert final_profile is not None
+    assert final_profile.application_status == "suspended"
+    assert final_profile.is_published is False
+    assert final_profile.offering is not None
+    assert final_profile.offering.state == "draft"
+
+
+@pytest.mark.integration
+def test_published_workspace_requires_explicit_unpublish_before_editing(
+    marketplace_engine: Engine,
+) -> None:
+    repository = PostgresTutorApplicationRepository(engine=marketplace_engine)
+    application_id, profile = create_approved_tutor(repository)
+    with_offering = repository.save_offering(
+        actor_ref=TUTOR_ACTOR,
+        request=SaveTutorOfferingRequest(
+            expected_version=0,
+            title="25-minute conversation lesson",
+            duration_minutes=25,
+            amount_minor=2500,
+            currency="USD",
+        ),
+    )
+    assert with_offering is not None
+    assert with_offering.offering is not None
+    with marketplace_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE marketplace_tutor_profile SET payout_ready = true "
+                "WHERE application_id = :application_id"
+            ),
+            {"application_id": application_id},
+        )
+
+    published = repository.set_publication(
+        actor_ref=TUTOR_ACTOR,
+        expected_profile_version=profile.version,
+        expected_offering_version=with_offering.offering.version,
+        publish=True,
+    )
+    assert published is not None
+    assert published.is_published is True
+    assert published.offering is not None
+    assert published.offering.state == "active"
+    assert (
+        repository.update_profile_draft(
+            actor_ref=TUTOR_ACTOR,
+            request=UpdateTutorProfileDraftRequest(
+                expected_version=published.version,
+                headline="A live edit must not leak",
+                biography="This content must remain private until an explicit republish cycle.",
+                time_zone="UTC",
+            ),
+        )
+        is None
+    )
+
+    unpublished = repository.set_publication(
+        actor_ref=TUTOR_ACTOR,
+        expected_profile_version=published.version,
+        expected_offering_version=published.offering.version,
+        publish=False,
+    )
+    assert unpublished is not None
+    edited = repository.update_profile_draft(
+        actor_ref=TUTOR_ACTOR,
+        request=UpdateTutorProfileDraftRequest(
+            expected_version=unpublished.version,
+            headline="A private edit is safe",
+            biography="This content remains private until another explicit publication action.",
+            time_zone="UTC",
+        ),
+    )
+    assert edited is not None

@@ -57,7 +57,7 @@ export type TutorOffering = {
   title: string;
   durationMinutes: 25 | 50;
   amountMinor: number;
-  currency: string;
+  currency: 'USD';
   state: 'draft' | 'active';
   commissionPolicy: MarketplacePolicyVersion;
   cancellationPolicy: MarketplacePolicyVersion;
@@ -247,11 +247,15 @@ export async function setTutorPublication(profile: TutorProfile, publish: boolea
   });
 }
 
-export async function listTutorApplicationsForReview(signal?: AbortSignal): Promise<TutorApplicationQueue> {
+export async function listTutorApplicationsForReview(
+  signal?: AbortSignal,
+  offset = 0,
+  limit = 20,
+): Promise<TutorApplicationQueue> {
   return runMarketplaceRequest(async () => {
     const result = await getJson({
       parse: parseTutorApplicationQueue,
-      path: '/v1/marketplace-operations/tutor-applications',
+      path: `/v1/marketplace-operations/tutor-applications?offset=${offset}&limit=${limit}`,
       signal,
     });
     return result.data;
@@ -452,8 +456,7 @@ function parseTutorOffering(value: unknown): TutorOffering | null {
     !Number.isSafeInteger(value.amount_minor) ||
     (value.amount_minor as number) < 500 ||
     (value.amount_minor as number) > 50_000 ||
-    typeof value.currency !== 'string' ||
-    !/^[A-Z]{3}$/.test(value.currency) ||
+    value.currency !== 'USD' ||
     (value.state !== 'draft' && value.state !== 'active')
   ) {
     return null;

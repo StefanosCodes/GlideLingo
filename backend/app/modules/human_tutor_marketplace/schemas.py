@@ -48,7 +48,7 @@ CredentialIssuer = Annotated[
 OfferingTitle = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=3, max_length=100)
 ]
-Currency = Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^[A-Z]{3}$")]
+Currency = Literal["USD"]
 
 
 def validate_time_zone(value: str) -> str:
@@ -240,7 +240,7 @@ class TutorOfferingResponse(BaseModel):
     title: str
     duration_minutes: Literal[25, 50]
     amount_minor: int = Field(ge=500, le=50_000)
-    currency: str
+    currency: Currency
     state: TutorOfferingState
     commission_policy: MarketplacePolicyVersionResponse
     cancellation_policy: MarketplacePolicyVersionResponse

@@ -106,14 +106,18 @@ four RevenueCat Secret Manager version numbers before the flag can be enabled.
 Numbers `004` and `005` are reserved by the in-flight affiliate and durable billing-event stack; do
 not renumber or apply `006` until the integration train has reconciled and applied those predecessors.
 The migration creates only the tutor application, normalized language/specialty, unpublished private
-profile, one optional credential, one offering draft, immutable commission/cancellation policy
+profile, one optional credential, one USD offering draft, immutable commission/cancellation policy
 versions, operator-capability, and append-only audit facts required by Milestone 1. It deliberately
 creates no learner discovery, booking, payment, transfer, calendar, or messaging tables.
 
 Apply it with the DDL-capable operator after `SET ROLE cloudsqlsuperuser`. The API runtime receives no
 ability to grant operator capabilities, alter immutable policy versions, set payout readiness,
-directly activate an offering, update or delete audit events, or run DDL. Publication uses a narrow
-database function that atomically verifies application state, offering versions, and payout readiness.
+directly activate an offering, create an approved or published record, update or delete audit events,
+or run DDL. Database triggers preserve application transitions, profile/application ownership,
+policy types, the single-currency rule, and active-offering publication eligibility even if a caller
+bypasses the service. Publication and suspension take locks in application/profile/offering order so
+their concurrent result is always suspended and private; first credential/offering creation locks the
+owning profile so equivalent retries converge instead of surfacing a uniqueness failure.
 Seed the required `review_tutor_applications`, `manage_tutor_status`, and
 `verify_tutor_credentials` capabilities through an approved operator procedure using the exact
 `mktusr_v1_` pseudonym derived with the environment's marketplace pseudonym key; never store the raw

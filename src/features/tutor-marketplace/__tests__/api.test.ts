@@ -97,6 +97,7 @@ describe('parseTutorProfile', () => {
     { ...validProfile, payout_ready: 'false' },
     { ...validProfile, publication_blockers: ['unknown'] },
     { ...validProfile, offering: { ...validProfile.offering, state: 'paid' } },
+    { ...validProfile, offering: { ...validProfile.offering, currency: 'EUR' } },
     {
       ...validProfile,
       offering: {

@@ -23,7 +23,7 @@ import { useTheme } from '@/hooks/use-theme';
 
 type LoadState =
   | { kind: 'loading' }
-  | { kind: 'ready'; items: TutorApplication[] }
+  | { kind: 'ready'; items: TutorApplication[]; hasMore: boolean }
   | { kind: 'forbidden' }
   | { kind: 'error' };
 
@@ -34,6 +34,7 @@ export function TutorOperationsScreen() {
   const [reload, setReload] = useState(0);
   const [state, setState] = useState<LoadState>(enabled ? { kind: 'loading' } : { kind: 'error' });
   const [workingId, setWorkingId] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,7 +44,7 @@ export function TutorOperationsScreen() {
     void listTutorApplicationsForReview(controller.signal)
       .then((queue) => {
         if (!controller.signal.aborted && sequence.current === request) {
-          setState({ kind: 'ready', items: queue.items });
+          setState({ kind: 'ready', items: queue.items, hasMore: queue.hasMore });
         }
       })
       .catch((caught: unknown) => {
@@ -70,7 +71,10 @@ export function TutorOperationsScreen() {
       const updated = await operation();
       setState((current) => current.kind === 'ready' ? {
         kind: 'ready',
-        items: current.items.map((item) => item.applicationId === updated.applicationId ? updated : item),
+        items: current.items
+          .map((item) => item.applicationId === updated.applicationId ? updated : item)
+          .filter((item) => item.status !== 'rejected'),
+        hasMore: current.hasMore,
       } : current);
     } catch (caught) {
       setError(
@@ -111,6 +115,29 @@ export function TutorOperationsScreen() {
       {state.kind === 'ready' ? state.items.map((application) => <ReviewCard application={application}
         key={application.applicationId} saving={workingId === application.applicationId}
         onAction={(operation) => void mutate(application, operation)} />) : null}
+      {state.kind === 'ready' && state.hasMore ? <GlideButton
+        disabled={loadingMore}
+        label={loadingMore ? 'Loading more applications…' : 'Load more applications'}
+        onPress={() => {
+          if (loadingMore) return;
+          setLoadingMore(true);
+          setError(null);
+          void listTutorApplicationsForReview(undefined, state.items.length).then((queue) => {
+            setState((current) => {
+              if (current.kind !== 'ready') return current;
+              const existingIds = new Set(current.items.map((item) => item.applicationId));
+              return {
+                kind: 'ready',
+                items: [...current.items, ...queue.items.filter((item) => !existingIds.has(item.applicationId))],
+                hasMore: queue.hasMore,
+              };
+            });
+          }).catch(() => setError('More applications could not be loaded. The current page is unchanged.'))
+            .finally(() => setLoadingMore(false));
+        }}
+        testID="load-more-tutor-applications"
+        variant="secondary"
+      /> : null}
       {error ? <GlideSurface accessible accessibilityRole="alert" padding="regular" style={styles.card} variant="tinted">
         <ThemedText type="body">{error}</ThemedText><GlideButton label="Reload queue" onPress={() => {
           setError(null); setState({ kind: 'loading' }); setReload((value) => value + 1);

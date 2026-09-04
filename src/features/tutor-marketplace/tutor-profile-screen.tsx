@@ -144,7 +144,7 @@ function ProfileEditor({ profile, saving, onSave }: {
   const [headline, setHeadline] = useState(profile.headline);
   const [biography, setBiography] = useState(profile.biography);
   const [timeZone, setTimeZone] = useState(profile.timeZone);
-  const locked = profile.applicationStatus !== 'approved';
+  const locked = profile.applicationStatus !== 'approved' || profile.isPublished;
   const valid = headline.trim().length >= 3 && biography.trim().length >= 20 && timeZone.trim().length > 0;
   return (
     <GlideSurface padding="roomy" style={styles.card}>
@@ -166,7 +166,7 @@ function CredentialEditor({ profile, saving, onSave }: {
 }) {
   const [title, setTitle] = useState(profile.credential?.title ?? '');
   const [issuer, setIssuer] = useState(profile.credential?.issuer ?? '');
-  const locked = profile.applicationStatus !== 'approved' ||
+  const locked = profile.applicationStatus !== 'approved' || profile.isPublished ||
     (profile.credential?.verificationStatus !== undefined && profile.credential.verificationStatus !== 'unverified');
   return (
     <GlideSurface padding="roomy" style={styles.card}>
@@ -190,12 +190,12 @@ function CredentialEditor({ profile, saving, onSave }: {
 function OfferingEditor({ profile, saving, onSave }: {
   profile: TutorProfile;
   saving: boolean;
-  onSave: (input: { title: string; durationMinutes: 25; amountMinor: number; currency: string }) => void;
+  onSave: (input: { title: string; durationMinutes: 25; amountMinor: number; currency: 'USD' }) => void;
 }) {
   const [title, setTitle] = useState(profile.offering?.title ?? '25-minute conversation lesson');
   const [price, setPrice] = useState(profile.offering ? String(profile.offering.amountMinor / 100) : '25');
   const amountMinor = Math.round(Number(price) * 100);
-  const locked = profile.applicationStatus !== 'approved';
+  const locked = profile.applicationStatus !== 'approved' || profile.isPublished;
   const valid = title.trim().length >= 3 && Number.isInteger(amountMinor) && amountMinor >= 500 && amountMinor <= 50_000;
   return (
     <GlideSurface padding="roomy" style={styles.card}>

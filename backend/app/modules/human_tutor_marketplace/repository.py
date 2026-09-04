@@ -13,6 +13,7 @@ from app.core.errors import DependencyUnavailableError
 from app.modules.human_tutor_marketplace.schemas import (
     ChangeTutorStatusRequest,
     CreateTutorApplicationRequest,
+    Currency,
     SaveTutorCredentialRequest,
     SaveTutorOfferingRequest,
     TutorApplicationDecision,
@@ -74,7 +75,7 @@ class StoredTutorOffering:
     title: str
     duration_minutes: int
     amount_minor: int
-    currency: str
+    currency: Currency
     state: TutorOfferingState
     commission_policy: StoredMarketplacePolicyVersion
     cancellation_policy: StoredMarketplacePolicyVersion
@@ -301,6 +302,7 @@ class PostgresTutorApplicationRepository:
                               AND profile.actor_ref = :actor_ref
                               AND profile.version = :expected_version
                               AND application.status = 'approved'
+                              AND profile.is_published = false
                             RETURNING profile.application_id
                             """
                         ),
@@ -338,8 +340,16 @@ class PostgresTutorApplicationRepository:
     ) -> StoredTutorProfile | None:
         try:
             with self._engine.begin() as connection:
-                profile = self._get_profile_row(connection, actor_ref=actor_ref)
-                if profile is None or profile["application_status"] != "approved":
+                profile = self._get_profile_row(
+                    connection,
+                    actor_ref=actor_ref,
+                    for_update=True,
+                )
+                if (
+                    profile is None
+                    or profile["application_status"] != "approved"
+                    or profile["is_published"]
+                ):
                     return None
                 existing = (
                     connection.execute(
@@ -363,10 +373,10 @@ class PostgresTutorApplicationRepository:
                         text(
                             """
                             INSERT INTO marketplace_tutor_credential
-                              (credential_id, application_id, tutor_id, version, credential_type,
-                               title, issuer)
+                              (credential_id, application_id, tutor_id, credential_type, title,
+                               issuer)
                             VALUES
-                              (:credential_id, :application_id, :tutor_id, 1, :credential_type,
+                              (:credential_id, :application_id, :tutor_id, :credential_type,
                                :title, :issuer)
                             """
                         ),
@@ -491,8 +501,16 @@ class PostgresTutorApplicationRepository:
     ) -> StoredTutorProfile | None:
         try:
             with self._engine.begin() as connection:
-                profile = self._get_profile_row(connection, actor_ref=actor_ref)
-                if profile is None or profile["application_status"] != "approved":
+                profile = self._get_profile_row(
+                    connection,
+                    actor_ref=actor_ref,
+                    for_update=True,
+                )
+                if (
+                    profile is None
+                    or profile["application_status"] != "approved"
+                    or profile["is_published"]
+                ):
                     return None
                 existing = (
                     connection.execute(
@@ -517,12 +535,12 @@ class PostgresTutorApplicationRepository:
                         text(
                             """
                             INSERT INTO marketplace_tutor_offering
-                              (offering_id, application_id, tutor_id, version, title,
-                               duration_minutes, amount_minor, currency, state,
+                              (offering_id, application_id, tutor_id, title,
+                               duration_minutes, amount_minor, currency,
                                commission_policy_id, cancellation_policy_id)
                             VALUES
-                              (:offering_id, :application_id, :tutor_id, 1, :title,
-                               :duration_minutes, :amount_minor, :currency, 'draft',
+                              (:offering_id, :application_id, :tutor_id, :title,
+                               :duration_minutes, :amount_minor, :currency,
                                :commission_policy_id, :cancellation_policy_id)
                             """
                         ),
@@ -796,11 +814,9 @@ class PostgresTutorApplicationRepository:
                     text(
                         """
                         INSERT INTO marketplace_tutor_application
-                          (application_id, actor_ref, status, version, headline, biography,
-                           time_zone)
+                          (application_id, actor_ref, headline, biography, time_zone)
                         VALUES
-                          (:application_id, :actor_ref, 'draft', 1, :headline, :biography,
-                           :time_zone)
+                          (:application_id, :actor_ref, :headline, :biography, :time_zone)
                         """
                     ),
                     {
@@ -1187,7 +1203,9 @@ class PostgresTutorApplicationRepository:
         connection: Connection,
         *,
         actor_ref: str,
+        for_update: bool = False,
     ) -> RowMapping | None:
+        suffix = " FOR UPDATE OF profile" if for_update else ""
         return (
             connection.execute(
                 text(
@@ -1201,6 +1219,7 @@ class PostgresTutorApplicationRepository:
                       ON application.application_id = profile.application_id
                     WHERE profile.actor_ref = :actor_ref
                     """
+                    + suffix
                 ),
                 {"actor_ref": actor_ref},
             )

@@ -145,3 +145,38 @@ test('capable operator can claim and approve an application with a reason', asyn
   await waitFor(() => expect(mockDecideCredential).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(screen.getByText(/Example Institute · verified/)).toBeTruthy());
 });
+
+test('operator can reject then page without skipping the next queued application', async () => {
+  process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ENABLED = 'true';
+  const underReview: TutorApplication = { ...submitted, status: 'under_review', version: 3 };
+  const rejected: TutorApplication = {
+    ...underReview,
+    status: 'rejected',
+    version: 4,
+    reviewedAt: '2026-09-04T13:00:00Z',
+    decisionReason: 'Application evidence did not meet the review bar.',
+  };
+  const laterApplication: TutorApplication = {
+    ...submitted,
+    applicationId: '7da10dbc-0546-4f74-a751-3cad7b5058b3',
+    headline: 'Later submitted tutor',
+  };
+  mockList
+    .mockResolvedValueOnce({ items: [underReview], offset: 0, limit: 20, hasMore: true })
+    .mockResolvedValueOnce({ items: [laterApplication], offset: 0, limit: 20, hasMore: false });
+  mockDecide.mockResolvedValue(rejected);
+
+  const screen = await render(<SafeAreaProvider initialMetrics={safeAreaMetrics}><TutorOperationsScreen /></SafeAreaProvider>);
+  await waitFor(() => expect(screen.getByTestId('load-more-tutor-applications')).toBeTruthy());
+  await fireEvent.changeText(
+    screen.getByLabelText(`Decision reason for ${underReview.headline}`),
+    'Application evidence did not meet the review bar.',
+  );
+  await fireEvent.press(screen.getByText('Reject'));
+  await waitFor(() => expect(screen.queryByText(underReview.headline)).toBeNull());
+  await fireEvent.press(screen.getByTestId('load-more-tutor-applications'));
+
+  await waitFor(() => expect(screen.getByText('Later submitted tutor')).toBeTruthy());
+  expect(mockList).toHaveBeenNthCalledWith(2, undefined, 0);
+  expect(screen.queryByTestId('load-more-tutor-applications')).toBeNull();
+});

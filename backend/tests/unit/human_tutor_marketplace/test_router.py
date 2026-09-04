@@ -208,6 +208,7 @@ class MemoryRepository:
         if (
             profile is None
             or profile.application_status != "approved"
+            or profile.is_published
             or profile.version != request.expected_version
         ):
             return None
@@ -228,7 +229,7 @@ class MemoryRepository:
         request: SaveTutorCredentialRequest,
     ) -> StoredTutorProfile | None:
         profile = self.profiles.get(actor_ref)
-        if profile is None or profile.application_status != "approved":
+        if profile is None or profile.application_status != "approved" or profile.is_published:
             return None
         current = profile.credential
         if current is None and request.expected_version == 0:
@@ -302,7 +303,7 @@ class MemoryRepository:
         request: SaveTutorOfferingRequest,
     ) -> StoredTutorProfile | None:
         profile = self.profiles.get(actor_ref)
-        if profile is None or profile.application_status != "approved":
+        if profile is None or profile.application_status != "approved" or profile.is_published:
             return None
         current = profile.offering
         policy_time = datetime(2026, 9, 4, tzinfo=UTC)
@@ -807,6 +808,16 @@ def test_approved_tutor_can_prepare_private_supply_but_cannot_publish_without_pa
             },
             headers=authorization("tutor-token"),
         )
+        credential_retry = client.post(
+            "/v1/tutor-profile/credential",
+            json={
+                "expected_version": 0,
+                "credential_type": "certificate",
+                "title": "Adult language teaching certificate",
+                "issuer": "Example Institute",
+            },
+            headers=authorization("tutor-token"),
+        )
         offering = client.post(
             "/v1/tutor-profile/offering",
             json={
@@ -815,6 +826,28 @@ def test_approved_tutor_can_prepare_private_supply_but_cannot_publish_without_pa
                 "duration_minutes": 25,
                 "amount_minor": 2500,
                 "currency": "USD",
+            },
+            headers=authorization("tutor-token"),
+        )
+        offering_retry = client.post(
+            "/v1/tutor-profile/offering",
+            json={
+                "expected_version": 0,
+                "title": "25-minute conversation lesson",
+                "duration_minutes": 25,
+                "amount_minor": 2500,
+                "currency": "USD",
+            },
+            headers=authorization("tutor-token"),
+        )
+        unsupported_currency = client.post(
+            "/v1/tutor-profile/offering",
+            json={
+                "expected_version": 0,
+                "title": "25-minute conversation lesson",
+                "duration_minutes": 25,
+                "amount_minor": 2500,
+                "currency": "EUR",
             },
             headers=authorization("tutor-token"),
         )
@@ -860,7 +893,10 @@ def test_approved_tutor_can_prepare_private_supply_but_cannot_publish_without_pa
     assert profile.json()["publication_blockers"] == ["payout_not_ready", "offering_missing"]
     assert edited.status_code == 200
     assert credential.status_code == 200
+    assert credential_retry.json() == credential.json()
     assert offering.status_code == 200
+    assert offering_retry.json() == offering.json()
+    assert unsupported_currency.status_code == 422
     assert offering.json()["offering"]["state"] == "draft"
     assert offering.json()["offering"]["commission_policy"]["commission_basis_points"] == 2000
     assert publication.status_code == 409

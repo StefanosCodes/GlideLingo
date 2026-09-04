@@ -13,11 +13,14 @@ import {
   isLessonTutorEnabled,
   useLessonTutor,
 } from '@/features/learning-session/lesson-tutor/use-lesson-tutor';
+import { VoicePracticePanel } from '@/features/learning-session/voice-practice/voice-practice-panel';
 import {
   type CheckObservation,
   type LessonMode,
   summarizeLessonCompletion,
 } from '@/features/learning-progress/evidence-policy';
+import { isVoiceEnabled } from '@/features/speak/voice-config';
+import { voiceScenarioForLesson } from '@/features/speak/voice-scenarios';
 import { useTheme } from '@/hooks/use-theme';
 import { type LessonCompletionResult, useLearning } from '@/providers/learning-provider';
 
@@ -46,6 +49,7 @@ export function LessonSittingView({
   const previousEvidence = lessonEvidence.find((record) => record.lessonId === lessonId);
   const [step, setStep] = useState(0);
   const [askOpen, setAskOpen] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const [selectedChoices, setSelectedChoices] = useState<Record<number, string | null>>({});
   const [checkObservations, setCheckObservations] = useState<Record<number, CheckObservation>>({});
   const [practiceResult, setPracticeResult] = useState<LessonCompletionResult | null>(null);
@@ -61,6 +65,8 @@ export function LessonSittingView({
     visible_step_index: step,
   });
   const tutorAvailable = isLessonTutorEnabled() && mode === 'learn' && beats.length > 0 && !done;
+  const voiceScenario = found ? voiceScenarioForLesson(found.course.id, found.lesson.id) : null;
+  const voiceAvailable = isVoiceEnabled() && mode === 'learn' && voiceScenario !== null;
   const progress = done || beats.length === 0 ? 1 : step / total;
   const completionInput = useMemo(
     () => ({
@@ -106,6 +112,7 @@ export function LessonSittingView({
 
   function finishAndOpenNext() {
     tutor.cancel();
+    setVoiceOpen(false);
     if (followingAuthored?.lesson) {
       openLesson(followingAuthored.lesson.id, 'learn');
       return;
@@ -115,11 +122,13 @@ export function LessonSittingView({
 
   function finishAndHome() {
     tutor.cancel();
+    setVoiceOpen(false);
     onClose();
   }
 
   function leaveLesson() {
     tutor.cancel();
+    setVoiceOpen(false);
     onClose();
   }
 
@@ -176,9 +185,24 @@ export function LessonSittingView({
             <Pressable
               accessibilityLabel="Ask about this lesson"
               accessibilityRole="button"
-              onPress={() => setAskOpen(true)}
+              onPress={() => {
+                setVoiceOpen(false);
+                setAskOpen(true);
+              }}
               style={styles.askAction}>
               <ThemedText type="footnote">Ask</ThemedText>
+            </Pressable>
+          ) : null}
+          {voiceAvailable ? (
+            <Pressable
+              accessibilityLabel="Practice this lesson by voice"
+              accessibilityRole="button"
+              onPress={() => {
+                setAskOpen(false);
+                setVoiceOpen(true);
+              }}
+              style={styles.askAction}>
+              <ThemedText type="footnote">Speak</ThemedText>
             </Pressable>
           ) : null}
         </View>
@@ -238,6 +262,14 @@ export function LessonSittingView({
           onRetry={tutor.retry}
           onSend={tutor.send}
           state={tutor.state}
+        />
+      ) : null}
+      {voiceOpen && voiceAvailable && voiceScenario && found ? (
+        <VoicePracticePanel
+          courseId={voiceScenario.courseId}
+          lessonTitle={found.lesson.title}
+          onClose={() => setVoiceOpen(false)}
+          scenarioId={voiceScenario.scenarioId}
         />
       ) : null}
     </ThemedView>

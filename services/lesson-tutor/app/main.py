@@ -25,6 +25,7 @@ from app.integrations.openai.realtime_voice import OpenAIRealtimeVoiceAdapter
 from app.modules.lesson_tutor.router import router as lesson_tutor_router
 from app.modules.lesson_tutor.service import LessonTutorService
 from app.modules.voice.router import router as voice_router
+from app.modules.voice.scenario_resolver import AuthoredVoiceScenarioResolver
 from app.modules.voice.service import VoiceRealtimeService, VoiceScenarioResolver
 
 
@@ -45,6 +46,9 @@ def create_app(
         if lesson_tutor_service is None and settings.enabled and settings.openai_api_key is not None
         else None
     )
+    resolved_voice_scenario_resolver = voice_scenario_resolver or AuthoredVoiceScenarioResolver(
+        content_root=settings.content_root
+    )
     voice_adapter = (
         OpenAIRealtimeVoiceAdapter(
             api_key=settings.openai_api_key.get_secret_value(),
@@ -55,7 +59,6 @@ def create_app(
         and settings.voice_enabled
         and settings.openai_api_key is not None
         and settings.openai_realtime_model is not None
-        and voice_scenario_resolver is not None
         else None
     )
 
@@ -85,7 +88,7 @@ def create_app(
     application.state.voice_realtime_service = voice_realtime_service or VoiceRealtimeService(
         enabled=settings.voice_enabled,
         adapter=voice_adapter,
-        scenario_resolver=voice_scenario_resolver,
+        scenario_resolver=resolved_voice_scenario_resolver,
         voice_id=settings.openai_realtime_voice_id,
         deadline_seconds=settings.voice_service_deadline_seconds,
     )

@@ -66,3 +66,38 @@ def test_enabled_service_constructs_and_closes_private_adapter(
         assert instances[0].closed is False
 
     assert instances[0].closed is True
+
+
+def test_enabled_voice_constructs_the_default_authored_scenario_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeVoiceAdapter:
+        def __init__(self, *, api_key: str, model: str, provider_timeout_seconds: float) -> None:
+            assert api_key == "test-only-key"
+            assert model == "configured-realtime-model"
+            assert provider_timeout_seconds == 8
+            self.closed = False
+            instances.append(self)
+
+        async def close(self) -> None:
+            self.closed = True
+
+    instances: list[FakeVoiceAdapter] = []
+    monkeypatch.setattr(main_module, "OpenAIRealtimeVoiceAdapter", FakeVoiceAdapter)
+    settings = Settings(
+        _env_file=None,
+        voice_enabled=True,
+        openai_api_key="test-only-key",
+        openai_realtime_model="configured-realtime-model",
+        openai_realtime_voice_id="configured-voice",
+    )
+
+    application = create_app(settings)
+    with TestClient(application) as client:
+        assert client.get("/health/live").status_code == 200
+        assert len(instances) == 1
+        service = application.state.voice_realtime_service
+        assert service._scenario_resolver.__class__.__name__ == "AuthoredVoiceScenarioResolver"
+        assert instances[0].closed is False
+
+    assert instances[0].closed is True

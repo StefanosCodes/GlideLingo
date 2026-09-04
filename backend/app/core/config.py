@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     revenuecat_entitlement_freshness_seconds: int = Field(default=900, ge=60, le=3600)
     revenuecat_webhook_max_body_bytes: int = Field(default=65536, ge=1024, le=262144)
     revenuecat_webhook_signature_tolerance_seconds: int = Field(default=300, ge=30, le=600)
+    human_tutor_marketplace_enabled: bool = False
+    human_tutor_marketplace_pseudonym_key: SecretStr | None = None
+    human_tutor_marketplace_actor_allowlist: tuple[str, ...] = ()
     clerk_issuer: str | None = None
     clerk_jwks_url: str | None = None
     clerk_audience: str | None = None
@@ -202,6 +205,31 @@ class Settings(BaseSettings):
             raise ValueError(
                 "RevenueCat API key must be an app public SDK key for the read-only "
                 "Customer Info endpoint, not a project secret key"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_human_tutor_marketplace_configuration(self) -> Self:
+        if not self.human_tutor_marketplace_enabled:
+            return self
+        if (
+            self.human_tutor_marketplace_pseudonym_key is None
+            or len(self.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()) < 32
+        ):
+            raise ValueError(
+                "A human tutor marketplace pseudonym key of at least 32 bytes is required "
+                "when enabled"
+            )
+        if not self.human_tutor_marketplace_actor_allowlist or any(
+            not actor.strip() for actor in self.human_tutor_marketplace_actor_allowlist
+        ):
+            raise ValueError(
+                "A non-empty human tutor marketplace actor allowlist is required when enabled"
+            )
+        if self.clerk_configuration is None:
+            raise ValueError(
+                "Clerk authentication must be configured when the human tutor marketplace "
+                "is enabled"
             )
         return self
 

@@ -12,6 +12,7 @@ import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { FirstNameCompletionGate } from '@/features/auth/first-name-completion-gate';
+import { isHumanTutorMarketplaceEnabled } from '@/features/tutor-marketplace/config';
 import { useTheme, useThemeController } from '@/hooks/use-theme';
 import { AppThemeProvider } from '@/providers/app-theme-provider';
 import { BillingProvider } from '@/providers/billing-provider';
@@ -130,6 +131,9 @@ function AppNavigation({ signedIn }: { signedIn: boolean }) {
           <Stack.Screen name="kit" />
           <Stack.Screen name="diagnostics" />
           <Stack.Screen name="subscription" />
+        </Stack.Protected>
+        <Stack.Protected guard={signedIn && isHumanTutorMarketplaceEnabled()}>
+          <Stack.Screen name="tutor/apply" />
         </Stack.Protected>
         <Stack.Screen name="sso-callback" />
       </Stack>

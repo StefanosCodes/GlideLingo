@@ -152,6 +152,22 @@ a real provider spend-control policy. Enable the private flag first, the public 
 the client flag last. See [`infra/gcp/README.md`](infra/gcp/README.md) for the rollout and environment
 boundaries.
 
+### Human tutor marketplace foundation
+
+The first marketplace slice is an invitation-only tutor application and operator review flow. It
+does not publish tutor profiles, take payments, expose contact details, or provide in-app video.
+Tutor identities are stored as marketplace-scoped HMAC pseudonyms, review access is granted through
+a database capability, and approved profiles remain unpublished.
+
+Both marketplace flags fail closed and remain disabled by default:
+
+- `EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ENABLED` exposes the signed-in application screen.
+- `GLIDELINGO_HUMAN_TUTOR_MARKETPLACE_ENABLED` registers the authenticated API routes.
+
+Before a private launch, apply `backend/migrations/006_human_tutor_marketplace_core.sql`, configure
+an independent server-only pseudonym key of at least 32 bytes, and explicitly populate the server
+actor allowlist. The browser bundle must never receive the pseudonym key or allowlist.
+
 Stop the project database without deleting its named volume:
 
 ```bash

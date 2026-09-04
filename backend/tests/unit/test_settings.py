@@ -69,6 +69,32 @@ def test_revenuecat_server_authorization_is_disabled_by_default() -> None:
     assert settings.revenuecat_entitlement_freshness_seconds == 900
 
 
+def test_human_tutor_marketplace_is_disabled_by_default() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.human_tutor_marketplace_enabled is False
+    assert settings.human_tutor_marketplace_pseudonym_key is None
+    assert settings.human_tutor_marketplace_actor_allowlist == ()
+
+
+def test_enabled_human_tutor_marketplace_requires_fail_closed_configuration() -> None:
+    with pytest.raises(ValidationError, match="pseudonym key"):
+        Settings(_env_file=None, human_tutor_marketplace_enabled=True)
+
+
+def test_enabled_human_tutor_marketplace_accepts_clerk_and_allowlist() -> None:
+    settings = Settings(
+        _env_file=None,
+        human_tutor_marketplace_enabled=True,
+        human_tutor_marketplace_pseudonym_key="m" * 32,
+        human_tutor_marketplace_actor_allowlist=("user_tutor_123",),
+        clerk_issuer="https://clerk.glidelingo.test",
+        clerk_jwks_url="https://clerk.glidelingo.test/.well-known/jwks.json",
+    )
+
+    assert settings.human_tutor_marketplace_enabled is True
+
+
 def test_enabled_revenuecat_requires_all_server_only_secrets() -> None:
     with pytest.raises(ValidationError, match="RevenueCat API key"):
         Settings(_env_file=None, revenuecat_enabled=True)

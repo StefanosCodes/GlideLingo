@@ -8,6 +8,7 @@ import { GlideSurface } from '@/components/ui/glide-surface';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
 import { AccountSummary } from '@/features/auth/account-summary';
+import { isHumanTutorMarketplaceEnabled } from '@/features/tutor-marketplace/config';
 import {
   capabilityStateForMode,
   strongestCapabilityEvidence,
@@ -169,6 +170,19 @@ export default function ProfileScreen() {
       </GlideSurface>
 
       <AccountSummary />
+
+      {isHumanTutorMarketplaceEnabled() ? (
+        <GlideSurface padding="roomy" style={styles.block}>
+          <ThemedText type="eyebrow" themeColor="textSecondary">
+            HUMAN TUTOR MARKETPLACE
+          </ThemedText>
+          <ThemedText type="title3">Interested in teaching?</ThemedText>
+          <ThemedText type="footnote" themeColor="textSecondary">
+            Create a private tutor application for the invitation-only marketplace.
+          </ThemedText>
+          <GlideButton label="Apply to become a tutor" onPress={() => router.push('/tutor/apply')} variant="secondary" />
+        </GlideSurface>
+      ) : null}
 
       <View style={styles.section}>
         <View style={styles.sectionHeading}>

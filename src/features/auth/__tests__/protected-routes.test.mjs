@@ -24,6 +24,14 @@ test('root layout waits for Clerk before choosing signed-in or signed-out routes
   assert.doesNotMatch(rootLayout, /const signedIn = isLoaded && isSignedIn && Boolean\(userId\)/);
 });
 
+test('human tutor application route requires both sign-in and the explicit client flag', () => {
+  const marketplaceBlock = rootLayout.match(
+    /<Stack\.Protected guard=\{signedIn && isHumanTutorMarketplaceEnabled\(\)\}>([\s\S]*?)<\/Stack\.Protected>/,
+  )?.[1];
+  assert.ok(marketplaceBlock, 'marketplace feature-protected route group is missing');
+  assert.match(marketplaceBlock, /name=["']tutor\/apply["']/);
+});
+
 test('previously distributed learning routes remain authenticated redirects', () => {
   assert.match(legacyPath, /<Redirect href=["']\/quests["']/);
   assert.match(legacyReview, /<Redirect href=["']\/phrases["']/);

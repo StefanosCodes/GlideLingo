@@ -14,6 +14,8 @@ from app.core.errors import (
     AuthenticationUnavailableError,
     BillingUnavailableError,
     DependencyUnavailableError,
+    HumanTutorMarketplaceForbiddenError,
+    HumanTutorMarketplaceUnavailableError,
     InternalErrorMiddleware,
     LessonContextNotFoundError,
     LessonTutorConflictError,
@@ -21,15 +23,21 @@ from app.core.errors import (
     LessonTutorTimeoutError,
     LessonTutorUnavailableError,
     ProRequiredError,
+    TutorApplicationConflictError,
+    TutorApplicationNotFoundError,
     authentication_unavailable_handler,
     billing_unavailable_handler,
     dependency_unavailable_handler,
+    human_tutor_marketplace_forbidden_handler,
+    human_tutor_marketplace_unavailable_handler,
     lesson_context_not_found_handler,
     lesson_tutor_conflict_handler,
     lesson_tutor_limited_handler,
     lesson_tutor_timeout_handler,
     lesson_tutor_unavailable_handler,
     pro_required_handler,
+    tutor_application_conflict_handler,
+    tutor_application_not_found_handler,
 )
 from app.core.logging import configure_logging
 from app.core.request_id import REQUEST_ID_HEADER, RequestIdMiddleware
@@ -39,6 +47,15 @@ from app.integrations.revenuecat.client import RevenueCatHttpClient
 from app.modules.billing.repository import PostgresEntitlementRepository
 from app.modules.billing.router import router as billing_router
 from app.modules.billing.service import BillingService
+from app.modules.human_tutor_marketplace.repository import (
+    PostgresTutorApplicationRepository,
+)
+from app.modules.human_tutor_marketplace.router import (
+    router as human_tutor_marketplace_router,
+)
+from app.modules.human_tutor_marketplace.service import (
+    HumanTutorMarketplaceService,
+)
 from app.modules.lesson_tutor.guard import GuardLimits, PostgresLessonTutorGuard
 from app.modules.lesson_tutor.router import router as lesson_tutor_router
 from app.modules.lesson_tutor.service import LessonTutorService
@@ -49,6 +66,7 @@ def create_app(
     *,
     lesson_tutor_service: LessonTutorService | None = None,
     billing_service: BillingService | None = None,
+    human_tutor_marketplace_service: HumanTutorMarketplaceService | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings.log_level)
@@ -78,6 +96,18 @@ def create_app(
         and settings.revenuecat_api_key is not None
         else None
     )
+    marketplace_service = human_tutor_marketplace_service
+    if marketplace_service is None and settings.human_tutor_marketplace_enabled:
+        marketplace_service = HumanTutorMarketplaceService(
+            enabled=True,
+            repository=PostgresTutorApplicationRepository(engine=database_engine),
+            pseudonym_key=(
+                settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
+                if settings.human_tutor_marketplace_pseudonym_key is not None
+                else None
+            ),
+            actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+        )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -156,6 +186,8 @@ def create_app(
         if clerk_configuration is not None
         else None
     )
+    if marketplace_service is not None:
+        application.state.human_tutor_marketplace_service = marketplace_service
     application.add_exception_handler(
         DependencyUnavailableError,
         dependency_unavailable_handler,
@@ -180,6 +212,22 @@ def create_app(
     application.add_exception_handler(LessonTutorLimitedError, lesson_tutor_limited_handler)
     application.add_exception_handler(ProRequiredError, pro_required_handler)
     application.add_exception_handler(BillingUnavailableError, billing_unavailable_handler)
+    application.add_exception_handler(
+        HumanTutorMarketplaceUnavailableError,
+        human_tutor_marketplace_unavailable_handler,
+    )
+    application.add_exception_handler(
+        HumanTutorMarketplaceForbiddenError,
+        human_tutor_marketplace_forbidden_handler,
+    )
+    application.add_exception_handler(
+        TutorApplicationNotFoundError,
+        tutor_application_not_found_handler,
+    )
+    application.add_exception_handler(
+        TutorApplicationConflictError,
+        tutor_application_conflict_handler,
+    )
     application.add_middleware(InternalErrorMiddleware)
     application.add_middleware(
         CORSMiddleware,
@@ -194,6 +242,8 @@ def create_app(
     application.include_router(lesson_tutor_router)
     application.include_router(billing_router)
     application.include_router(auth_router)
+    if marketplace_service is not None:
+        application.include_router(human_tutor_marketplace_router)
     return application
 
 

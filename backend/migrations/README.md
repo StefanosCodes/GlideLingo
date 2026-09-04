@@ -99,3 +99,21 @@ Keep `GLIDELINGO_REVENUECAT_ENABLED=false` and `GLIDELINGO_LESSON_TUTOR_ENABLED=
 least-privileged app public SDK key used by the server's read-only Customer Info request, environment
 filter, and live sandbox evidence are all in place. The development Terraform contract must pin all
 four RevenueCat Secret Manager version numbers before the flag can be enabled.
+
+## Human tutor marketplace application core
+
+`006_human_tutor_marketplace_core.sql` is the first additive human-tutor marketplace migration.
+Numbers `004` and `005` are reserved by the in-flight affiliate and durable billing-event stack; do
+not renumber or apply `006` until the integration train has reconciled and applied those predecessors.
+The migration creates only the tutor application, normalized language/specialty, unpublished profile,
+operator-capability, and immutable audit facts required by the first vertical slice.
+
+Apply it with the DDL-capable operator after `SET ROLE cloudsqlsuperuser`. The API runtime receives no
+ability to grant operator capabilities, update or delete audit events, or run DDL. Seed the first
+`review_tutor_applications` capability through an approved operator procedure using the exact
+`mktusr_v1_` pseudonym derived with the environment's marketplace pseudonym key; never store the raw
+Clerk user ID in these tables.
+
+Keep `GLIDELINGO_HUMAN_TUTOR_MARKETPLACE_ENABLED=false` until the migration and grants are verified,
+the server-only pseudonym key is pinned, Clerk is configured, and an explicit test-actor allowlist is
+present. This migration does not enable discovery, messaging, calendar access, payments, or payouts.

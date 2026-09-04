@@ -11,14 +11,19 @@ import { setApiAccessTokenProvider } from '@/api/auth-token';
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
+import {
+  AnalyticsProvider,
+  AnalyticsScreenTracker,
+  useAnalyticsIdentity,
+} from '@/features/analytics/analytics-provider';
 import { FirstNameCompletionGate } from '@/features/auth/first-name-completion-gate';
+import { DesktopUpdateProvider } from '@/features/desktop-update/desktop-update-provider';
 import { useTheme, useThemeController } from '@/hooks/use-theme';
 import { AppThemeProvider } from '@/providers/app-theme-provider';
 import { BillingProvider } from '@/providers/billing-provider';
 import { GlideLingoClerkProvider } from '@/providers/clerk-provider';
 import { useAuth } from '@/providers/clerk-runtime';
-import { LearningProvider } from '@/providers/learning-provider';
-import { DesktopUpdateProvider } from '@/features/desktop-update/desktop-update-provider';
+import { LearningProvider, useLearning } from '@/providers/learning-provider';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -32,22 +37,25 @@ export default function RootLayout() {
 
   const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim();
   return (
-    <AppThemeProvider>
-      <DesktopUpdateProvider>
-        {publishableKey ? (
-          <GlideLingoClerkProvider publishableKey={publishableKey}>
-            <ClerkApp />
-          </GlideLingoClerkProvider>
-        ) : (
-          <MissingClerkConfiguration />
-        )}
-      </DesktopUpdateProvider>
-    </AppThemeProvider>
+    <AnalyticsProvider>
+      <AppThemeProvider>
+        <DesktopUpdateProvider>
+          {publishableKey ? (
+            <GlideLingoClerkProvider publishableKey={publishableKey}>
+              <ClerkApp />
+            </GlideLingoClerkProvider>
+          ) : (
+            <MissingClerkConfiguration />
+          )}
+        </DesktopUpdateProvider>
+      </AppThemeProvider>
+    </AnalyticsProvider>
   );
 }
 
 function ClerkApp() {
   const { getToken, isLoaded, isSignedIn, userId } = useAuth();
+  const signedIn = isSignedIn && Boolean(userId);
   const getTokenRef = useRef(getToken);
   useLayoutEffect(() => {
     getTokenRef.current = getToken;
@@ -57,6 +65,7 @@ function ClerkApp() {
     () => setApiAccessTokenProvider(() => getTokenRef.current()),
     [],
   );
+  useAnalyticsIdentity(isLoaded, signedIn && userId ? userId : null);
 
   if (!isLoaded) {
     return (
@@ -66,14 +75,12 @@ function ClerkApp() {
     );
   }
 
-  const signedIn = isSignedIn && Boolean(userId);
-
   return (
     <BillingProvider userId={signedIn ? userId : null}>
       {signedIn && userId ? (
         <LearningProvider key={userId} storageScope={userId}>
           <FirstNameCompletionGate>
-            <AppNavigation signedIn />
+            <SignedInAppNavigation />
           </FirstNameCompletionGate>
         </LearningProvider>
       ) : (
@@ -81,6 +88,11 @@ function ClerkApp() {
       )}
     </BillingProvider>
   );
+}
+
+function SignedInAppNavigation() {
+  const { activeLessonId } = useLearning();
+  return <AppNavigation lessonActive={Boolean(activeLessonId)} signedIn />;
 }
 
 function AuthLoadingScreen() {
@@ -101,7 +113,13 @@ function AuthLoadingScreen() {
   );
 }
 
-function AppNavigation({ signedIn }: { signedIn: boolean }) {
+function AppNavigation({
+  lessonActive = false,
+  signedIn,
+}: {
+  lessonActive?: boolean;
+  signedIn: boolean;
+}) {
   const colors = useTheme();
   const { scheme } = useThemeController();
   const isDark = scheme === 'dark';
@@ -120,6 +138,7 @@ function AppNavigation({ signedIn }: { signedIn: boolean }) {
 
   return (
     <NavigationThemeProvider value={navigationTheme}>
+      <AnalyticsScreenTracker lessonActive={lessonActive} />
       <AnimatedSplashOverlay />
       <Stack screenOptions={{ contentStyle: { backgroundColor: colors.background }, headerShown: false }}>
         <Stack.Protected guard={!signedIn}>

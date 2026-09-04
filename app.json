@@ -58,7 +58,8 @@
       "@clerk/expo",
       "expo-secure-store",
       "expo-apple-authentication",
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-localization"
     ],
     "experiments": {
       "typedRoutes": true,

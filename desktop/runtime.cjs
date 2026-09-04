@@ -9,6 +9,10 @@ const PRODUCTION_API_ORIGIN = 'https://glidelingo-api-production-50843312405.us-
 const PRODUCTION_CLERK_ORIGIN = 'https://clerk.glidelingo.com';
 const REVENUECAT_WEB_SDK_ORIGIN = 'https://sdk.revenuecat-static.com';
 const REVENUECAT_BRANDING_ORIGIN = 'https://da08ctfrofx1b.cloudfront.net';
+const POSTHOG_INGESTION_ORIGINS = Object.freeze([
+  'https://eu.i.posthog.com',
+  'https://us.i.posthog.com',
+]);
 const AUTH_CALLBACK_PATHS = new Set(['/sign-in', '/sso-callback']);
 const AUTH_CALLBACK_DESTINATIONS = new Set([
   `${APP_SCHEME}://${APP_HOST}/sign-in`,
@@ -61,6 +65,7 @@ function buildContentSecurityPolicy({
 } = {}) {
   const exactApiOrigin = validateProductionApiOrigin(apiOrigin);
   const exactClerkOrigin = validateProductionClerkOrigin(clerkOrigin);
+  const posthogIngestionOrigins = POSTHOG_INGESTION_ORIGINS.join(' ');
 
   return [
     "default-src 'self'",
@@ -68,7 +73,7 @@ function buildContentSecurityPolicy({
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' data: blob: ${exactClerkOrigin} https://img.clerk.com https://*.clerk.com ${REVENUECAT_BRANDING_ORIGIN} https://*.stripe.com https://*.paddle.com https://*.revenuecat.com`,
     `font-src 'self' data: ${REVENUECAT_BRANDING_ORIGIN}`,
-    `connect-src 'self' ${exactApiOrigin} ${exactClerkOrigin} https://api.clerk.com https://*.protect.clerk.com:* https://api.revenuecat.com https://e.revenue.cat ${REVENUECAT_WEB_SDK_ORIGIN} https://*.stripe.com https://*.paddle.com wss://${new URL(exactClerkOrigin).hostname}`,
+    `connect-src 'self' ${exactApiOrigin} ${exactClerkOrigin} https://api.clerk.com https://*.protect.clerk.com:* https://api.revenuecat.com https://e.revenue.cat ${REVENUECAT_WEB_SDK_ORIGIN} ${posthogIngestionOrigins} https://*.stripe.com https://*.paddle.com wss://${new URL(exactClerkOrigin).hostname}`,
     "media-src 'self' data: blob:",
     "object-src 'none'",
     `frame-src ${exactClerkOrigin} https://accounts.google.com https://appleid.apple.com https://challenges.cloudflare.com https://*.protect.clerk.com https://js.stripe.com https://hooks.stripe.com https://*.paddle.com`,
@@ -422,6 +427,7 @@ module.exports = {
   APP_SCHEME,
   DEVELOPMENT_CLERK_ORIGIN,
   PACKAGED_RENDERER_ORIGIN,
+  POSTHOG_INGESTION_ORIGINS,
   PRODUCTION_API_ORIGIN,
   PRODUCTION_CLERK_ORIGIN,
   REVENUECAT_BRANDING_ORIGIN,

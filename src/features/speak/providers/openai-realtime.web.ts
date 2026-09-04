@@ -19,6 +19,8 @@ export async function connectOpenAIRealtime({
   onEvent,
 }: ConnectRealtimeOptions): Promise<RealtimeTransport> {
   const { dataChannel, microphoneStream, peer } = prepared;
+  let closed = false;
+  let connectionLost = false;
   const remoteAudio = document.createElement('audio');
   remoteAudio.autoplay = true;
   remoteAudio.setAttribute('aria-hidden', 'true');
@@ -34,11 +36,17 @@ export async function connectOpenAIRealtime({
       onEvent(null);
     }
   });
-  peer.addEventListener('connectionstatechange', () => {
+  const handleConnectionLost = () => {
+    if (closed || connectionLost) return;
+    connectionLost = true;
+    onConnectionLost();
+  };
+  const handlePeerStateChange = () => {
     if (peer.connectionState === 'disconnected' || peer.connectionState === 'failed') {
-      onConnectionLost();
+      handleConnectionLost();
     }
-  });
+  };
+  peer.addEventListener('connectionstatechange', handlePeerStateChange);
 
   try {
     await waitForDataChannel(dataChannel, async () => {
@@ -47,6 +55,8 @@ export async function connectOpenAIRealtime({
         sdp: admission.connection.answer_sdp,
       });
     });
+    dataChannel.addEventListener('error', handleConnectionLost);
+    dataChannel.addEventListener('close', handleConnectionLost);
     onConnected();
   } catch (error) {
     dataChannel.close();
@@ -55,12 +65,14 @@ export async function connectOpenAIRealtime({
     throw error;
   }
 
-  let closed = false;
   return {
     admission,
     close() {
       if (closed) return;
       closed = true;
+      peer.removeEventListener('connectionstatechange', handlePeerStateChange);
+      dataChannel.removeEventListener('error', handleConnectionLost);
+      dataChannel.removeEventListener('close', handleConnectionLost);
       dataChannel.close();
       peer.close();
       microphoneStream.getTracks().forEach((track) => track.stop());

@@ -95,6 +95,27 @@ class FakeGateway:
         self.closed = True
 
 
+class MisroutingGateway(FakeGateway):
+    def __init__(self, *, call_number: int, application_session: bool = False) -> None:
+        super().__init__()
+        self.call_number = call_number
+        self.application_session = application_session
+
+    async def create(
+        self, payload: PrivateVoiceSessionRequest, *, request_id: str
+    ) -> PrivateVoiceSessionResponse:
+        response = await super().create(payload, request_id=request_id)
+        if len(self.creates) != self.call_number:
+            return response
+        if self.application_session:
+            return response.model_copy(
+                update={"application_session_id": UUID("00000000-0000-4000-8000-000000000099")}
+            )
+        return response.model_copy(
+            update={"spec": response.spec.model_copy(update={"scenario_id": "wrong-scenario"})}
+        )
+
+
 def service(gateway: FakeGateway, clock: list[datetime] | None = None) -> VoiceSessionService:
     return VoiceSessionService(
         enabled=True,
@@ -169,6 +190,90 @@ def test_reconnect_replaces_and_cleans_up_the_previous_provider_call() -> None:
         )
         assert replay == replacement
         assert len(gateway.creates) == 2
+        await subject.close()
+
+    asyncio.run(run())
+
+
+def test_create_rejects_and_cleans_up_a_mismatched_private_spec() -> None:
+    async def run() -> None:
+        gateway = MisroutingGateway(call_number=1)
+        subject = service(gateway)
+
+        with pytest.raises(VoiceSessionUnavailableError):
+            await subject.create(
+                request(),
+                principal=PRINCIPAL,
+                idempotency_key="voice-create-mismatched-spec",
+                request_id="req_" + "2" * 32,
+            )
+
+        assert [item.provider_call_id for item in gateway.ends] == ["call_1"]
+        assert subject._records == {}
+        assert subject._active_by_actor == {}
+        await subject.close()
+
+    asyncio.run(run())
+
+
+def test_reconnect_rejects_a_mismatched_application_session_and_preserves_original() -> None:
+    async def run() -> None:
+        gateway = MisroutingGateway(call_number=2, application_session=True)
+        subject = service(gateway)
+        original = await subject.create(
+            request(),
+            principal=PRINCIPAL,
+            idempotency_key="voice-create-before-misroute",
+            request_id="req_" + "3" * 32,
+        )
+
+        with pytest.raises(VoiceSessionUnavailableError):
+            await subject.reconnect(
+                original.session_id,
+                "v=0\r\na=mismatched-reconnect-offer",
+                principal=PRINCIPAL,
+                idempotency_key="voice-reconnect-misrouted",
+                request_id="req_" + "4" * 32,
+            )
+
+        assert [item.provider_call_id for item in gateway.ends] == ["call_2"]
+        assert subject._records[original.session_id].provider_call_id == "call_1"
+        assert subject._active_by_actor
+        await subject.close()
+
+    asyncio.run(run())
+
+
+def test_foreign_actor_cannot_reconnect_or_end_an_owned_session() -> None:
+    async def run() -> None:
+        gateway = FakeGateway()
+        subject = service(gateway)
+        admission = await subject.create(
+            request(),
+            principal=PRINCIPAL,
+            idempotency_key="voice-create-owner-scope",
+            request_id="req_" + "5" * 32,
+        )
+
+        with pytest.raises(VoiceSessionNotFoundError):
+            await subject.reconnect(
+                admission.session_id,
+                "v=0\r\na=foreign-reconnect-offer",
+                principal=OTHER_PRINCIPAL,
+                idempotency_key="voice-reconnect-foreign",
+                request_id="req_" + "6" * 32,
+            )
+        with pytest.raises(VoiceSessionNotFoundError):
+            await subject.end(
+                admission.session_id,
+                EndVoiceSessionRequest(reason="cancelled", events=[]),
+                principal=OTHER_PRINCIPAL,
+                idempotency_key="voice-end-foreign",
+                request_id="req_" + "7" * 32,
+            )
+
+        assert len(gateway.creates) == 1
+        assert gateway.ends == []
         await subject.close()
 
     asyncio.run(run())

@@ -256,6 +256,7 @@ test('connection loss mutes immediately and reconnect failure closes both transp
   controller.setMuted(false);
   connectionLost?.();
   expect(oldSetMuted).toHaveBeenLastCalledWith(true);
+  expect(oldClose).toHaveBeenCalledTimes(1);
   expect(controller.snapshot).toMatchObject({ lifecycle: 'reconnecting', muted: true });
 
   await expect(controller.reconnect()).rejects.toThrow('reconnect failed');
@@ -263,6 +264,39 @@ test('connection loss mutes immediately and reconnect failure closes both transp
   expect(replacementMedia.closeChannel).toHaveBeenCalledTimes(1);
   expect(replacementMedia.closePeer).toHaveBeenCalledTimes(1);
   expect(replacementMedia.stop).toHaveBeenCalledTimes(1);
+});
+
+test('connection loss closes the old transport immediately and ignores its later events', async () => {
+  const media = mediaFakes();
+  let connectionLost: (() => void) | undefined;
+  let rawEvent: ((event: unknown) => void) | undefined;
+  const close = jest.fn();
+  const controller = new VoiceSessionController(jest.fn(), true, {
+    requestMicrophone: jest.fn(async () => media.stream),
+    prepare: jest.fn(async () => media.prepared),
+    create: jest.fn(async () => ADMISSION),
+    connect: jest.fn(async (options: ConnectRealtimeOptions) => {
+      connectionLost = options.onConnectionLost;
+      rawEvent = options.onEvent;
+      options.onConnected();
+      return {
+        admission: ADMISSION,
+        close,
+        interrupt: jest.fn(() => false),
+        setMuted: jest.fn(),
+      };
+    }),
+    reconnect: jest.fn(),
+    end: jest.fn(),
+  } as never);
+
+  await controller.start({ ...REQUEST, client_capabilities: [...REQUEST.client_capabilities] });
+  connectionLost?.();
+  rawEvent?.({ type: 'response.created', event_id: 'evt_after_disconnect' });
+
+  expect(close).toHaveBeenCalledTimes(1);
+  expect(controller.snapshot.lifecycle).toBe('reconnecting');
+  expect(controller.snapshot.events).toEqual([]);
 });
 
 test('a replacement admission is stopped when local reconnect attachment fails', async () => {
@@ -456,4 +490,51 @@ test('end drops partial transcripts and sends at most 256 final events', async (
   expect(sent).toHaveLength(256);
   expect(sent.every((event) => event.type === 'transcript.final')).toBe(true);
   expect(sent[0]?.text).toBe('τελικό 44');
+});
+
+test('untrusted provider event volume cannot exceed the server sequence bound or block cleanup', async () => {
+  const media = mediaFakes();
+  let rawEvent: ((event: unknown) => void) | undefined;
+  const close = jest.fn();
+  const setMuted = jest.fn();
+  const end = jest.fn(async (_sessionId: string, request: { events: VoiceSessionEvent[] }) => ({
+    session_id: ADMISSION.session_id,
+    lifecycle: 'ended' as const,
+    end_reason: 'failed' as const,
+    scenario_completed: false as const,
+    transcript: request.events,
+    evidence: { applied: false as const, reason: 'authored_scenario_evidence_not_integrated' },
+  }));
+  const controller = new VoiceSessionController(jest.fn(), true, {
+    requestMicrophone: jest.fn(async () => media.stream),
+    prepare: jest.fn(async () => media.prepared),
+    create: jest.fn(async () => ADMISSION),
+    connect: jest.fn(async (options: ConnectRealtimeOptions) => {
+      rawEvent = options.onEvent;
+      options.onConnected();
+      return { admission: ADMISSION, close, interrupt: jest.fn(() => false), setMuted };
+    }),
+    reconnect: jest.fn(),
+    end,
+  } as never);
+
+  await controller.start({ ...REQUEST, client_capabilities: [...REQUEST.client_capabilities] });
+  for (let index = 0; index <= 10_000; index += 1) {
+    rawEvent?.({
+      type: 'conversation.item.input_audio_transcription.completed',
+      event_id: `evt_bounded_${index}`,
+      transcript: `bounded ${index}`,
+    });
+  }
+  await Promise.resolve();
+
+  expect(controller.snapshot).toMatchObject({
+    lifecycle: 'failed',
+    failureCode: 'provider_event_limit',
+  });
+  expect(close).toHaveBeenCalledTimes(1);
+  expect(setMuted).toHaveBeenCalledWith(true);
+  expect(end).toHaveBeenCalledTimes(1);
+  const sent = end.mock.calls[0]?.[1].events ?? [];
+  expect(Math.max(...sent.map((event) => event.sequence))).toBe(10_000);
 });

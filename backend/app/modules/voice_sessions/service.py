@@ -132,7 +132,7 @@ class VoiceSessionService:
                 provider = await self._gateway.create(private, request_id=request_id)
             finally:
                 self._pending_creates -= 1
-            if provider.application_session_id != session_id:
+            if not self._provider_matches_request(provider, private):
                 await self._safe_stop(actor_ref, session_id, provider.provider_call_id, request_id)
                 raise VoiceSessionUnavailableError
             expires_at = self._now() + timedelta(seconds=provider.spec.maximum_duration_seconds)
@@ -189,7 +189,10 @@ class VoiceSessionService:
                 offer_sdp=offer_sdp,
             )
             replacement = await self._gateway.create(private, request_id=request_id)
-            if replacement.spec != record.admission.spec:
+            if (
+                replacement.application_session_id != session_id
+                or replacement.spec != record.admission.spec
+            ):
                 await self._safe_stop(
                     actor_ref, session_id, replacement.provider_call_id, request_id
                 )
@@ -217,6 +220,20 @@ class VoiceSessionService:
                 self._reconnect_replays, (session_id, idempotency_key), fingerprint, admission
             )
             return admission
+
+    @staticmethod
+    def _provider_matches_request(
+        response: PrivateVoiceSessionResponse, request: PrivateVoiceSessionRequest
+    ) -> bool:
+        spec = response.spec
+        return (
+            response.application_session_id == request.application_session_id
+            and spec.course_id == request.course_id
+            and spec.scenario_id == request.scenario_id
+            and spec.source_locale == request.source_locale
+            and spec.target_locale == request.target_locale
+            and spec.conversation_mode == request.conversation_mode
+        )
 
     async def end(
         self,

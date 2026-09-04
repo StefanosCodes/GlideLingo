@@ -35,6 +35,7 @@ const DEFAULT_DEPENDENCIES: VoiceSessionControllerDependencies = {
 };
 
 const DEFAULT_CONNECTION_DEADLINE_MS = 20_000;
+const MAX_PROVIDER_EVENT_SEQUENCE = 10_000;
 
 export class VoiceSessionController {
   private admission: VoiceSessionAdmission | null = null;
@@ -250,12 +251,25 @@ export class VoiceSessionController {
       },
       onConnectionLost: () => {
         if (this.generation === generation) {
-          this.transport?.setMuted(true);
+          ++this.generation;
+          const disconnected = this.transport;
+          this.transport = null;
+          disconnected?.setMuted(true);
+          disconnected?.close();
           this.dispatch({ type: 'connection-lost' });
         }
       },
       onEvent: (raw) => {
         if (this.generation !== generation) return;
+        if (this.sequence >= MAX_PROVIDER_EVENT_SEQUENCE) {
+          ++this.generation;
+          this.transport?.setMuted(true);
+          this.transport?.close();
+          this.transport = null;
+          this.dispatch({ type: 'failed', code: 'provider_event_limit' });
+          void this.stopAdmission(admission, 'failed');
+          return;
+        }
         const event = normalizeOpenAIRealtimeEvent(raw, {
           sessionId: admission.session_id,
           sequence: this.sequence + 1,

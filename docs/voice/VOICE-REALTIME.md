@@ -82,9 +82,18 @@ provider errors, reconnect replacement, unmount, and session expiry stop local m
 server/provider cleanup; expiry is the final backstop.
 
 The current session registry is process-local and deliberately bounded. It is safe for disabled
-review and deterministic local tests, but not for multi-instance enablement. Rollback is to set
-the three flags to `false`; this removes new admission while authenticated end/recap and expiry
-cleanup remain available for already-admitted sessions.
+review and deterministic local tests, but not for multi-instance enablement. The three flags can
+prevent admission only at process startup; restarting the public API discards its in-memory cleanup
+references. If this slice is exercised locally, every admitted session must be explicitly ended and
+provider cleanup confirmed before a disabled restart. A deployable rollback requires durable
+ownership plus an operator-visible admission-drain and cleanup procedure before any environment is
+enabled.
+
+An ambiguous provider-create timeout can mean OpenAI accepted a call before its response and cleanup
+reference were lost. Public idempotency prevents duplicate application admissions only after the
+private response returns; it cannot yet prove provider-side deduplication or recover that orphan.
+This is another reason the slice must remain disabled until durable ownership and reconciliation
+exist.
 
 ## Verification and activation gates
 
@@ -97,7 +106,8 @@ be deployed or enabled until all of these pass independently:
 3. Hostile browser tests attempt `session.update`, client-created system items, malformed and
    replayed events, and confirm there are still no consequential tools or learning mutations.
 4. Server-enforced rate, daily usage, concurrency, cost telemetry, and abuse controls exist.
-5. Durable multi-instance ownership and terminal cleanup replace the process-local registry.
+5. Durable multi-instance ownership, provider-create reconciliation, terminal cleanup, and a
+   rehearsed admission-drain procedure replace the process-local registry.
 6. The deployed IAM-private boundary and real Clerk/RevenueCat authorization path pass acceptance.
 7. Operational dashboards, alerts, rollback rehearsal, privacy review, and learner-safe copy are
    approved for the target environment.

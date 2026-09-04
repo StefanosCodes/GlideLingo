@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glidelingo.app/schemas/course-content/v1/modules.schema.json",
+  "title": "GlideLingo modules document",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "modules"],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "modules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/module" }
+    }
+  },
+  "$defs": {
+    "module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "id",
+        "version",
+        "courseId",
+        "stageId",
+        "transformation",
+        "targetCapabilityIds",
+        "supportingCapabilityIds",
+        "prerequisiteModuleIds",
+        "newResources",
+        "recycledResources",
+        "likelyLearnerErrors",
+        "culturalPragmaticFocus",
+        "missionIds",
+        "checkpointActivityId",
+        "delayedReviewCapabilityIds",
+        "estimatedMinutes",
+        "recommendedScenarioIds"
+      ],
+      "properties": {
+        "schemaVersion": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+        "id": { "$ref": "common.schema.json#/$defs/id" },
+        "version": { "$ref": "common.schema.json#/$defs/version" },
+        "courseId": { "$ref": "common.schema.json#/$defs/id" },
+        "stageId": { "$ref": "common.schema.json#/$defs/id" },
+        "transformation": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "targetCapabilityIds": { "$ref": "common.schema.json#/$defs/nonEmptyIdList" },
+        "supportingCapabilityIds": { "$ref": "common.schema.json#/$defs/idList" },
+        "prerequisiteModuleIds": { "$ref": "common.schema.json#/$defs/idList" },
+        "newResources": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+        "recycledResources": { "$ref": "common.schema.json#/$defs/stringList" },
+        "likelyLearnerErrors": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+        "culturalPragmaticFocus": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+        "missionIds": { "$ref": "common.schema.json#/$defs/nonEmptyIdList" },
+        "checkpointActivityId": { "$ref": "common.schema.json#/$defs/id" },
+        "delayedReviewCapabilityIds": { "$ref": "common.schema.json#/$defs/nonEmptyIdList" },
+        "estimatedMinutes": { "type": "integer", "minimum": 1 },
+        "recommendedScenarioIds": { "$ref": "common.schema.json#/$defs/idList" }
+      }
+    }
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "lessonId": "el-letters-1",
+  "blocks": [
+    {
+      "type": "heading",
+      "text": "Greek is spoken more regularly than it looks"
+    },
+    {
+      "type": "prose",
+      "text": "Modern Greek writing looks new if you grew up with Latin letters. The sounds do not. Most letters keep one stable sound. Learn those first and the alphabet becomes a map, not a puzzle."
+    },
+    {
+      "type": "prose",
+      "text": "This sitting is only listening with your eyes. Say each example aloud. You do not need to write yet."
+    },
+    {
+      "type": "heading",
+      "text": "Three vowels to hold"
+    },
+    {
+      "type": "example",
+      "greek": "α · Α",
+      "gloss": "like the a in father",
+      "audioId": "el-letter-alpha"
+    },
+    {
+      "type": "example",
+      "greek": "ε · Ε",
+      "gloss": "like the e in red",
+      "audioId": "el-letter-epsilon"
+    },
+    {
+      "type": "example",
+      "greek": "ι · Ι",
+      "gloss": "like the ee in see",
+      "audioId": "el-letter-iota"
+    },
+    {
+      "type": "callout",
+      "text": "η and υ also sound like ι in Standard Modern Greek. Treat them as the same sound for now."
+    },
+    {
+      "type": "heading",
+      "text": "Hear it in a word"
+    },
+    {
+      "type": "example",
+      "greek": "καλημέρα",
+      "gloss": "kalimera — good morning",
+      "audioId": "el-kalimera"
+    },
+    {
+      "type": "example",
+      "greek": "νερό",
+      "gloss": "nero — water",
+      "audioId": "el-nero"
+    },
+    {
+      "type": "listen",
+      "label": "The three vowels, then καλημέρα",
+      "audioId": "el-vowels-kalimera"
+    },
+    {
+      "type": "check",
+      "prompt": "Which letter sounds like the a in father?",
+      "choices": ["α", "ε", "ι"],
+      "answer": "α"
+    }
+  ]
+}

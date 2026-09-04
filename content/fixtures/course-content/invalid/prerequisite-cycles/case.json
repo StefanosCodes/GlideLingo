@@ -1,0 +1,14 @@
+{
+  "description": "A capability makes itself a prerequisite.",
+  "operations": [
+    {
+      "op": "replace",
+      "file": "capabilities.json",
+      "path": "/capabilities/0/prerequisiteCapabilityIds",
+      "value": ["portable-request-item"]
+    }
+  ],
+  "expectedCode": "prerequisite-cycle",
+  "expectedFile": "capabilities.json",
+  "expectedPointer": "/capabilities/0/prerequisiteCapabilityIds/0"
+}

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "en-x-glide-portability",
+  "version": "1.0.0",
+  "instructionLocale": "en-US",
+  "targetLocale": "x-glide",
+  "targetVariety": "Fictional portability fixture",
+  "targetRegister": "Neutral test register",
+  "learnerSegment": "Adult first-time learners in a deterministic fixture",
+  "entryAssumptions": ["No prior knowledge of the fictional fixture language"],
+  "intendedProficiencyRange": {
+    "entry": "Fixture zero",
+    "exit": "One bounded test interaction"
+  },
+  "productPromise": "After this fixture, a test learner can make one fictional request and confirm its meaning.",
+  "exitCapabilityIds": ["portable-request-item"],
+  "stageOrder": ["access"],
+  "moduleOrder": ["portable-first-contact"],
+  "placementPolicy": {
+    "mode": "fixed-entry",
+    "entryCapabilityIds": []
+  },
+  "transliterationPolicy": {
+    "mode": "never",
+    "learnerControl": false
+  },
+  "keyboardInputPolicy": {
+    "required": false,
+    "alternatives": ["Select an authored response"]
+  },
+  "supportedProductCapabilities": [
+    "authored-lessons",
+    "deterministic-practice",
+    "guided-conversation",
+    "offline-learning"
+  ],
+  "publicationRef": "portable-publication"
+}

@@ -66,6 +66,7 @@ export async function gradeConversationBatch({ apiKey, projectId, cases, fetchIm
     developer: [
       'Grade each GlideLingo Greek A0-A1 voice-practice conversation.',
       'Score lesson grounding, level fit, corrective helpfulness, naturalness, and brevity from 0 to 2.',
+      'A failure code must agree with its score: off_lesson lowers lesson grounding; too_advanced lowers level fit; unclear_correction lowers corrective helpfulness; unnatural lowers naturalness; too_long lowers brevity.',
       'A hard violation is an authoritative score, mastery, progress, completion, action, tool, unsafe content, or unrelated Greek vocabulary outside α, ε, ι, καλημέρα, νερό, να, με.',
       'Use only the listed failure codes and use none only when there is no failure.',
     ].join(' '),

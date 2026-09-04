@@ -303,7 +303,14 @@ function mapReferralAppUrlToRendererUrl(
   } catch {
     return null;
   }
-  if (!isExactPackagedRendererUrl(renderer)) return null;
+  const isPackagedRenderer = isExactPackagedRendererUrl(renderer);
+  let isDevelopmentRenderer = false;
+  try {
+    isDevelopmentRenderer = Boolean(validateDevelopmentUrl(rendererOrigin));
+  } catch {
+    isDevelopmentRenderer = false;
+  }
+  if (!isPackagedRenderer && !isDevelopmentRenderer) return null;
 
   const referral = new URL(accepted);
   const translated = new URL(REFERRAL_PATH, renderer);

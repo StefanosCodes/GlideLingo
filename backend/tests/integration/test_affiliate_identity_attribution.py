@@ -443,6 +443,104 @@ def test_published_versions_are_immutable_non_overlapping_and_have_no_policy_def
 
 
 @pytest.mark.integration
+def test_open_program_version_rotates_once_under_concurrency(
+    affiliate_database: AffiliateDatabase,
+) -> None:
+    ids = seed_referral(affiliate_database)
+    boundaries = [NOW + timedelta(days=1), NOW + timedelta(days=2)]
+    start = Barrier(2)
+
+    def rotate(boundary: datetime) -> tuple[str, datetime]:
+        version_id = uuid4()
+        policy_json = json.dumps(
+            {
+                "customer_offer": {"version": 2},
+                "attribution": {},
+                "commission": {},
+                "transfer": {},
+                "external_payout": {},
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        start.wait()
+        try:
+            with affiliate_database.engine.begin() as connection:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE affiliate_program_version
+                        SET effective_until = :boundary, updated_at = :updated_at
+                        WHERE id = :current_version_id
+                        """
+                    ),
+                    {
+                        "boundary": boundary,
+                        "updated_at": NOW,
+                        "current_version_id": ids["version"],
+                    },
+                )
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO affiliate_program_version
+                          (id, program_id, version, status, policy_document, policy_hash,
+                           effective_from, published_at)
+                        VALUES
+                          (:id, :program_id, 2, 'published', CAST(:policy AS jsonb),
+                           :policy_hash, :boundary, :published_at)
+                        """
+                    ),
+                    {
+                        "id": version_id,
+                        "program_id": ids["program"],
+                        "policy": policy_json,
+                        "policy_hash": hashlib.sha256(policy_json.encode()).hexdigest(),
+                        "boundary": boundary,
+                        "published_at": NOW,
+                    },
+                )
+            return "rotated", boundary
+        except DBAPIError:
+            return "conflict", boundary
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(rotate, boundaries))
+
+    assert sorted(outcome for outcome, _boundary in outcomes) == ["conflict", "rotated"]
+    winning_boundary = next(boundary for outcome, boundary in outcomes if outcome == "rotated")
+    with affiliate_database.engine.connect() as connection:
+        intervals = connection.execute(
+            text(
+                """
+                SELECT version, effective_from, effective_until
+                FROM affiliate_program_version
+                WHERE program_id = :program_id
+                ORDER BY version
+                """
+            ),
+            {"program_id": ids["program"]},
+        ).all()
+
+    assert len(intervals) == 2
+    assert intervals[0].effective_until == winning_boundary
+    assert intervals[1].effective_from == winning_boundary
+    assert intervals[1].effective_until is None
+
+    with pytest.raises(DBAPIError), affiliate_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE affiliate_program_version
+                SET effective_until = effective_until + interval '1 second'
+                WHERE id = :id
+                """
+            ),
+            {"id": ids["version"]},
+        )
+
+
+@pytest.mark.integration
 def test_handoff_is_minimized_single_use_expiring_and_cannot_replace_a_lock(
     affiliate_database: AffiliateDatabase,
 ) -> None:
@@ -493,6 +591,14 @@ def test_handoff_is_minimized_single_use_expiring_and_cannot_replace_a_lock(
         ).status
         is BindStatus.BOUND
     )
+    # A lost success response is safe to retry only for the same authenticated
+    # principal; the persisted outcome is replayed without replacing attribution.
+    assert (
+        affiliate_service.bind_attribution(
+            principal=first_principal, handoff_token=tokens[0]
+        ).status
+        is BindStatus.BOUND
+    )
     assert (
         affiliate_service.bind_attribution(
             principal=second_principal, handoff_token=tokens[0]
@@ -508,6 +614,12 @@ def test_handoff_is_minimized_single_use_expiring_and_cannot_replace_a_lock(
         now=NOW + timedelta(minutes=1),
     )
     affiliate_service.resolve_referral(link_slug="creator-link", campaign_slug=None)
+    assert (
+        affiliate_service.bind_attribution(
+            principal=first_principal, handoff_token=tokens[1]
+        ).status
+        is BindStatus.LOCKED
+    )
     assert (
         affiliate_service.bind_attribution(
             principal=first_principal, handoff_token=tokens[1]
@@ -710,6 +822,128 @@ def test_attribution_replacement_and_purchase_accrual_share_one_principal_bounda
     assert accrued_creator_id == (
         replacement_creator_id if bind_status is BindStatus.BOUND else ids["creator"]
     )
+
+
+@pytest.mark.integration
+def test_late_purchase_fact_uses_attribution_effective_when_purchase_occurred(
+    affiliate_database: AffiliateDatabase,
+) -> None:
+    ids = seed_referral(affiliate_database)
+    principal = ClerkPrincipal(user_id="user_late_purchase", issuer="https://clerk.test")
+    clock = [NOW]
+    affiliate_service = service(
+        affiliate_database,
+        clock=clock,
+        tokens=["K" * 43, "L" * 43],
+    )
+    affiliate_service.resolve_referral(link_slug="creator-link", campaign_slug=None)
+    assert (
+        affiliate_service.bind_attribution(principal=principal, handoff_token="K" * 43).status
+        is BindStatus.BOUND
+    )
+
+    replacement_creator_id = uuid4()
+    with affiliate_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO affiliate_creator (id, slug, display_name, status)
+                VALUES (:id, 'late-creator-two', 'Late Creator Two', 'active')
+                """
+            ),
+            {"id": replacement_creator_id},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO affiliate_link
+                  (id, creator_id, campaign_id, slug, destination_key, status)
+                VALUES (:id, :creator_id, :campaign_id, 'late-creator-link-two',
+                        'offer', 'active')
+                """
+            ),
+            {
+                "id": uuid4(),
+                "creator_id": replacement_creator_id,
+                "campaign_id": ids["campaign"],
+            },
+        )
+
+    purchase_at = NOW + timedelta(minutes=1)
+    clock[0] = NOW + timedelta(minutes=2)
+    affiliate_service.resolve_referral(link_slug="late-creator-link-two", campaign_slug=None)
+    assert (
+        affiliate_service.bind_attribution(principal=principal, handoff_token="L" * 43).status
+        is BindStatus.BOUND
+    )
+    seed_commission_policy(affiliate_database, program_version_id=ids["version"])
+
+    principal_ref = derive_affiliate_principal_ref(key=KEY, principal=principal)
+    commission_repository = PostgresAffiliateCommissionRepository(engine=affiliate_database.engine)
+    result = commission_repository.accept_financial_fact(
+        fact=financial_fact(
+            event_id="evt_late_purchase",
+            transaction_ref="ch_late_purchase",
+            occurred_at=purchase_at,
+            principal_ref=principal_ref,
+        ),
+        processed_at=NOW + timedelta(minutes=3),
+    )
+    assert result.status is CommissionApplyStatus.ACCRUED
+    assert (
+        commission_repository.accept_financial_fact(
+            fact=financial_fact(
+                event_id="evt_late_purchase",
+                transaction_ref="ch_late_purchase",
+                occurred_at=purchase_at,
+                principal_ref=principal_ref,
+            ),
+            processed_at=NOW + timedelta(minutes=4),
+        ).status
+        is CommissionApplyStatus.DUPLICATE
+    )
+
+    with affiliate_database.engine.connect() as connection:
+        entry = connection.execute(
+            text(
+                """
+                SELECT entry.creator_id, attribution.state, attribution.bound_at,
+                       attribution.replaced_at, attribution.locked_at
+                FROM affiliate_commission_entry AS entry
+                JOIN affiliate_attribution AS attribution
+                  ON attribution.id = entry.attribution_id
+                WHERE entry.provider_transaction_ref = 'ch_late_purchase'
+                """
+            )
+        ).one()
+        current_creator_id = connection.execute(
+            text(
+                """
+                SELECT creator_id FROM affiliate_attribution
+                WHERE principal_ref = :principal_ref AND state = 'bound'
+                """
+            ),
+            {"principal_ref": principal_ref},
+        ).scalar_one()
+
+    assert entry.creator_id == ids["creator"]
+    assert entry.state == "replaced"
+    assert entry.replaced_at is not None
+    assert entry.bound_at <= purchase_at < entry.replaced_at
+    assert entry.locked_at == purchase_at
+    assert current_creator_id == replacement_creator_id
+
+    with pytest.raises(DBAPIError), affiliate_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE affiliate_attribution
+                SET replaced_at = replaced_at + interval '1 second'
+                WHERE principal_ref = :principal_ref AND locked_at = :purchase_at
+                """
+            ),
+            {"principal_ref": principal_ref, "purchase_at": purchase_at},
+        )
 
 
 @pytest.mark.integration
@@ -1076,7 +1310,11 @@ def test_active_commission_policy_and_rules_are_immutable(
     )
 
     attempts = (
-        ("UPDATE affiliate_commission_policy SET effective_until = :now WHERE id = :id", policy_id),
+        (
+            "UPDATE affiliate_commission_policy "
+            "SET effective_from = effective_from + interval '1 second' WHERE id = :id",
+            policy_id,
+        ),
         ("DELETE FROM affiliate_commission_policy WHERE id = :id", policy_id),
         (
             "UPDATE affiliate_commission_rule SET commission_rate_basis_points = 1 WHERE id = :id",
@@ -1098,6 +1336,132 @@ def test_active_commission_policy_and_rules_are_immutable(
                 """
             ),
             {"id": uuid4(), "policy_id": policy_id},
+        )
+
+
+@pytest.mark.integration
+def test_commission_policy_rotation_preserves_delayed_historical_selection(
+    affiliate_database: AffiliateDatabase,
+) -> None:
+    ids = seed_referral(affiliate_database)
+    principal = ClerkPrincipal(user_id="user_policy_rotation", issuer="https://clerk.test")
+    affiliate_service = service(affiliate_database, clock=[NOW], tokens=["M" * 43])
+    affiliate_service.resolve_referral(link_slug="creator-link", campaign_slug=None)
+    assert (
+        affiliate_service.bind_attribution(principal=principal, handoff_token="M" * 43).status
+        is BindStatus.BOUND
+    )
+    old_policy_id, _old_rule_id = seed_commission_policy(
+        affiliate_database,
+        program_version_id=ids["version"],
+        rate_basis_points=1000,
+    )
+    new_policy_id = uuid4()
+    new_rule_id = uuid4()
+    boundary = NOW + timedelta(hours=1)
+    with affiliate_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE affiliate_commission_policy
+                SET effective_until = :boundary
+                WHERE id = :old_policy_id
+                """
+            ),
+            {"boundary": boundary, "old_policy_id": old_policy_id},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO affiliate_commission_policy
+                  (id, program_version_id, policy_version, status)
+                VALUES (:id, :program_version_id, 2, 'draft')
+                """
+            ),
+            {"id": new_policy_id, "program_version_id": ids["version"]},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO affiliate_commission_rule
+                  (id, policy_id, product_ref, commission_rate_basis_points, rounding_mode)
+                VALUES (:id, :policy_id, 'monthly', 2000, 'half_up')
+                """
+            ),
+            {"id": new_rule_id, "policy_id": new_policy_id},
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE affiliate_commission_policy
+                SET status = 'active', effective_from = :boundary, activated_at = :activated_at
+                WHERE id = :id
+                """
+            ),
+            {"id": new_policy_id, "boundary": boundary, "activated_at": NOW},
+        )
+
+    principal_ref = derive_affiliate_principal_ref(key=KEY, principal=principal)
+    repository = PostgresAffiliateCommissionRepository(engine=affiliate_database.engine)
+    before_boundary = financial_fact(
+        event_id="evt_policy_v1_delayed",
+        transaction_ref="ch_policy_v1_delayed",
+        occurred_at=boundary - timedelta(seconds=1),
+        principal_ref=principal_ref,
+    )
+    at_boundary = financial_fact(
+        event_id="evt_policy_v2_boundary",
+        transaction_ref="ch_policy_v2_boundary",
+        occurred_at=boundary,
+        principal_ref=principal_ref,
+    )
+    assert (
+        repository.accept_financial_fact(
+            fact=before_boundary,
+            processed_at=boundary + timedelta(days=1),
+        ).status
+        is CommissionApplyStatus.ACCRUED
+    )
+    assert (
+        repository.accept_financial_fact(
+            fact=at_boundary,
+            processed_at=boundary + timedelta(days=1),
+        ).status
+        is CommissionApplyStatus.ACCRUED
+    )
+
+    with affiliate_database.engine.connect() as connection:
+        entries = connection.execute(
+            text(
+                """
+                SELECT provider_transaction_ref, policy_id,
+                       commission_rate_basis_points, commission_amount_minor
+                FROM affiliate_commission_entry
+                WHERE provider_transaction_ref IN
+                  ('ch_policy_v1_delayed', 'ch_policy_v2_boundary')
+                ORDER BY provider_transaction_ref
+                """
+            )
+        ).all()
+
+    by_transaction = {entry.provider_transaction_ref: entry for entry in entries}
+    assert by_transaction["ch_policy_v1_delayed"].policy_id == old_policy_id
+    assert by_transaction["ch_policy_v1_delayed"].commission_rate_basis_points == 1000
+    assert by_transaction["ch_policy_v1_delayed"].commission_amount_minor == 200
+    assert by_transaction["ch_policy_v2_boundary"].policy_id == new_policy_id
+    assert by_transaction["ch_policy_v2_boundary"].commission_rate_basis_points == 2000
+    assert by_transaction["ch_policy_v2_boundary"].commission_amount_minor == 400
+
+    with pytest.raises(DBAPIError), affiliate_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE affiliate_commission_policy
+                SET effective_until = effective_until + interval '1 second'
+                WHERE id = :id
+                """
+            ),
+            {"id": old_policy_id},
         )
 
 

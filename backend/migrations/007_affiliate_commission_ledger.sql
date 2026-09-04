@@ -88,8 +88,22 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog
 AS $$
 BEGIN
-  IF TG_OP IN ('UPDATE', 'DELETE') AND OLD.status = 'active' THEN
+  IF TG_OP = 'DELETE' AND OLD.status = 'active' THEN
     RAISE EXCEPTION 'active affiliate commission policy is immutable';
+  END IF;
+  IF TG_OP = 'UPDATE' AND OLD.status = 'active' THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended(OLD.program_version_id::text, 1));
+    IF NEW.id IS DISTINCT FROM OLD.id
+       OR NEW.program_version_id IS DISTINCT FROM OLD.program_version_id
+       OR NEW.policy_version IS DISTINCT FROM OLD.policy_version
+       OR NEW.status IS DISTINCT FROM OLD.status
+       OR NEW.effective_from IS DISTINCT FROM OLD.effective_from
+       OR OLD.effective_until IS NOT NULL
+       OR NEW.effective_until IS NULL
+       OR NEW.activated_at IS DISTINCT FROM OLD.activated_at
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+      RAISE EXCEPTION 'active affiliate commission policies allow only one-way interval closure';
+    END IF;
   END IF;
   IF TG_OP = 'DELETE' THEN
     RETURN OLD;
@@ -264,9 +278,11 @@ BEGIN
     WHERE id = NEW.rule_id
     FOR SHARE;
     IF source_fact.principal_ref IS DISTINCT FROM attribution.principal_ref
-       OR attribution.state NOT IN ('locked', 'corrected')
+       OR attribution.state NOT IN ('locked', 'corrected', 'replaced')
        OR attribution.locked_at IS NULL
        OR attribution.bound_at > NEW.occurred_at
+       OR (attribution.replaced_at IS NOT NULL
+           AND attribution.replaced_at <= NEW.occurred_at)
        OR policy.status <> 'active'
        OR policy.effective_from > NEW.occurred_at
        OR (policy.effective_until IS NOT NULL

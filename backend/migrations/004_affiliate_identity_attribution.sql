@@ -58,9 +58,23 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog
 AS $$
 BEGIN
-  IF TG_OP IN ('UPDATE', 'DELETE') THEN
-    IF OLD.status = 'published' THEN
-      RAISE EXCEPTION 'published affiliate program versions are immutable';
+  IF TG_OP = 'DELETE' AND OLD.status = 'published' THEN
+    RAISE EXCEPTION 'published affiliate program versions are immutable';
+  END IF;
+  IF TG_OP = 'UPDATE' AND OLD.status = 'published' THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended(OLD.program_id::text, 0));
+    IF NEW.id IS DISTINCT FROM OLD.id
+       OR NEW.program_id IS DISTINCT FROM OLD.program_id
+       OR NEW.version IS DISTINCT FROM OLD.version
+       OR NEW.status IS DISTINCT FROM OLD.status
+       OR NEW.policy_document IS DISTINCT FROM OLD.policy_document
+       OR NEW.policy_hash IS DISTINCT FROM OLD.policy_hash
+       OR NEW.effective_from IS DISTINCT FROM OLD.effective_from
+       OR OLD.effective_until IS NOT NULL
+       OR NEW.effective_until IS NULL
+       OR NEW.published_at IS DISTINCT FROM OLD.published_at
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+      RAISE EXCEPTION 'published affiliate program versions allow only one-way interval closure';
     END IF;
   END IF;
   IF TG_OP = 'DELETE' THEN
@@ -225,10 +239,12 @@ CREATE TABLE affiliate_handoff (
     expires_at timestamptz NOT NULL,
     consumed_at timestamptz,
     consumed_by_principal_ref text REFERENCES affiliate_principal(principal_ref),
+    bind_status text CHECK (bind_status IN ('bound', 'locked')),
     CHECK (expires_at = issued_at + interval '15 minutes'),
     CHECK (
-      (consumed_at IS NULL AND consumed_by_principal_ref IS NULL)
-      OR (consumed_at IS NOT NULL AND consumed_by_principal_ref IS NOT NULL)
+      (consumed_at IS NULL AND consumed_by_principal_ref IS NULL AND bind_status IS NULL)
+      OR (consumed_at IS NOT NULL AND consumed_by_principal_ref IS NOT NULL
+          AND bind_status IS NOT NULL)
     ),
     CHECK (consumed_at IS NULL OR consumed_at >= issued_at)
 );
@@ -279,7 +295,9 @@ BEGIN
     OR NEW.program_version_id IS DISTINCT FROM OLD.program_version_id
     OR NEW.link_id IS DISTINCT FROM OLD.link_id
     OR NEW.click_id IS DISTINCT FROM OLD.click_id
+    OR NEW.state IS DISTINCT FROM OLD.state
     OR NEW.bound_at IS DISTINCT FROM OLD.bound_at
+    OR NEW.replaced_at IS DISTINCT FROM OLD.replaced_at
     OR NEW.locked_at IS DISTINCT FROM OLD.locked_at
     OR NEW.lock_reference IS DISTINCT FROM OLD.lock_reference
   ) THEN

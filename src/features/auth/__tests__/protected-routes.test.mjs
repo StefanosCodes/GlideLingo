@@ -7,6 +7,7 @@ const legacyPath = readFileSync(new URL('../../../app/(app)/path.tsx', import.me
 const legacyReview = readFileSync(new URL('../../../app/(app)/review.tsx', import.meta.url), 'utf8');
 const legacyProgress = readFileSync(new URL('../../../app/(app)/progress.tsx', import.meta.url), 'utf8');
 const webSignIn = readFileSync(new URL('../../../app/(auth)/sign-in.web.tsx', import.meta.url), 'utf8');
+const webSignUp = readFileSync(new URL('../../../app/(auth)/sign-up.web.tsx', import.meta.url), 'utf8');
 const webCallback = readFileSync(new URL('../../../app/sso-callback.web.tsx', import.meta.url), 'utf8');
 
 test('signed-out direct navigation cannot enter any learning, profile, billing, or diagnostics route', () => {
@@ -38,9 +39,11 @@ test('the referral handoff route is public without weakening protected app route
 
 test('web sign-in resumes referral state without putting the handoff in an auth redirect', () => {
   assert.match(webSignIn, /referralAuthReturnPath\(\)/);
+  assert.match(webSignUp, /referralAuthReturnPath\(\)/);
   assert.match(webCallback, /referralAuthReturnPath\(\)/);
-  assert.doesNotMatch(webSignIn + webCallback, /handoff_token|#handoff=/);
+  assert.doesNotMatch(webSignIn + webSignUp + webCallback, /handoff_token|#handoff=/);
   assert.match(webSignIn, /router\.replace\(referralAuthReturnPath\(\)\)/);
+  assert.match(webSignUp, /router\.replace\(referralAuthReturnPath\(\)\)/);
 });
 
 test('previously distributed learning routes remain authenticated redirects', () => {

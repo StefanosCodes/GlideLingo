@@ -116,7 +116,9 @@ for the Clerk session to expire. The initial platform `membership_admin` capabil
 an authorized migration operator after deriving the principal reference with the same environment-
 specific server key. The public API cannot bootstrap an administrator.
 
-Published program versions are immutable and overlapping published effective intervals are rejected.
+Published program versions are immutable except for one concurrency-serialized transition from an
+open-ended interval to a closed interval; a closed interval cannot be changed again. Overlapping
+published effective intervals are rejected.
 There is no default policy document: an operator-created draft must contain explicit policy, and a
 published version must include every required policy section and a reviewed SHA-256 policy hash. Active
 traffic also requires an explicitly active program, published effective version, active campaign,
@@ -174,7 +176,10 @@ events but leaves deliveries pending.
 Tutor lane. It must be inserted into the canonical production runner only after migration `006` is
 merged, so production still applies the complete numeric sequence. The migration is additive, creates
 no policy defaults, and grants the public runtime only `SELECT` on the minimized commission projection.
-Accepted financial facts and commission entries are immutable. A future authenticated and reconciled
+Accepted financial facts and commission entries are immutable. Active policy economics and rules are
+immutable; only the same one-way interval closure is permitted so a new policy version can begin at
+the exact half-open boundary and delayed facts still select the historical version. A future
+authenticated and reconciled
 finance worker must receive a separate, narrowly scoped writer role in a later migration before this
 ledger can consume Stripe marketplace facts; the public API identity cannot manufacture money.
 

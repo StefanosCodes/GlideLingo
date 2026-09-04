@@ -220,7 +220,9 @@ class PostgresAffiliateRepository:
                     connection.execute(
                         text(
                             """
-                            SELECT handoff.id, handoff.consumed_at, handoff.expires_at,
+                            SELECT handoff.id, handoff.consumed_at,
+                                   handoff.consumed_by_principal_ref,
+                                   handoff.bind_status, handoff.expires_at,
                                    click.id AS click_id, click.creator_id, click.campaign_id,
                                    click.program_version_id, click.link_id
                             FROM affiliate_handoff AS handoff
@@ -237,6 +239,8 @@ class PostgresAffiliateRepository:
                 if handoff is None:
                     return BoundAttribution(status=BindStatus.INVALID)
                 if handoff["consumed_at"] is not None:
+                    if handoff["consumed_by_principal_ref"] == principal_ref:
+                        return BoundAttribution(status=BindStatus(handoff["bind_status"]))
                     return BoundAttribution(status=BindStatus.ALREADY_CONSUMED)
                 if handoff["expires_at"] <= now:
                     return BoundAttribution(status=BindStatus.EXPIRED)
@@ -250,22 +254,6 @@ class PostgresAffiliateRepository:
                     {"principal_ref": principal_ref},
                 )
                 self._upsert_principal(connection, principal_ref=principal_ref, now=now)
-                connection.execute(
-                    text(
-                        """
-                        UPDATE affiliate_handoff
-                        SET consumed_at = :now,
-                            consumed_by_principal_ref = :principal_ref
-                        WHERE id = :handoff_id
-                          AND consumed_at IS NULL
-                        """
-                    ),
-                    {
-                        "now": now,
-                        "principal_ref": principal_ref,
-                        "handoff_id": handoff["id"],
-                    },
-                )
                 current = (
                     connection.execute(
                         text(
@@ -283,6 +271,13 @@ class PostgresAffiliateRepository:
                     .one_or_none()
                 )
                 if current is not None and current["locked_at"] is not None:
+                    self._record_handoff_outcome(
+                        connection,
+                        handoff_id=handoff["id"],
+                        principal_ref=principal_ref,
+                        status=BindStatus.LOCKED,
+                        now=now,
+                    )
                     self._insert_audit(
                         connection,
                         event_id=uuid4(),
@@ -332,6 +327,13 @@ class PostgresAffiliateRepository:
                         "bound_at": now,
                     },
                 )
+                self._record_handoff_outcome(
+                    connection,
+                    handoff_id=handoff["id"],
+                    principal_ref=principal_ref,
+                    status=BindStatus.BOUND,
+                    now=now,
+                )
                 self._insert_audit(
                     connection,
                     event_id=uuid4(),
@@ -347,6 +349,34 @@ class PostgresAffiliateRepository:
                 return BoundAttribution(status=BindStatus.BOUND)
         except SQLAlchemyError as error:
             raise DependencyUnavailableError from error
+
+    @staticmethod
+    def _record_handoff_outcome(
+        connection: Connection,
+        *,
+        handoff_id: UUID,
+        principal_ref: str,
+        status: BindStatus,
+        now: datetime,
+    ) -> None:
+        connection.execute(
+            text(
+                """
+                UPDATE affiliate_handoff
+                SET consumed_at = :now,
+                    consumed_by_principal_ref = :principal_ref,
+                    bind_status = :bind_status
+                WHERE id = :handoff_id
+                  AND consumed_at IS NULL
+                """
+            ),
+            {
+                "now": now,
+                "principal_ref": principal_ref,
+                "bind_status": status.value,
+                "handoff_id": handoff_id,
+            },
+        )
 
     def ensure_principal(self, *, principal_ref: str, now: datetime) -> None:
         try:

@@ -431,6 +431,28 @@ test('supported app dispatch preserves the active loopback renderer for auth cal
   assert.deepEqual(loaded, ['http://127.0.0.1:8081/sso-callback?state=opaque']);
 });
 
+test('enabled referral dispatch preserves the validated development renderer', () => {
+  const token = 'd'.repeat(43);
+  const loaded = [];
+
+  assert.equal(dispatchSupportedAppUrl(`glidelingo://app/referral?handoff=${token}`, {
+    activateWindow() {},
+    hasWindow: () => true,
+    loadRendererUrl: (url) => loaded.push(url),
+    referralsEnabled: true,
+    rendererOrigin: 'http://127.0.0.1:8081/',
+    storePendingUrl() {},
+  }), true);
+  assert.deepEqual(loaded, [`http://127.0.0.1:8081/referral#handoff=${token}`]);
+  assert.equal(
+    mapReferralAppUrlToRendererUrl(
+      `glidelingo://app/referral?handoff=${token}`,
+      'https://attacker.example/',
+    ),
+    null,
+  );
+});
+
 test('packaged renderer URLs require the exact virtual HTTPS origin', () => {
   assert.equal(isExactPackagedRendererUrl(`${PACKAGED_RENDERER_ORIGIN}/sign-in`), true);
   assert.equal(isExactPackagedRendererUrl('http://desktop.glidelingo.com/sign-in'), false);

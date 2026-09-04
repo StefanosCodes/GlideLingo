@@ -219,9 +219,9 @@ class PostgresAffiliateCommissionRepository:
         product_ref = fact["product_ref"]
         if not isinstance(principal_ref, str) or not isinstance(product_ref, str):
             raise CommissionFactConflictError
-        # Referral binding uses this same principal-scoped lock. Whichever transaction
-        # wins becomes the deterministic boundary: a purchase locks the current
-        # attribution, or a completed replacement becomes current before the purchase.
+        # Referral binding uses this same principal-scoped lock. The fact's occurrence
+        # time selects the half-open attribution interval, even when reconciliation
+        # happens after a newer attribution has replaced it.
         connection.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:principal_ref, 0))"),
             {"principal_ref": principal_ref},
@@ -230,50 +230,62 @@ class PostgresAffiliateCommissionRepository:
             connection.execute(
                 text(
                     """
-                    UPDATE affiliate_attribution
-                    SET state = 'locked', locked_at = :occurred_at,
-                        lock_reference = :lock_reference, updated_at = :processed_at
+                    SELECT id, creator_id, program_version_id, state, locked_at
+                    FROM affiliate_attribution
                     WHERE principal_ref = :principal_ref
-                      AND state = 'bound'
-                      AND locked_at IS NULL
                       AND bound_at <= :occurred_at
-                    RETURNING id, creator_id, program_version_id
+                      AND (replaced_at IS NULL OR replaced_at > :occurred_at)
+                    ORDER BY bound_at DESC, id DESC
+                    LIMIT 1
+                    FOR UPDATE
                     """
                 ),
                 {
                     "principal_ref": principal_ref,
                     "occurred_at": fact["occurred_at"],
-                    "processed_at": processed_at,
-                    "lock_reference": f"financial_fact:{fact['id']}",
                 },
             )
             .mappings()
             .one_or_none()
         )
         if attribution is None:
+            return CommissionApplyResult(status=CommissionApplyStatus.INELIGIBLE)
+
+        if attribution["locked_at"] is None:
+            next_state = "locked" if attribution["state"] == "bound" else attribution["state"]
             attribution = (
                 connection.execute(
                     text(
                         """
-                        SELECT id, creator_id, program_version_id
-                        FROM affiliate_attribution
-                        WHERE principal_ref = :principal_ref
-                          AND state IN ('locked', 'corrected')
-                          AND locked_at IS NOT NULL
-                          AND bound_at <= :occurred_at
-                        FOR SHARE
+                        UPDATE affiliate_attribution
+                        SET state = :next_state, locked_at = :occurred_at,
+                            lock_reference = :lock_reference, updated_at = :processed_at
+                        WHERE id = :attribution_id
+                          AND locked_at IS NULL
+                        RETURNING id, creator_id, program_version_id, state, locked_at
                         """
                     ),
                     {
-                        "principal_ref": principal_ref,
+                        "attribution_id": attribution["id"],
+                        "next_state": next_state,
                         "occurred_at": fact["occurred_at"],
+                        "processed_at": processed_at,
+                        "lock_reference": f"financial_fact:{fact['id']}",
                     },
                 )
                 .mappings()
-                .one_or_none()
+                .one()
             )
-        if attribution is None:
-            return CommissionApplyResult(status=CommissionApplyStatus.INELIGIBLE)
+
+        # Policy rotation uses this program-version lock. Delayed facts therefore
+        # observe one committed set of half-open policy intervals.
+        connection.execute(
+            text(
+                "SELECT pg_advisory_xact_lock("
+                "hashtextextended(CAST(:program_version_id AS text), 1))"
+            ),
+            {"program_version_id": attribution["program_version_id"]},
+        )
 
         rule = (
             connection.execute(

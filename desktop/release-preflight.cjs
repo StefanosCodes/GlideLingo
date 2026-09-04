@@ -153,8 +153,8 @@ function runReleasePreflight({
   commandRunner('npm', ['run', 'env:check'], { label: 'Development environment check' });
   commandRunner(
     'npm',
-    ['ci', '--prefix', 'desktop', '--ignore-scripts', '--dry-run'],
-    { label: 'Desktop lockfile check' },
+    ['ci', '--prefix', 'desktop', '--ignore-scripts'],
+    { label: 'Desktop dependency install' },
   );
   commandRunner('npm', ['run', 'verify:full-stack'], { label: 'Full-stack verification' });
 

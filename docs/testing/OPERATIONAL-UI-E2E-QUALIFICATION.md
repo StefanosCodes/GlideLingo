@@ -2,10 +2,9 @@
 
 ## Qualification identity
 
-- As of: 2026-09-04T10:48:40-05:00
+- As of: 2026-09-04T12:00:10-05:00
 - Branch: feat/operational-ui-e2e-stress
-- Base: origin/main at 0db98e547ecf38a0e715d9d1e16c5a092d83a0c6
-- End-of-run origin/main: f9de28c922cbfb6ec690a195da5e3081e99df3b3 (advanced after the lane was created; not silently integrated)
+- Base: origin/main at f9de28c922cbfb6ec690a195da5e3081e99df3b3
 - Target: the commit containing this report
 - Target OS: macOS 26.2, Apple Silicon
 - Runtime: Node 24.19.0, Expo 57.0.20, Electron 44, Playwright 1.62.1
@@ -30,8 +29,8 @@ verify the committed preload, URL, CSP, navigation, and packaged security contra
 | --- | --- | --- |
 | Structural validation | Passed | Skill validator, metadata YAML, relative links, TypeScript, and diff checks |
 | Dirty/wrong lane protection | Passed | Unrelated feat/lesson-tutor-agent checkout was left untouched; isolated lane created from fetched origin/main |
-| End-of-run base drift | Recorded | origin/main advanced through PRs 58 and 60; desktop/main.cjs overlaps, so integration and its rerun remain a separate explicit step |
-| Active PR/harness inventory | Passed | PR 58 worktree matched its remote head; root harness was absent while the separate Astro website harness was present |
+| Current-main integration | Passed | Branch was rebased onto fetched origin/main; the merged desktop updater path and protocol CSP correction coexist |
+| Active PR/harness inventory | Passed | Open PRs and worktrees were inventoried; the separate Astro website harness was not reused as Expo application evidence |
 | Port ownership | Passed | Port 8081 belonged to another Codex worktree and was not stopped or reused |
 | Host readiness | Passed after repair | Initial 127.0.0.1 probe could not reach Expo's IPv6 localhost bind; config now uses the exact localhost origin |
 | Expected-red assertion | Passed | Non-zero result at the first absent visible outcome with trace, screenshot, video, context, and observations |
@@ -82,7 +81,7 @@ its reports.
 
 The macOS functional job now runs the combined Expo web/Electron command and uploads artifacts on
 failure. It deliberately requires both `GLIDELINGO_CLERK_TEST_PUBLISHABLE_KEY` for localhost and the
-existing production `GLIDELINGO_CLERK_PUBLISHABLE_KEY` for Electron. The test variable is not yet
-provisioned, a successful remote job has not yet been observed, and making that job a required
-branch-protection check is an external repository action requiring explicit authorization. Until
-those steps happen, the accurate claim is locally operationally qualified, not merge-gate enforced.
+existing production `GLIDELINGO_CLERK_PUBLISHABLE_KEY` for Electron. Both repository variables are
+provisioned without committing their values. A successful remote job has not yet been observed and
+the job is not yet a required branch-protection check. Until both happen, the accurate claim is
+locally operationally qualified, not merge-gate enforced.

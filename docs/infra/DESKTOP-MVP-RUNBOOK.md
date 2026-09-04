@@ -80,14 +80,33 @@ insufficient.
 
 ## Desktop release and updates
 
-After the production API commit is accepted, increment `desktop/package.json`, merge that reviewed
-version, and create the matching protected tag such as `desktop-v1.0.1`. The **Desktop Release**
-workflow uses WIF and pinned GCP Secret Manager versions to build, sign, notarize, and stage a draft
-universal macOS release.
+Marketing-site files under `website/` are not part of the Electron package. Update the desktop
+version only when changes to the Expo application, Electron shell, or packaged assets should reach
+installed users.
 
-Do not publish the draft until installed-app Google/Apple authentication, onboarding, sandbox or live
-checkout, entitlement reconciliation, launch, and update acceptance have passed. Publishing the
-approved GitHub release makes it visible to the website download link and to already-installed apps.
+For a desktop release:
+
+1. Create a small version-bump branch from fresh `origin/main`. Update `desktop/package.json` and
+   both version fields in `desktop/package-lock.json` to one unused patch version.
+2. Run `npm run desktop:release:preflight`. Fix every failure before opening the pull request.
+3. Merge the reviewed version PR, record its exact 40-character commit, and create the protected
+   matching tag `desktop-v<version>` on that commit.
+4. Run the **Desktop Release** workflow. It uses WIF and pinned GCP Secret Manager versions to build,
+   sign, notarize, and stage a private universal macOS draft.
+5. From the exact tagged checkout, run
+   `npm run desktop:release:accept-draft -- desktop-v<version>`.
+6. Install the retained DMG normally and complete the signed-app checklist before separately
+   approving publication or website activation.
+
+The preflight produces unsigned local DMG/ZIP/update metadata and proves the package shape. Draft
+acceptance downloads and verifies the exact signed artifacts. Neither replaces the first real
+published `N → N+1` updater acceptance test. Drafts are invisible to installed apps, and macOS
+automatic updates require a signed application.
+
+Do not publish the draft until installed-app credential authentication, onboarding, sandbox or live
+checkout, entitlement reconciliation, launch, and applicable update acceptance have passed. Publishing
+the approved GitHub release makes it visible to already-installed apps and the website's fallback
+GitHub Releases page. Activating the website's direct DMG link is a separate approved deployment.
 Installed apps check for a newer published release on launch, ask before downloading, and ask again
 before restarting to install.
 

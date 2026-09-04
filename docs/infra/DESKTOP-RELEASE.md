@@ -97,6 +97,40 @@ On macOS, `base64 < file | pbcopy` copies a file's encoded value without writing
 
 ## Build and publish
 
+### Lean operator flow
+
+Desktop delivery has three separate proof levels. Do not treat an earlier level as evidence for a
+later one:
+
+| Proof | Command or action | What it proves |
+| --- | --- | --- |
+| Local behavior | `npm run dev:desktop` | Development auth, billing, API, persistence, and UI behavior |
+| Local release preflight | `npm run desktop:release:preflight` | Version availability, clean dependency contracts, tests, and the unsigned DMG/ZIP/update-metadata shape |
+| Signed draft acceptance | `npm run desktop:release:accept-draft -- desktop-v<version>` | The exact downloaded GitHub artifacts are signed, notarized, internally consistent, and universal |
+| Published forward update | Install published `N`, then publish and accept `N+1` | The real updater downloads and installs the new signed release without losing user state |
+
+The local preflight is the normal release-preparation command. Run it on the version-bump branch
+before opening its pull request. It checks the ignored development `.env`, verifies that the desktop
+manifest and lockfile versions match, refuses a version whose tag already exists locally or on
+GitHub, runs the full-stack suite, and builds all six unsigned release-shaped artifacts in ignored
+`release-dry-run/`. It then validates their checksums, updater metadata, packaged version, and x64 +
+arm64 slices.
+
+The preflight deliberately uses development configuration and unsigned output. It never reads
+production release secrets, signs an app, publishes a release, or enables the updater. Its output is
+verification evidence, never a distribution artifact. A failed preflight must be fixed before the
+version PR is merged.
+
+`desktop/package.json` is the desktop version source. Its version must match the root entry and
+package entry in `desktop/package-lock.json`, and the eventual tag must be exactly
+`desktop-v<version>`. Never move or reuse a desktop tag or replace a published binary. If a release
+fails after its tag is created, increment the patch version and move forward.
+
+Ordinary marketing-site changes under `website/` are not packaged into Electron and do not require
+a desktop version bump. Changes to the Expo application under `src/`, the Electron shell under
+`desktop/`, or packaged assets do require a new desktop release when they should reach installed
+users.
+
 For a signed local build, install the Developer ID identity in the login keychain, expose one supported notarization credential set, set `EXPO_PUBLIC_API_BASE_URL`, `GLIDELINGO_CLERK_ORIGIN`, `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`, `EXPO_PUBLIC_REVENUECAT_WEB_API_KEY`, and `GLIDELINGO_BILLING_MODE`, and run:
 
 ```bash
@@ -106,7 +140,7 @@ npm run desktop:release
 To exercise the universal package layout without reading Apple credentials or producing a
 releasable binary, run `npm run desktop:package:dry-run`. Its separate builder overlay disables
 signing and the post-sign/notarization hook and writes only to ignored `release-dry-run/`. It is
-verification evidence, never a distribution artifact.
+the faster app-layout diagnostic; use `desktop:release:preflight` for the complete pre-PR gate.
 
 For CI, run the **Desktop Release** workflow manually with both the exact 40-character reviewed
 `main` commit SHA and its existing protected release tag. Manual runs cannot select a branch,
@@ -129,6 +163,20 @@ byte sizes, and GitHub SHA-256 digests. A run refuses to replace an already-publ
 Sandbox drafts are additionally marked as internal prereleases and carry a do-not-publish warning.
 The workflow contains no public-publish or website-activation step. Only a production-mode draft
 may proceed to the separately approved clean-Mac promotion process.
+
+After the workflow succeeds, check out the exact tagged release commit and run:
+
+```bash
+npm run desktop:release:accept-draft -- desktop-v<version>
+```
+
+This command authenticates with the existing `gh` session, resolves even GitHub's internally
+untagged draft representation, downloads the exact six assets by immutable release/asset identity,
+and revalidates the remote digests. It separately extracts the updater ZIP and mounts the DMG
+read-only, then applies `codesign`, Gatekeeper, stapler, version, and universal-architecture checks
+to both app copies. Temporary mounts are detached even on failure. The downloaded files remain in
+ignored `release-acceptance/desktop-v<version>/` for normal manual DMG installation. The command
+cannot publish, install into `/Applications`, or change the website.
 
 The packaged updater is fixed to the public `StefanosCodes/GlideLingo` GitHub Releases channel.
 It runs once at launch only from a packaged, currently validly signed macOS app. Development,
@@ -161,7 +209,7 @@ The automated workflow proves:
 - DMG and ZIP checksums are generated before upload.
 - updater metadata and both blockmaps are present before the draft can converge.
 
-Before linking a release from the public landing page, download the DMG onto a second clean Mac, drag GlideLingo to Applications, launch it normally, and exercise the critical lesson, audio, persistence, and production API flows. With the installed signed app, prove the system-browser OAuth callback while GlideLingo is already running, then quit and relaunch to prove the stored Clerk session restores cleanly. This installed OAuth smoke remains an activation gate even after unit and packaging checks pass.
+Before linking a release from the public landing page, download the DMG onto a second clean Mac or a fresh macOS test profile, drag GlideLingo to Applications, and launch it normally. Exercise email/password signup, email-code verification, first-name onboarding, persistence, sign-out, sign-in, recovery, billing, lessons, audio, and production API access. Quit and relaunch to prove the stored Clerk session and local learning state restore cleanly. This installed-app smoke remains an activation gate even after automated draft acceptance passes.
 
 The clean-Mac smoke test is currently external, so the workflow intentionally leaves every
 release in draft state and contains no publish step. A sandbox build must remain a draft even when
@@ -171,11 +219,11 @@ clean-Mac evidence from a production-mode build and an authorized approval. Unti
 page remains in its explicit disabled state.
 
 Before calling automatic updates release-ready, complete one real forward-update acceptance test:
-install and launch the published signed/notarized `1.0.0`, publish a separately signed/notarized
-`1.0.1` through the same protected lane, relaunch `1.0.0`, accept both update prompts, and verify
-that `1.0.1` starts with authentication state and local learning data intact. Also repeat once by
+install and launch a published signed/notarized version `N`, publish separately signed/notarized
+version `N+1` through the same protected lane, relaunch `N`, accept both update prompts, and verify
+that `N+1` starts with authentication state and local learning data intact. Also repeat once by
 choosing **Later** at each prompt to prove no unattended install occurs. This signed `1.0.0` to
-`1.0.1` exercise cannot be replaced by an unsigned local package test.
+`1.0.1`-style forward exercise cannot be replaced by an unsigned local package test.
 
 The authentication integration preserves the corrected desktop origin and OAuth contract:
 FastAPI CORS allows the exact virtual renderer origin `https://desktop.glidelingo.com`, packaged

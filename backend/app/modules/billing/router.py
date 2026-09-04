@@ -105,7 +105,7 @@ async def receive_revenuecat_webhook(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Webhook payload is invalid.",
         ) from None
-    return await service.process_webhook(payload)
+    return await service.process_webhook(payload, raw_body=raw_body)
 
 
 async def _read_bounded_body(request: Request, *, maximum_bytes: int) -> bytes:

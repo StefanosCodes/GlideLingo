@@ -14,6 +14,9 @@ from app.main import create_app
 from app.modules.billing.identity import derive_billing_actor_ref
 from app.modules.billing.repository import EntitlementRepository, StoredProEntitlement
 from app.modules.billing.service import BillingService
+from app.modules.billing_events.crypto import ProviderActorCipher
+from app.modules.billing_events.models import IntakeReceipt, NormalizedBillingEvent
+from app.modules.billing_events.repository import BillingEventRepository
 
 NOW = datetime.now(UTC).replace(microsecond=0)
 KEY = b"billing-router-pseudonym-key-at-least-32-bytes"
@@ -288,3 +291,61 @@ def test_billing_openapi_separates_clerk_status_from_public_webhook() -> None:
     assert reconcile_operation["security"] == [{"ClerkSessionToken": []}]
     assert "requestBody" not in reconcile_operation
     assert "security" not in webhook_operation
+
+
+class CapturingEventRepository:
+    def __init__(self) -> None:
+        self.events: list[NormalizedBillingEvent] = []
+
+    def accept(self, *, event: NormalizedBillingEvent, **_kwargs: object) -> IntakeReceipt:
+        self.events.append(event)
+        return IntakeReceipt(status="accepted")
+
+
+def test_flagged_webhook_routes_to_durable_intake_before_acknowledgement() -> None:
+    entitlement_repository = MemoryRepository()
+    provider = ActiveProvider()
+    event_repository = CapturingEventRepository()
+    service = BillingService(
+        enabled=True,
+        repository=cast(EntitlementRepository, entitlement_repository),
+        provider=provider,
+        pseudonym_key=KEY,
+        environment="SANDBOX",
+        freshness_seconds=900,
+        webhook_authorization=AUTHORIZATION,
+        webhook_signing_secret=SIGNING_SECRET.decode(),
+        webhook_signature_tolerance_seconds=300,
+        event_intake_enabled=True,
+        event_repository=cast(BillingEventRepository, event_repository),
+        event_provider_account_ref="app_router_test",
+        provider_actor_cipher=ProviderActorCipher(secret=KEY),
+    )
+    application = create_app(Settings(_env_file=None), billing_service=service)
+    raw = json.dumps(
+        {
+            "api_version": "1.0",
+            "event": {
+                "id": "evt_durable_router",
+                "type": "INITIAL_PURCHASE",
+                "event_timestamp_ms": int(NOW.timestamp() * 1000),
+                "environment": "SANDBOX",
+                "app_id": "app_router_test",
+                "app_user_id": "user_route_123",
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+
+    with TestClient(application) as client:
+        response = client.post(
+            "/v1/billing/revenuecat/webhook",
+            content=raw,
+            headers=signed_webhook_headers(raw),
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "accepted"}
+    assert [event.provider_event_id for event in event_repository.events] == ["evt_durable_router"]
+    assert provider.users == []
+    assert entitlement_repository.events == set()

@@ -126,8 +126,10 @@ GLIDELINGO_REVENUECAT_ENABLED=false
 GLIDELINGO_REVENUECAT_ENVIRONMENT=SANDBOX
 GLIDELINGO_REVENUECAT_API_KEY=
 GLIDELINGO_REVENUECAT_PSEUDONYM_KEY=
+GLIDELINGO_REVENUECAT_WEBHOOK_APP_ID=
 GLIDELINGO_REVENUECAT_WEBHOOK_AUTHORIZATION=
 GLIDELINGO_REVENUECAT_WEBHOOK_SIGNING_SECRET=
+GLIDELINGO_BILLING_EVENT_INTAKE_ENABLED=false
 ```
 
 `GLIDELINGO_REVENUECAT_API_KEY` is deliberately the app public SDK key used with RevenueCat's read-only
@@ -165,9 +167,35 @@ disabled, provider-unavailable, or database-unavailable billing state returns `5
 Tutor availability is checked first, so an unavailable tutor remains `503 lesson_tutor_unavailable`
 without performing billing or provider work.
 
-## Future affiliate-consumer boundary
+## Disabled durable consumer foundation
 
-The current webhook path is intentionally an entitlement implementation, not a reusable financial ledger. It fetches current RevenueCat state and writes `revenuecat_webhook_event` plus the exact `pro` snapshot synchronously; maintenance later prunes those webhook receipts after 30 days. Future affiliate work must follow the [post-core affiliate and creator contract](product/AFFILIATE-CREATOR-PROGRAM.md): first add a durable minimized billing inbox and independently retryable `pro_entitlement` and `affiliate_finance` deliveries, then process any shadow ledger. RevenueCat remains authoritative only for `pro`; Stripe financial resources are the proposed authority for RevenueCat Web Billing charges, refunds, disputes/chargebacks, fees, and balance effects after deterministic sandbox correlation is proven. Affiliate failure must never withhold or invent a valid entitlement, and no affiliate flag, offer, ledger effect, transfer, or payout is enabled by this MVP.
+Migration `005_billing_event_intake.sql` adds a provider/environment/app-scoped minimized inbox,
+an encrypted provider-actor lookup, and independent `pro_entitlement` and `affiliate_finance`
+delivery rows. `GLIDELINGO_BILLING_EVENT_INTAKE_ENABLED=false` preserves the original synchronous
+RevenueCat receipt-plus-entitlement path exactly. When the flag is explicitly enabled after the
+migration and acceptance gates pass, a verified known RevenueCat lifecycle event is acknowledged only
+after the inbox and both delivery rows commit in one transaction. Duplicate identity is scoped by
+provider, environment, app/account context, and provider event ID. Unknown event types retain only
+minimized metadata and schedule no consumer.
+
+Run the independently deployable worker with `npm run worker:billing` (equivalent to
+`python -m app.workers.billing_events` from `backend`). PostgreSQL claims use
+`FOR UPDATE SKIP LOCKED`; each delivery has its own lease, attempt count, bounded exponential retry,
+and terminal `manual_review` state. The Pro consumer performs a fresh RevenueCat subscriber read and
+updates only the existing exact `pro` state. The placeholder affiliate-finance consumer has no
+financial side effect and retries to manual review until a separately reviewed Stripe-resource
+consumer replaces it. One delivery never completes, rolls back, or blocks the other.
+
+The inbox stores no raw webhook body, email, phone, card/bank data, or plaintext Clerk/RevenueCat user
+ID. It stores allowlisted event/object metadata and the exact-body SHA-256; the reversible provider
+actor identifier needed for the fresh worker read is encrypted with a context-derived key from the
+environment-specific RevenueCat pseudonym secret and authenticated to provider/environment/app/actor
+scope. Rotation and deletion policy must be approved before enablement.
+
+This is only the durable foundation required by the
+[post-core affiliate and creator contract](product/AFFILIATE-CREATOR-PROGRAM.md). RevenueCat remains
+authoritative only for `pro`; no Stripe adapter, financial reconciliation, commission, ledger effect,
+transfer, payout, provider account, or affiliate feature is implemented or enabled here.
 
 Apply `backend/migrations/002_revenuecat_entitlements.sql` with the migration operator and schedule
 `maintenance_revenuecat_webhooks.sql` with a separate delete-capable maintenance identity before

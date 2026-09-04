@@ -23,6 +23,8 @@ from app.modules.billing_events.repository import BillingEventRepository
 logger = logging.getLogger("glidelingo.billing_events")
 
 type DeliveryErrorClass = Literal[
+    "commission_policy_unavailable",
+    "commission_source_unavailable",
     "consumer_not_implemented",
     "database_unavailable",
     "invalid_provider_actor",

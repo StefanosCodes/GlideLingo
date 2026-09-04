@@ -77,6 +77,7 @@ def test_affiliate_foundation_is_fully_disabled_by_default() -> None:
     assert settings.affiliate_referral_resolution_enabled is False
     assert settings.affiliate_attribution_binding_enabled is False
     assert settings.affiliate_membership_admin_enabled is False
+    assert settings.affiliate_commissions_enabled is False
     assert settings.affiliate_principal_pseudonym_key is None
 
 
@@ -160,6 +161,28 @@ def test_billing_event_intake_accepts_complete_scoped_configuration() -> None:
 
     assert settings.billing_event_intake_enabled is True
     assert settings.revenuecat_webhook_app_id == "app_test"
+
+
+def test_affiliate_commissions_require_every_disabled_foundation_gate() -> None:
+    with pytest.raises(ValidationError, match="master affiliate flag"):
+        Settings(_env_file=None, affiliate_commissions_enabled=True)
+
+    settings = Settings(
+        _env_file=None,
+        affiliates_enabled=True,
+        affiliate_commissions_enabled=True,
+        affiliate_principal_pseudonym_key="a" * 32,
+        clerk_issuer="https://clerk.glidelingo.test",
+        clerk_jwks_url="https://clerk.glidelingo.test/.well-known/jwks.json",
+        revenuecat_enabled=True,
+        revenuecat_api_key="rcb_public-web-key",
+        revenuecat_pseudonym_key="r" * 32,
+        revenuecat_webhook_app_id="app_test",
+        revenuecat_webhook_authorization="Bearer webhook-secret-value",
+        revenuecat_webhook_signing_secret="s" * 32,
+        billing_event_intake_enabled=True,
+    )
+    assert settings.affiliate_commissions_enabled is True
 
 
 def test_enabled_revenuecat_rejects_overprivileged_project_secret_key() -> None:

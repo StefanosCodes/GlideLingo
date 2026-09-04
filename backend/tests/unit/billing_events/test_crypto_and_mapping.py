@@ -40,12 +40,29 @@ def test_provider_actor_cipher_is_bound_to_provider_scope() -> None:
 
 
 def test_reviewed_purchase_event_routes_to_independent_consumers() -> None:
-    assert revenuecat_consumers(event_type="INITIAL_PURCHASE", has_provider_actor=True) == (
-        "pro_entitlement",
-        "affiliate_finance",
-    )
+    for event_type in ("INITIAL_PURCHASE", "REFUND", "REFUND_REVERSED"):
+        assert revenuecat_consumers(event_type=event_type, has_provider_actor=True) == (
+            "pro_entitlement",
+            "affiliate_finance",
+        )
 
 
 def test_unknown_or_actorless_event_has_no_consumer_side_effect() -> None:
     assert revenuecat_consumers(event_type="FUTURE_EVENT", has_provider_actor=True) == ()
     assert revenuecat_consumers(event_type="RENEWAL", has_provider_actor=False) == ()
+
+
+def test_actorless_reversal_routes_only_to_transaction_scoped_finance() -> None:
+    assert revenuecat_consumers(
+        event_type="REFUND",
+        has_provider_actor=False,
+        has_transaction_ref=True,
+    ) == ("affiliate_finance",)
+    assert (
+        revenuecat_consumers(
+            event_type="REFUND",
+            has_provider_actor=False,
+            has_transaction_ref=False,
+        )
+        == ()
+    )

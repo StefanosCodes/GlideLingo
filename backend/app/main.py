@@ -50,6 +50,7 @@ from app.integrations.lesson_tutor.client import GoogleIdentityTokenProvider, Le
 from app.integrations.revenuecat.client import RevenueCatHttpClient
 from app.modules.affiliates.api import admin_router as affiliate_admin_router
 from app.modules.affiliates.api import router as affiliate_router
+from app.modules.affiliates.commission_repository import PostgresAffiliateCommissionRepository
 from app.modules.affiliates.repository import PostgresAffiliateRepository
 from app.modules.affiliates.service import AffiliateService
 from app.modules.billing.repository import PostgresEntitlementRepository
@@ -166,6 +167,8 @@ def create_app(
             if settings.affiliate_principal_pseudonym_key is not None
             else None
         ),
+        commissions_enabled=settings.affiliate_commissions_enabled,
+        commission_repository=PostgresAffiliateCommissionRepository(engine=database_engine),
     )
     application.state.lesson_tutor_service = lesson_tutor_service or LessonTutorService(
         enabled=settings.lesson_tutor_enabled,

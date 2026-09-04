@@ -170,3 +170,19 @@ capability. Both the request process and `npm run worker:billing` use that bound
 configuration, duplicate/out-of-order/lease/concurrency tests, worker deployment, metrics, alerting,
 and recovery operations are reviewed. Enabling the flag without running the worker durably accepts
 events but leaves deliveries pending.
+
+## Disabled affiliate commission ledger
+
+`007_affiliate_commission_ledger.sql` intentionally leaves migration number `006` available for the
+Tutor lane. It must be inserted into the canonical production runner only after migration `006` is
+merged, so production still applies the complete numeric sequence. The migration is additive, creates
+no policy defaults, and grants the runtime only read access to policy/rule rows plus append-only access
+to commission entries.
+
+Before `GLIDELINGO_AFFILIATE_COMMISSIONS_ENABLED=true`, an operator must create a draft policy and its
+explicit product rules, review the currency, minor-unit basis amount, rate in basis points, half-up
+rounding rule, and effective interval, then activate that immutable version. The flag also requires the
+affiliate master flag, durable billing intake, exact Clerk configuration, and both pseudonym keys.
+Purchase events lock existing attribution before accruing; refunds and refund reversals append exact
+negations of their source entries. This slice does not create checkout, provider pricing, commission
+policy values, balances, transfer instructions, payouts, or provider mutations.

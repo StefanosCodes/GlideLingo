@@ -20,6 +20,12 @@ from app.core.errors import (
     AffiliateForbiddenError,
     AffiliateReferralNotFoundError,
 )
+from app.modules.affiliates.commission_domain import (
+    CommissionApplyStatus,
+    CommissionPolicyUnavailableError,
+    CommissionSourceUnavailableError,
+)
+from app.modules.affiliates.commission_repository import PostgresAffiliateCommissionRepository
 from app.modules.affiliates.domain import (
     BindStatus,
     CreatorMembershipRole,
@@ -30,8 +36,14 @@ from app.modules.affiliates.identity import derive_affiliate_principal_ref
 from app.modules.affiliates.repository import PostgresAffiliateRepository
 from app.modules.affiliates.service import AffiliateService
 
-MIGRATION = (
+AFFILIATE_MIGRATION = (
     Path(__file__).resolve().parents[2] / "migrations" / "004_affiliate_identity_attribution.sql"
+)
+BILLING_EVENT_MIGRATION = (
+    Path(__file__).resolve().parents[2] / "migrations" / "005_billing_event_intake.sql"
+)
+COMMISSION_MIGRATION = (
+    Path(__file__).resolve().parents[2] / "migrations" / "007_affiliate_commission_ledger.sql"
 )
 NOW = datetime(2026, 9, 2, 12, 0, tzinfo=UTC)
 KEY = b"affiliate-integration-pseudonym-key-at-least-32-bytes"
@@ -72,10 +84,6 @@ def affiliate_database() -> Generator[AffiliateDatabase]:
         )
         connection.exec_driver_sql("GRANT cloudsqlsuperuser TO glidelingo")
 
-    migration = MIGRATION.read_text(encoding="utf-8").replace(
-        "public.affiliate_program_version",
-        f'"{schema}".affiliate_program_version',
-    )
     raw_connection = operator.raw_connection()
     try:
         driver_connection = cast(Any, raw_connection.driver_connection)
@@ -84,7 +92,15 @@ def affiliate_database() -> Generator[AffiliateDatabase]:
         try:
             cursor.execute("SET ROLE cloudsqlsuperuser")
             cursor.execute(f'SET search_path TO "{schema}", public')
-            cursor.execute(migration)
+            for migration_file in (
+                AFFILIATE_MIGRATION,
+                BILLING_EVENT_MIGRATION,
+                COMMISSION_MIGRATION,
+            ):
+                migration = migration_file.read_text(encoding="utf-8").replace(
+                    "public.", f'"{schema}".'
+                )
+                cursor.execute(migration)
             cursor.execute("RESET ROLE")
         finally:
             cursor.close()
@@ -212,6 +228,98 @@ def service(
         now=lambda: clock[0],
         token_factory=lambda: next(token_iterator),
     )
+
+
+def seed_commission_policy(
+    database: AffiliateDatabase,
+    *,
+    program_version_id: UUID,
+    basis_amount_minor: int = 1999,
+    rate_basis_points: int = 1250,
+) -> None:
+    policy_id = uuid4()
+    with database.engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO affiliate_commission_policy
+                  (id, program_version_id, policy_version, status)
+                VALUES (:id, :program_version_id, 1, 'draft')
+                """
+            ),
+            {"id": policy_id, "program_version_id": program_version_id},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO affiliate_commission_rule
+                  (id, policy_id, product_ref, currency_code, basis_amount_minor,
+                   commission_rate_basis_points, rounding_mode)
+                VALUES
+                  (:id, :policy_id, 'monthly', 'USD', :basis_amount_minor,
+                   :rate_basis_points, 'half_up')
+                """
+            ),
+            {
+                "id": uuid4(),
+                "policy_id": policy_id,
+                "basis_amount_minor": basis_amount_minor,
+                "rate_basis_points": rate_basis_points,
+            },
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE affiliate_commission_policy
+                SET status = 'active', effective_from = :effective_from,
+                    activated_at = :activated_at
+                WHERE id = :id
+                """
+            ),
+            {
+                "id": policy_id,
+                "effective_from": NOW - timedelta(days=1),
+                "activated_at": NOW - timedelta(days=1),
+            },
+        )
+
+
+def insert_billing_event(
+    database: AffiliateDatabase,
+    *,
+    event_type: str,
+    transaction_ref: str,
+    occurred_at: datetime = NOW,
+) -> UUID:
+    event_ref = uuid4()
+    with database.engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO billing_event_inbox
+                  (event_ref, provider, environment, provider_account_ref,
+                   provider_event_id, event_type, occurred_at, received_at,
+                   object_refs, schema_version, payload_sha256)
+                VALUES
+                  (:event_ref, 'revenuecat', 'SANDBOX', 'app_test',
+                   :provider_event_id, :event_type, :occurred_at, :received_at,
+                   CAST(:object_refs AS jsonb), 1, :payload_sha256)
+                """
+            ),
+            {
+                "event_ref": event_ref,
+                "provider_event_id": f"evt_{event_ref.hex}",
+                "event_type": event_type,
+                "occurred_at": occurred_at,
+                "received_at": max(occurred_at, NOW),
+                "object_refs": json.dumps(
+                    {"product": "monthly", "transaction": transaction_ref},
+                    separators=(",", ":"),
+                ),
+                "payload_sha256": hashlib.sha256(event_ref.bytes).hexdigest(),
+            },
+        )
+    return event_ref
 
 
 @pytest.mark.integration
@@ -486,6 +594,208 @@ def test_concurrent_handoffs_for_one_principal_serialize_attribution_replacement
 
 
 @pytest.mark.integration
+def test_commission_ledger_is_concurrent_idempotent_and_conserves_refunds(
+    affiliate_database: AffiliateDatabase,
+) -> None:
+    ids = seed_referral(affiliate_database)
+    principal = ClerkPrincipal(user_id="user_commission", issuer="https://clerk.test")
+    affiliate_service = service(
+        affiliate_database,
+        clock=[NOW],
+        tokens=["G" * 43],
+    )
+    affiliate_service.resolve_referral(link_slug="creator-link", campaign_slug=None)
+    assert (
+        affiliate_service.bind_attribution(principal=principal, handoff_token="G" * 43).status
+        is BindStatus.BOUND
+    )
+    seed_commission_policy(
+        affiliate_database,
+        program_version_id=ids["version"],
+    )
+    repository = PostgresAffiliateCommissionRepository(engine=affiliate_database.engine)
+    principal_ref = derive_affiliate_principal_ref(key=KEY, principal=principal)
+    transaction_ref = "txn_commission_1"
+    purchase_ref = insert_billing_event(
+        affiliate_database,
+        event_type="INITIAL_PURCHASE",
+        transaction_ref=transaction_ref,
+    )
+    start = Barrier(2)
+
+    def accrue(_: int) -> CommissionApplyStatus:
+        start.wait()
+        return repository.apply_billing_event(
+            event_ref=purchase_ref,
+            principal_ref=principal_ref,
+            processed_at=NOW,
+        ).status
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        accrual_results = list(pool.map(accrue, range(2)))
+    assert sorted(accrual_results) == [
+        CommissionApplyStatus.ACCRUED,
+        CommissionApplyStatus.DUPLICATE,
+    ]
+
+    refund_ref = insert_billing_event(
+        affiliate_database,
+        event_type="REFUND",
+        transaction_ref=transaction_ref,
+        occurred_at=NOW + timedelta(minutes=1),
+    )
+    assert (
+        repository.apply_billing_event(
+            event_ref=refund_ref,
+            principal_ref=principal_ref,
+            processed_at=NOW + timedelta(minutes=1),
+        ).status
+        is CommissionApplyStatus.REFUNDED
+    )
+    assert (
+        repository.apply_billing_event(
+            event_ref=refund_ref,
+            principal_ref=principal_ref,
+            processed_at=NOW + timedelta(minutes=1),
+        ).status
+        is CommissionApplyStatus.DUPLICATE
+    )
+
+    reinstatement_ref = insert_billing_event(
+        affiliate_database,
+        event_type="REFUND_REVERSED",
+        transaction_ref=transaction_ref,
+        occurred_at=NOW + timedelta(minutes=2),
+    )
+    assert (
+        repository.apply_billing_event(
+            event_ref=reinstatement_ref,
+            principal_ref=principal_ref,
+            processed_at=NOW + timedelta(minutes=2),
+        ).status
+        is CommissionApplyStatus.REINSTATED
+    )
+
+    with affiliate_database.engine.connect() as connection:
+        entries = connection.execute(
+            text(
+                """
+                SELECT entry_kind, basis_amount_minor, commission_amount_minor
+                FROM affiliate_commission_entry
+                ORDER BY occurred_at
+                """
+            )
+        ).all()
+        attribution = connection.execute(
+            text(
+                """
+                SELECT state, lock_reference
+                FROM affiliate_attribution
+                WHERE principal_ref = :principal_ref
+                """
+            ),
+            {"principal_ref": principal_ref},
+        ).one()
+    assert [tuple(entry) for entry in entries] == [
+        ("accrual", 1999, 250),
+        ("refund", -1999, -250),
+        ("reinstatement", 1999, 250),
+    ]
+    assert sum(entry.commission_amount_minor for entry in entries) == 250
+    assert attribution.state == "locked"
+    assert attribution.lock_reference == f"billing_event:{purchase_ref}"
+
+    invalid_amount_event = insert_billing_event(
+        affiliate_database,
+        event_type="RENEWAL",
+        transaction_ref="txn_invalid_amount",
+        occurred_at=NOW + timedelta(minutes=3),
+    )
+    with pytest.raises(DBAPIError), affiliate_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO affiliate_commission_entry
+                  (id, source_event_ref, attribution_id, creator_id, program_version_id,
+                   policy_id, rule_id, provider, environment, provider_account_ref,
+                   provider_transaction_ref, entry_kind, currency_code, basis_amount_minor,
+                   commission_rate_basis_points, commission_amount_minor, occurred_at,
+                   recorded_at)
+                SELECT
+                  :id, :source_event_ref, attribution_id, creator_id, program_version_id,
+                  policy_id, rule_id, provider, environment, provider_account_ref,
+                  'txn_invalid_amount', 'accrual', currency_code, basis_amount_minor,
+                  commission_rate_basis_points, 999, :occurred_at, :occurred_at
+                FROM affiliate_commission_entry
+                WHERE entry_kind = 'accrual'
+                """
+            ),
+            {
+                "id": uuid4(),
+                "source_event_ref": invalid_amount_event,
+                "occurred_at": NOW + timedelta(minutes=3),
+            },
+        )
+
+    with pytest.raises(DBAPIError), affiliate_database.engine.begin() as connection:
+        connection.execute(
+            text("UPDATE affiliate_commission_entry SET commission_amount_minor = 999")
+        )
+
+
+@pytest.mark.integration
+def test_commission_processing_fails_closed_without_policy_or_reversal_source(
+    affiliate_database: AffiliateDatabase,
+) -> None:
+    seed_referral(affiliate_database)
+    principal = ClerkPrincipal(user_id="user_unconfigured", issuer="https://clerk.test")
+    affiliate_service = service(affiliate_database, clock=[NOW], tokens=["H" * 43])
+    affiliate_service.resolve_referral(link_slug="creator-link", campaign_slug=None)
+    affiliate_service.bind_attribution(principal=principal, handoff_token="H" * 43)
+    principal_ref = derive_affiliate_principal_ref(key=KEY, principal=principal)
+    repository = PostgresAffiliateCommissionRepository(engine=affiliate_database.engine)
+
+    pre_attribution_ref = insert_billing_event(
+        affiliate_database,
+        event_type="INITIAL_PURCHASE",
+        transaction_ref="txn_before_attribution",
+        occurred_at=NOW - timedelta(minutes=1),
+    )
+    assert (
+        repository.apply_billing_event(
+            event_ref=pre_attribution_ref,
+            principal_ref=principal_ref,
+            processed_at=NOW,
+        ).status
+        is CommissionApplyStatus.INELIGIBLE
+    )
+
+    purchase_ref = insert_billing_event(
+        affiliate_database,
+        event_type="RENEWAL",
+        transaction_ref="txn_no_policy",
+    )
+    with pytest.raises(CommissionPolicyUnavailableError):
+        repository.apply_billing_event(
+            event_ref=purchase_ref,
+            principal_ref=principal_ref,
+            processed_at=NOW,
+        )
+
+    refund_ref = insert_billing_event(
+        affiliate_database,
+        event_type="REFUND",
+        transaction_ref="txn_missing_purchase",
+    )
+    with pytest.raises(CommissionSourceUnavailableError):
+        repository.apply_billing_event(
+            event_ref=refund_ref,
+            principal_ref=principal_ref,
+            processed_at=NOW,
+        )
+
+
+@pytest.mark.integration
 def test_memberships_are_resource_scoped_audited_and_revoked_on_next_check(
     affiliate_database: AffiliateDatabase,
 ) -> None:
@@ -657,6 +967,9 @@ def test_runtime_role_has_only_the_required_affiliate_dml(
         "affiliate_handoff": {"SELECT", "INSERT", "UPDATE"},
         "affiliate_attribution": {"SELECT", "INSERT", "UPDATE"},
         "affiliate_audit_event": {"INSERT"},
+        "affiliate_commission_policy": {"SELECT"},
+        "affiliate_commission_rule": {"SELECT"},
+        "affiliate_commission_entry": {"SELECT", "INSERT"},
     }
     with affiliate_database.engine.connect() as connection:
         for table, privileges in expected.items():

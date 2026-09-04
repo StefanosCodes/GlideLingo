@@ -1,15 +1,18 @@
 """FastAPI contracts for the disabled affiliate foundation."""
 
+from datetime import datetime
 from typing import Annotated, Any, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from app.auth.clerk import CurrentClerkPrincipal
 from app.core.errors import ErrorResponse
 from app.modules.affiliates.schemas import (
     BindAttributionRequest,
     BindAttributionResponse,
+    CommissionLedgerEntryResponse,
+    CreatorCommissionLedgerResponse,
     CreatorMembershipResponse,
     GrantCreatorMembershipRequest,
     GrantStaffMembershipRequest,
@@ -82,6 +85,45 @@ def bind_attribution(
         handoff_token=body.handoff_token,
     )
     return BindAttributionResponse(status=result.status)
+
+
+@router.get(
+    "/creators/{creator_id}/commissions",
+    operation_id="list_affiliate_creator_commissions",
+    response_model=CreatorCommissionLedgerResponse,
+    responses={
+        401: AFFILIATE_ERRORS[401],
+        403: AFFILIATE_ERRORS[403],
+        503: AFFILIATE_ERRORS[503],
+    },
+)
+def list_creator_commissions(
+    creator_id: UUID,
+    principal: CurrentClerkPrincipal,
+    service: AffiliateServiceDependency,
+    before: Annotated[datetime | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> CreatorCommissionLedgerResponse:
+    entries = service.list_creator_commissions(
+        principal=principal,
+        creator_id=creator_id,
+        before=before,
+        limit=limit,
+    )
+    return CreatorCommissionLedgerResponse(
+        creator_id=creator_id,
+        entries=[
+            CommissionLedgerEntryResponse(
+                entry_id=entry.entry_id,
+                kind=entry.kind,
+                currency_code=entry.currency_code,
+                basis_amount_minor=entry.basis_amount_minor,
+                commission_amount_minor=entry.commission_amount_minor,
+                occurred_at=entry.occurred_at,
+            )
+            for entry in entries
+        ],
+    )
 
 
 @admin_router.post(

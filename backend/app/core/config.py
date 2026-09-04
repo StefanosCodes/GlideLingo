@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     affiliate_referral_resolution_enabled: bool = False
     affiliate_attribution_binding_enabled: bool = False
     affiliate_membership_admin_enabled: bool = False
+    affiliate_commissions_enabled: bool = False
     affiliate_principal_pseudonym_key: SecretStr | None = None
     billing_event_intake_enabled: bool = False
     billing_event_worker_poll_seconds: float = Field(default=1.0, gt=0, le=60)
@@ -232,6 +233,7 @@ class Settings(BaseSettings):
             self.affiliate_referral_resolution_enabled,
             self.affiliate_attribution_binding_enabled,
             self.affiliate_membership_admin_enabled,
+            self.affiliate_commissions_enabled,
         )
         if any(route_flags) and not self.affiliates_enabled:
             raise ValueError("Affiliate route flags require the master affiliate flag")
@@ -245,12 +247,16 @@ class Settings(BaseSettings):
                 "An affiliate principal pseudonym key of at least 32 bytes is required when enabled"
             )
         if (
-            self.affiliate_attribution_binding_enabled or self.affiliate_membership_admin_enabled
+            self.affiliate_attribution_binding_enabled
+            or self.affiliate_membership_admin_enabled
+            or self.affiliate_commissions_enabled
         ) and self.clerk_configuration is None:
             raise ValueError(
                 "Clerk authentication must be configured when authenticated affiliate routes "
                 "are enabled"
             )
+        if self.affiliate_commissions_enabled and not self.billing_event_intake_enabled:
+            raise ValueError("Affiliate commissions require durable billing event intake")
         return self
 
     @property

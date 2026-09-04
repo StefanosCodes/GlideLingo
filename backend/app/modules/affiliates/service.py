@@ -1,7 +1,7 @@
 """Flag-gated affiliate identity, authorization, and attribution operations."""
 
 import secrets
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -13,6 +13,8 @@ from app.core.errors import (
     AffiliateResourceNotFoundError,
     AffiliateUnavailableError,
 )
+from app.modules.affiliates.commission_domain import CommissionLedgerEntry
+from app.modules.affiliates.commission_repository import AffiliateCommissionRepository
 from app.modules.affiliates.domain import (
     AffiliateRepositoryConflictError,
     AffiliateRepositoryNotFoundError,
@@ -40,6 +42,8 @@ class AffiliateService:
         attribution_binding_enabled: bool,
         membership_admin_enabled: bool,
         principal_pseudonym_key: bytes | None,
+        commissions_enabled: bool = False,
+        commission_repository: AffiliateCommissionRepository | None = None,
         now: Callable[[], datetime] | None = None,
         token_factory: Callable[[], str] | None = None,
     ) -> None:
@@ -49,6 +53,8 @@ class AffiliateService:
         self._attribution_binding_enabled = attribution_binding_enabled
         self._membership_admin_enabled = membership_admin_enabled
         self._principal_pseudonym_key = principal_pseudonym_key
+        self._commissions_enabled = commissions_enabled
+        self._commission_repository = commission_repository
         self._now = now or (lambda: datetime.now(UTC))
         self._token_factory = token_factory or (lambda: secrets.token_urlsafe(32))
 
@@ -110,6 +116,31 @@ class AffiliateService:
             now=now,
         )
         raise AffiliateForbiddenError
+
+    def list_creator_commissions(
+        self,
+        *,
+        principal: ClerkPrincipal,
+        creator_id: UUID,
+        before: datetime | None,
+        limit: int,
+    ) -> Sequence[CommissionLedgerEntry]:
+        if (
+            not self._affiliates_enabled
+            or not self._commissions_enabled
+            or self._commission_repository is None
+        ):
+            raise AffiliateUnavailableError
+        self.authorize_creator(
+            principal=principal,
+            creator_id=creator_id,
+            allowed_roles=frozenset(CreatorMembershipRole),
+        )
+        return self._commission_repository.list_creator_entries(
+            creator_id=creator_id,
+            before=before,
+            limit=limit,
+        )
 
     def authorize_staff(
         self,

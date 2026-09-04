@@ -15,6 +15,7 @@ REVENUECAT_PURCHASE_LIFECYCLE_EVENTS = frozenset(
         "INVOICE_ISSUANCE",
         "NON_RENEWING_PURCHASE",
         "PRODUCT_CHANGE",
+        "REFUND",
         "REFUND_REVERSED",
         "RENEWAL",
         "SUBSCRIPTION_EXTENDED",
@@ -25,10 +26,14 @@ REVENUECAT_PURCHASE_LIFECYCLE_EVENTS = frozenset(
 
 
 def revenuecat_consumers(
-    *, event_type: str, has_provider_actor: bool
+    *, event_type: str, has_provider_actor: bool, has_transaction_ref: bool = False
 ) -> Sequence[BillingEventConsumer]:
     """Return reviewed consumers; unknown or actorless events have no side effects."""
 
-    if event_type not in REVENUECAT_PURCHASE_LIFECYCLE_EVENTS or not has_provider_actor:
+    if event_type not in REVENUECAT_PURCHASE_LIFECYCLE_EVENTS:
         return ()
-    return ("pro_entitlement", "affiliate_finance")
+    if has_provider_actor:
+        return ("pro_entitlement", "affiliate_finance")
+    if event_type in {"REFUND", "REFUND_REVERSED"} and has_transaction_ref:
+        return ("affiliate_finance",)
+    return ()

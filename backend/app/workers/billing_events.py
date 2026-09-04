@@ -10,10 +10,13 @@ from app.core.errors import DependencyUnavailableError
 from app.core.logging import configure_logging
 from app.db.engine import create_database_engine
 from app.integrations.revenuecat.client import RevenueCatHttpClient
+from app.modules.affiliates.commission_delivery import AffiliateCommissionDeliveryHandler
+from app.modules.affiliates.commission_repository import PostgresAffiliateCommissionRepository
 from app.modules.billing.repository import PostgresEntitlementRepository
 from app.modules.billing_events.crypto import ProviderActorCipher
 from app.modules.billing_events.delivery import (
     BillingEventWorker,
+    DeliveryHandler,
     ProEntitlementDeliveryHandler,
     placeholder_affiliate_finance_handler,
 )
@@ -36,6 +39,20 @@ async def run_worker(settings: Settings) -> int:
         timeout_seconds=settings.revenuecat_api_timeout_seconds,
     )
     repository = PostgresBillingEventRepository(engine=engine)
+    affiliate_handler: DeliveryHandler = placeholder_affiliate_finance_handler
+    if settings.affiliate_commissions_enabled:
+        assert settings.affiliate_principal_pseudonym_key is not None
+        assert settings.clerk_issuer is not None
+        affiliate_handler = AffiliateCommissionDeliveryHandler(
+            repository=PostgresAffiliateCommissionRepository(engine=engine),
+            actor_cipher=ProviderActorCipher(
+                secret=settings.revenuecat_pseudonym_key.get_secret_value().encode()
+            ),
+            affiliate_principal_key=(
+                settings.affiliate_principal_pseudonym_key.get_secret_value().encode()
+            ),
+            clerk_issuer=settings.clerk_issuer,
+        )
     worker = BillingEventWorker(
         repository=repository,
         handlers={
@@ -46,7 +63,7 @@ async def run_worker(settings: Settings) -> int:
                     secret=settings.revenuecat_pseudonym_key.get_secret_value().encode()
                 ),
             ),
-            "affiliate_finance": placeholder_affiliate_finance_handler,
+            "affiliate_finance": affiliate_handler,
         },
         lease_seconds=settings.billing_event_worker_lease_seconds,
         maximum_attempts=settings.billing_event_worker_maximum_attempts,

@@ -49,6 +49,8 @@ class RevenueCatWebhookEvent(BaseModel):
     environment: RevenueCatEnvironment | None = None
     app_id: ProviderObjectId | None = None
     app_user_id: AppUserId | None = None
+    transaction_id: ProviderObjectId | None = None
+    original_transaction_id: ProviderObjectId | None = None
     product_id: ProviderObjectId | None = None
     new_product_id: ProviderObjectId | None = None
 
@@ -269,6 +271,7 @@ class BillingService:
         consumers = revenuecat_consumers(
             event_type=event.type,
             has_provider_actor=event.app_user_id is not None,
+            has_transaction_ref=event.transaction_id is not None,
         )
         actor_ref = None
         provider_actor_ciphertext = None
@@ -290,6 +293,8 @@ class BillingService:
             for key, value in (
                 ("product", event.product_id),
                 ("new_product", event.new_product_id),
+                ("transaction", event.transaction_id),
+                ("original_transaction", event.original_transaction_id),
             )
             if value is not None
         }

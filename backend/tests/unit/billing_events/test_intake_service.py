@@ -64,7 +64,10 @@ def intake_service(repository: CapturingIntakeRepository) -> BillingService:
 
 
 def payload(
-    *, event_type: str = "INITIAL_PURCHASE", app_id: str = "app_test"
+    *,
+    event_type: str = "INITIAL_PURCHASE",
+    app_id: str = "app_test",
+    app_user_id: str | None = "user_test_123",
 ) -> RevenueCatWebhookPayload:
     return RevenueCatWebhookPayload.model_validate(
         {
@@ -75,8 +78,9 @@ def payload(
                 "event_timestamp_ms": int(NOW.timestamp() * 1000),
                 "environment": "SANDBOX",
                 "app_id": app_id,
-                "app_user_id": "user_test_123",
+                "app_user_id": app_user_id,
                 "product_id": "monthly",
+                "transaction_id": "txn_test_123",
             },
         }
     )
@@ -97,6 +101,7 @@ def test_durable_intake_acknowledges_only_after_repository_accepts() -> None:
     assert event.provider_account_ref == "app_test"
     assert event.actor_ref is not None
     assert event.provider_actor_ciphertext is not None
+    assert event.object_refs == {"product": "monthly", "transaction": "txn_test_123"}
     assert b"user_test_123" not in event.provider_actor_ciphertext
 
 
@@ -113,6 +118,22 @@ def test_unknown_event_is_retained_without_delivery_or_reversible_actor() -> Non
     event, consumers = repository.accepted[0]
     assert consumers == ()
     assert event.actor_ref is not None
+    assert event.provider_actor_ciphertext is None
+
+
+def test_actorless_refund_is_retained_for_transaction_scoped_reversal() -> None:
+    repository = CapturingIntakeRepository()
+
+    response = asyncio.run(
+        intake_service(repository).process_webhook(
+            payload(event_type="REFUND", app_user_id=None), raw_body=b"{}"
+        )
+    )
+
+    assert response.status == "accepted"
+    event, consumers = repository.accepted[0]
+    assert consumers == ("affiliate_finance",)
+    assert event.actor_ref is None
     assert event.provider_actor_ciphertext is None
 
 

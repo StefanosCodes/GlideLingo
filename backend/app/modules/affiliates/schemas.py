@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, StringConstraints, model_validator
 
+from app.modules.affiliates.commission_domain import CommissionEntryKind
 from app.modules.affiliates.domain import (
     BindStatus,
     CreatorMembershipRole,
@@ -121,3 +122,17 @@ class StaffMembershipResponse(BaseModel):
 class RevokedMembershipResponse(BaseModel):
     membership_id: UUID
     status: Literal["revoked"] = "revoked"
+
+
+class CommissionLedgerEntryResponse(BaseModel):
+    entry_id: UUID
+    kind: CommissionEntryKind
+    currency_code: str
+    basis_amount_minor: int
+    commission_amount_minor: int
+    occurred_at: datetime
+
+
+class CreatorCommissionLedgerResponse(BaseModel):
+    creator_id: UUID
+    entries: list[CommissionLedgerEntryResponse]

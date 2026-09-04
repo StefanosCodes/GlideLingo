@@ -155,6 +155,8 @@ grep -Fq 'EXPECTED_CORS_ORIGINS: ${{ needs.stage.outputs.cors_origins }}' "${wor
 grep -Fq 'test "$(jq -r .cors_origins <<< "${current_state}")" = "${EXPECTED_CORS_ORIGINS}"' "${workflow}"
 grep -Fq 'EXPECTED_DESKTOP_MINIMUM_SUPPORTED_VERSION: ${{ needs.stage.outputs.desktop_minimum_supported_version }}' "${workflow}"
 grep -Fq 'test "$(jq -r .desktop_minimum_supported_version <<< "${current_state}")" = "${EXPECTED_DESKTOP_MINIMUM_SUPPORTED_VERSION}"' "${workflow}"
+grep -Fq 'read-production-deploy-state.sh "" allow-missing-default' "${workflow}"
+grep -Fq -- '--update-env-vars="GLIDELINGO_DESKTOP_MINIMUM_SUPPORTED_VERSION=${desktop_minimum_supported_version}"' "${workflow}"
 grep -Fq '${candidate_url}/v1/desktop/update-policy?current_version=0.0.0' "${workflow}"
 cors_round_trip_fixture='["https://desktop.glidelingo.com"]'
 shell_sentinel='$(printf should-not-execute)'
@@ -185,6 +187,17 @@ fixture='{
 }'
 state="$("${state_reader}" candidate-deadbeef <<< "${fixture}")"
 jq -e '.generation == "7" and .live_revision == "api-00001" and .candidate_revision == "api-00002" and .desktop_minimum_supported_version == "1.2.3"' <<< "${state}" >/dev/null
+missing_desktop_minimum_fixture="$(jq 'del(.spec.template.spec.containers[0].env[] | select(.name == "GLIDELINGO_DESKTOP_MINIMUM_SUPPORTED_VERSION"))' <<< "${fixture}")"
+if "${state_reader}" candidate-deadbeef <<< "${missing_desktop_minimum_fixture}" >/dev/null 2>&1; then
+  echo "Strict deploy-state reader accepted a missing desktop minimum." >&2
+  exit 1
+fi
+bootstrap_state="$("${state_reader}" candidate-deadbeef allow-missing-default <<< "${missing_desktop_minimum_fixture}")"
+jq -e '.desktop_minimum_supported_version == "0.0.0"' <<< "${bootstrap_state}" >/dev/null
+if "${state_reader}" candidate-deadbeef unexpected-mode <<< "${fixture}" >/dev/null 2>&1; then
+  echo "Deploy-state reader accepted an unknown desktop minimum mode." >&2
+  exit 1
+fi
 if "${state_reader}" candidate-deadbeef <<< "$(jq '(.spec.template.spec.containers[0].env[] | select(.name == "GLIDELINGO_CORS_ORIGINS") | .value) = "[\\\"https://evil.example\\\"]"' <<< "${fixture}")" >/dev/null 2>&1; then
   echo "Deploy-state reader accepted a noncanonical production CORS origin." >&2
   exit 1
@@ -192,6 +205,10 @@ fi
 for invalid_minimum in 'v1.2.3' '01.2.3' '1.2' '1.2.3-beta' ''; do
   if "${state_reader}" candidate-deadbeef <<< "$(jq --arg value "${invalid_minimum}" '(.spec.template.spec.containers[0].env[] | select(.name == "GLIDELINGO_DESKTOP_MINIMUM_SUPPORTED_VERSION") | .value) = $value' <<< "${fixture}")" >/dev/null 2>&1; then
     echo "Deploy-state reader accepted invalid desktop minimum ${invalid_minimum}." >&2
+    exit 1
+  fi
+  if "${state_reader}" candidate-deadbeef allow-missing-default <<< "$(jq --arg value "${invalid_minimum}" '(.spec.template.spec.containers[0].env[] | select(.name == "GLIDELINGO_DESKTOP_MINIMUM_SUPPORTED_VERSION") | .value) = $value' <<< "${fixture}")" >/dev/null 2>&1; then
+    echo "Bootstrap deploy-state reader accepted invalid desktop minimum ${invalid_minimum}." >&2
     exit 1
   fi
 done
@@ -202,6 +219,10 @@ if "${state_reader}" candidate-deadbeef <<< "$(jq --arg value "${long_minimum}" 
 fi
 if "${state_reader}" candidate-deadbeef <<< "$(jq '.spec.template.spec.containers[0].env += [{"name":"GLIDELINGO_DESKTOP_MINIMUM_SUPPORTED_VERSION","value":"1.2.3"}]' <<< "${fixture}")" >/dev/null 2>&1; then
   echo "Deploy-state reader accepted a duplicate desktop minimum." >&2
+  exit 1
+fi
+if "${state_reader}" candidate-deadbeef allow-missing-default <<< "$(jq '.spec.template.spec.containers[0].env += [{"name":"GLIDELINGO_DESKTOP_MINIMUM_SUPPORTED_VERSION","value":"1.2.3"}]' <<< "${fixture}")" >/dev/null 2>&1; then
+  echo "Bootstrap deploy-state reader accepted a duplicate desktop minimum." >&2
   exit 1
 fi
 if "${state_reader}" candidate-deadbeef <<< "$(jq '.status.observedGeneration = 6' <<< "${fixture}")" >/dev/null 2>&1; then

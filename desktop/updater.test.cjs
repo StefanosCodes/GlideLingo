@@ -282,6 +282,7 @@ test('start performs one automatic check and never loads updater outside package
     apiOrigin: 'https://api.example.test',
     fetchImpl: async () => ({ ok: true, json: async () => ({ minimum_supported_version: '0.0.0' }) }),
     loadUpdater: () => { loads += 1; return updater; },
+    loadUpdaterVersion: () => SUPPORTED_ELECTRON_UPDATER_VERSION,
     logger: { info() {}, error() {} },
     removeLegacyUpdaterIdImpl: async ({ userDataPath }) => {
       assert.equal(userDataPath, '/tmp/GlideLingo');

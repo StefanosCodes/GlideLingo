@@ -3,24 +3,59 @@ import hashlib
 import hmac
 import json
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from urllib.parse import parse_qs
 from uuid import UUID
 
 import httpx
 import pytest
 
+from app.auth.clerk import ClerkPrincipal
 from app.core.errors import (
     HumanTutorMarketplaceForbiddenError,
+    HumanTutorMarketplaceUnavailableError,
     TutorApplicationConflictError,
 )
 from app.modules.human_tutor_marketplace.booking import (
+    BookingRepository,
+    BookingService,
     StripeHttpMarketplaceProvider,
     StripeOperationError,
     parse_checkout_webhook,
     verify_stripe_signature,
 )
+from app.modules.human_tutor_marketplace.discovery import MarketplaceDiscoveryService
 
 BOOKING_ID = UUID("9948afe2-59ac-46f6-88cf-15c5f9994567")
+
+
+def test_acquisition_kill_switch_rejects_checkout_before_any_dependency_access() -> None:
+    service = BookingService(
+        enabled=True,
+        repository=cast(BookingRepository, object()),
+        provider=None,
+        discovery=cast(MarketplaceDiscoveryService, object()),
+        pseudonym_key=b"booking-test-key-at-least-32-bytes",
+        actor_allowlist=("user_learner",),
+        environment="SANDBOX",
+        platform_account_id="acct_test",
+        connect_refresh_url="https://app.example.test/refresh",
+        connect_return_url="https://app.example.test/return",
+        checkout_success_url="https://app.example.test/success",
+        checkout_cancel_url="https://app.example.test/cancel",
+        meeting_hosts=("meet.example.test",),
+        accepting_new_bookings=False,
+    )
+
+    with pytest.raises(HumanTutorMarketplaceUnavailableError):
+        asyncio.run(
+            service.create_checkout(
+                principal=ClerkPrincipal(user_id="user_learner", issuer="https://clerk.test"),
+                tutor_id=UUID("9948afe2-59ac-46f6-88cf-15c5f9991234"),
+                starts_at=datetime.now(UTC) + timedelta(hours=2),
+                idempotency_key=UUID("9948afe2-59ac-46f6-88cf-15c5f9995678"),
+            )
+        )
 
 
 def checkout_payload(*, created: int = 1_800_000_000) -> dict[str, object]:

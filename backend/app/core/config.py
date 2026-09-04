@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     revenuecat_webhook_max_body_bytes: int = Field(default=65536, ge=1024, le=262144)
     revenuecat_webhook_signature_tolerance_seconds: int = Field(default=300, ge=30, le=600)
     human_tutor_marketplace_enabled: bool = False
+    human_tutor_marketplace_acquisition_enabled: bool = False
     human_tutor_marketplace_pseudonym_key: SecretStr | None = None
     human_tutor_marketplace_actor_allowlist: tuple[str, ...] = ()
     human_tutor_google_calendar_enabled: bool = False
@@ -306,6 +307,15 @@ class Settings(BaseSettings):
                     "Google Calendar redirects must be exact HTTPS, loopback HTTP, "
                     "or the reviewed native URL"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def validate_human_tutor_marketplace_acquisition_configuration(self) -> Self:
+        if (
+            self.human_tutor_marketplace_acquisition_enabled
+            and not self.human_tutor_marketplace_enabled
+        ):
+            raise ValueError("Tutor acquisition requires the human tutor marketplace")
         return self
 
     @model_validator(mode="after")

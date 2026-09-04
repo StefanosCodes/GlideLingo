@@ -18,14 +18,15 @@ The repository currently contains:
 - A loopback-only local PostgreSQL service managed by Docker Compose.
 - A centralized client API boundary and internal system-diagnostics feature.
 - An operator-run PostgreSQL tutor guard migration for idempotency and bounded turn admission.
+- A default-off human tutor marketplace with operator-run migrations, a durable money worker, and
+  separate code, integration, operations, and enablement gates.
 - Pull-request verification for both the client and backend boundaries.
 
 The repository does **not** currently contain:
 
 - General product tables or persisted learner progress on the server.
-- Server-owned RevenueCat entitlement authorization or its webhook state.
 - A generated API client.
-- Background workers, Redis, or object storage.
+- Redis or object storage.
 - A separate production GCP project and enabled tutor rollout.
 
 All tutor flags default off. The guard migration is not run by application startup, and the tutor
@@ -61,6 +62,8 @@ The repository remains one monorepo, while mobile, desktop, API, workers, and mi
 4. [Local development and operations](./LOCAL-DEVELOPMENT.md) defines commands, environments, debugging, and observability.
 5. [Deployment](./DEPLOYMENT.md) separates iOS, Android, macOS, web, API, database, and worker release lanes.
 6. [Implementation roadmap](./IMPLEMENTATION-ROADMAP.md) defines the order in which the architecture should become real.
+7. [Human tutor marketplace runbook](./HUMAN-TUTOR-MARKETPLACE-RUNBOOK.md) defines marketplace
+   activation, monitoring, incident, worker, and rollback gates.
 
 ## Architecture principles
 
@@ -99,7 +102,7 @@ One repository does not imply one deployment. Every artifact has its own build, 
 | Database | One PostgreSQL database | A real service extraction establishes separate data ownership |
 | UI system | Existing custom primitives | A focused spike proves another system solves a current problem better |
 | Server state | Generated API contracts plus a remote-data cache | A simpler direct call is sufficient for a tiny bounded path |
-| Workers | None initially | Work must survive request/process failure, retry, or scale independently |
+| Workers | Add only durable feature-owned workers, currently marketplace money operations | A new workload must survive request/process failure or needs independent scale |
 | Redis | None initially | A measured queue, cache, shared limit, or coordination need exists |
 | Content | Versioned authored source published immutably | Editorial workflow demonstrates a better accountable process |
 

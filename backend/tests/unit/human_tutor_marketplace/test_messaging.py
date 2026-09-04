@@ -1,7 +1,17 @@
+import asyncio
+from typing import cast
+from uuid import UUID
+
 import pytest
 
-from app.core.errors import TutorApplicationConflictError
+from app.auth.clerk import ClerkPrincipal
+from app.core.errors import (
+    HumanTutorMarketplaceUnavailableError,
+    TutorApplicationConflictError,
+)
 from app.modules.human_tutor_marketplace.messaging import (
+    MessagingRepository,
+    MessagingService,
     validate_approved_meeting_url,
     validate_message_body,
 )
@@ -47,3 +57,22 @@ def test_meeting_url_requires_an_exact_approved_https_host() -> None:
     ):
         with pytest.raises(ValueError):
             validate_approved_meeting_url(value, approved_hosts=approved)
+
+
+def test_acquisition_kill_switch_blocks_only_new_conversations() -> None:
+    service = MessagingService(
+        enabled=True,
+        repository=cast(MessagingRepository, object()),
+        pseudonym_key=b"messaging-test-key-at-least-32-bytes",
+        actor_allowlist=("user_learner",),
+        retention_days=90,
+        accepting_new_conversations=False,
+    )
+
+    with pytest.raises(HumanTutorMarketplaceUnavailableError):
+        asyncio.run(
+            service.create_conversation(
+                principal=ClerkPrincipal(user_id="user_learner", issuer="https://clerk.test"),
+                tutor_id=UUID("9948afe2-59ac-46f6-88cf-15c5f9991234"),
+            )
+        )

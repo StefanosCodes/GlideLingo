@@ -194,6 +194,7 @@ def create_app(
         ),
         actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
         retention_days=settings.human_tutor_message_retention_days,
+        accepting_new_conversations=settings.human_tutor_marketplace_acquisition_enabled,
     )
     discovery_service = marketplace_discovery_service
     if discovery_service is None and settings.human_tutor_marketplace_enabled:
@@ -212,6 +213,7 @@ def create_app(
                 else None
             ),
             actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+            acquisition_enabled=settings.human_tutor_marketplace_acquisition_enabled,
         )
     stripe_marketplace_provider = (
         StripeHttpMarketplaceProvider(
@@ -249,6 +251,7 @@ def create_app(
         checkout_cancel_url=settings.human_tutor_checkout_cancel_url,
         meeting_hosts=settings.human_tutor_approved_meeting_hosts,
         hold_seconds=settings.human_tutor_booking_hold_seconds,
+        accepting_new_bookings=settings.human_tutor_marketplace_acquisition_enabled,
     )
     lifecycle_runtime = marketplace_lifecycle_service or LifecycleService(
         enabled=settings.human_tutor_commerce_enabled,

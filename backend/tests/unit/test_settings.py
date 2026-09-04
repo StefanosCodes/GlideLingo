@@ -75,6 +75,7 @@ def test_human_tutor_marketplace_is_disabled_by_default() -> None:
     settings = Settings(_env_file=None)
 
     assert settings.human_tutor_marketplace_enabled is False
+    assert settings.human_tutor_marketplace_acquisition_enabled is False
     assert settings.human_tutor_marketplace_pseudonym_key is None
     assert settings.human_tutor_marketplace_actor_allowlist == ()
     assert settings.human_tutor_google_calendar_enabled is False
@@ -86,6 +87,9 @@ def test_human_tutor_marketplace_is_disabled_by_default() -> None:
 def test_enabled_human_tutor_marketplace_requires_fail_closed_configuration() -> None:
     with pytest.raises(ValidationError, match="pseudonym key"):
         Settings(_env_file=None, human_tutor_marketplace_enabled=True)
+
+    with pytest.raises(ValidationError, match="acquisition requires"):
+        Settings(_env_file=None, human_tutor_marketplace_acquisition_enabled=True)
 
 
 def test_enabled_human_tutor_marketplace_accepts_clerk_and_allowlist() -> None:

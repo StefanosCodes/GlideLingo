@@ -16,6 +16,7 @@ from app.auth.clerk import ClerkPrincipal
 from app.core.errors import (
     DependencyUnavailableError,
     HumanTutorMarketplaceForbiddenError,
+    HumanTutorMarketplaceUnavailableError,
     TutorApplicationConflictError,
     TutorApplicationNotFoundError,
 )
@@ -691,12 +692,14 @@ class MarketplaceDiscoveryService:
         booking_busy_reader: BookingBusyReader | None = None,
         pseudonym_key: bytes | None,
         actor_allowlist: tuple[str, ...],
+        acquisition_enabled: bool = True,
     ) -> None:
         self._repository = repository
         self._calendar_busy_reader = calendar_busy_reader
         self._booking_busy_reader = booking_busy_reader
         self._pseudonym_key = pseudonym_key
         self._actor_allowlist = frozenset(actor_allowlist)
+        self._acquisition_enabled = acquisition_enabled
 
     async def get_own_availability(
         self, *, principal: ClerkPrincipal
@@ -742,6 +745,7 @@ class MarketplaceDiscoveryService:
         cursor: str | None,
         limit: int,
     ) -> TutorSearchResponse:
+        self._require_acquisition()
         actor_ref = self._actor_ref(principal)
         tutors = await asyncio.to_thread(
             self._repository.list_public_tutors,
@@ -797,6 +801,7 @@ class MarketplaceDiscoveryService:
         )
 
     async def get_tutor(self, *, principal: ClerkPrincipal, tutor_id: UUID) -> PublicTutorResponse:
+        self._require_acquisition()
         tutor = await asyncio.to_thread(
             self._repository.get_public_tutor,
             learner_actor_ref=self._actor_ref(principal),
@@ -809,6 +814,7 @@ class MarketplaceDiscoveryService:
     async def set_favorite(
         self, *, principal: ClerkPrincipal, tutor_id: UUID, favorite: bool
     ) -> PublicTutorResponse:
+        self._require_acquisition()
         actor_ref = self._actor_ref(principal)
         updated = await asyncio.to_thread(
             self._repository.set_favorite,
@@ -836,6 +842,7 @@ class MarketplaceDiscoveryService:
         ends_at: datetime,
         limit: int,
     ) -> TutorSlotsResponse:
+        self._require_acquisition()
         self._actor_ref(principal)
         schedule = await asyncio.to_thread(
             self._repository.get_manual_availability_by_tutor,
@@ -998,6 +1005,10 @@ class MarketplaceDiscoveryService:
             key=self._pseudonym_key,
             clerk_user_id=principal.user_id,
         )
+
+    def _require_acquisition(self) -> None:
+        if not self._acquisition_enabled:
+            raise HumanTutorMarketplaceUnavailableError
 
     @staticmethod
     def _availability_response(schedule: StoredManualAvailability) -> ManualAvailabilityResponse:

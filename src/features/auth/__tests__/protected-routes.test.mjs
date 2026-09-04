@@ -33,12 +33,23 @@ test('human tutor routes require both sign-in and the explicit client flag', () 
     'tutor/apply',
     'tutor/profile',
     'tutor/availability',
-    'tutors/index',
-    'tutors/[tutorId]',
     'marketplace-operations/tutor-applications',
   ]) {
     assert.match(
       marketplaceBlock,
+      new RegExp(`name=["']${route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`),
+    );
+  }
+});
+
+test('new tutor discovery requires the independent acquisition rollback flag', () => {
+  const acquisitionBlock = rootLayout.match(
+    /<Stack\.Protected guard=\{signedIn && isHumanTutorMarketplaceEnabled\(\) && isHumanTutorMarketplaceAcquisitionEnabled\(\)\}>([\s\S]*?)<\/Stack\.Protected>/,
+  )?.[1];
+  assert.ok(acquisitionBlock, 'marketplace acquisition-protected route group is missing');
+  for (const route of ['tutors/index', 'tutors/[tutorId]']) {
+    assert.match(
+      acquisitionBlock,
       new RegExp(`name=["']${route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`),
     );
   }
@@ -63,6 +74,14 @@ test('booking learning context requires marketplace, commerce, and learning-brid
   )?.[1];
   assert.ok(learningBridgeBlock, 'learning-bridge feature-protected route group is missing');
   assert.match(learningBridgeBlock, /name=["']booking-learning\/\[bookingId\]["']/);
+});
+
+test('booking operations require marketplace and commerce flags', () => {
+  const commerceBlock = rootLayout.match(
+    /<Stack\.Protected guard=\{signedIn && isHumanTutorMarketplaceEnabled\(\) && isHumanTutorCommerceEnabled\(\)\}>([\s\S]*?)<\/Stack\.Protected>/,
+  )?.[1];
+  assert.ok(commerceBlock, 'commerce feature-protected route group is missing');
+  assert.match(commerceBlock, /name=["']marketplace-operations\/bookings["']/);
 });
 
 test('previously distributed learning routes remain authenticated redirects', () => {

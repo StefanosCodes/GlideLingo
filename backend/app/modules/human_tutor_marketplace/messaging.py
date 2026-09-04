@@ -988,16 +988,20 @@ class MessagingService:
         pseudonym_key: bytes | None,
         actor_allowlist: tuple[str, ...],
         retention_days: int | None,
+        accepting_new_conversations: bool = True,
     ) -> None:
         self._enabled = enabled
         self._repository = repository
         self._pseudonym_key = pseudonym_key
         self._actor_allowlist = frozenset(actor_allowlist)
         self._retention_days = retention_days
+        self._accepting_new_conversations = accepting_new_conversations
 
     async def create_conversation(
         self, *, principal: ClerkPrincipal, tutor_id: UUID
     ) -> ConversationView:
+        if not self._accepting_new_conversations:
+            raise HumanTutorMarketplaceUnavailableError
         actor_ref = self._actor_ref(principal)
         conversation = await asyncio.to_thread(
             self._repository.create_prebooking_conversation,

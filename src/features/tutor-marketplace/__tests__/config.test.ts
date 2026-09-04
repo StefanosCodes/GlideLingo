@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, test } from '@jest/globals';
 
-import { isHumanTutorCommerceEnabled, isHumanTutorGoogleCalendarEnabled, isHumanTutorLearningBridgeEnabled, isHumanTutorMarketplaceEnabled } from '@/features/tutor-marketplace/config';
+import {
+  isHumanTutorCommerceEnabled,
+  isHumanTutorGoogleCalendarEnabled,
+  isHumanTutorLearningBridgeEnabled,
+  isHumanTutorMarketplaceAcquisitionEnabled,
+  isHumanTutorMarketplaceEnabled,
+} from '@/features/tutor-marketplace/config';
 
 const previousValue = process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ENABLED;
 const previousCalendar = process.env.EXPO_PUBLIC_HUMAN_TUTOR_GOOGLE_CALENDAR_ENABLED;
 const previousCommerce = process.env.EXPO_PUBLIC_HUMAN_TUTOR_COMMERCE_ENABLED;
 const previousLearningBridge = process.env.EXPO_PUBLIC_HUMAN_TUTOR_LEARNING_BRIDGE_ENABLED;
+const previousAcquisition = process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ACQUISITION_ENABLED;
 
 afterEach(() => {
   if (previousValue === undefined) delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ENABLED;
@@ -16,6 +23,17 @@ afterEach(() => {
   else process.env.EXPO_PUBLIC_HUMAN_TUTOR_COMMERCE_ENABLED = previousCommerce;
   if (previousLearningBridge === undefined) delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_LEARNING_BRIDGE_ENABLED;
   else process.env.EXPO_PUBLIC_HUMAN_TUTOR_LEARNING_BRIDGE_ENABLED = previousLearningBridge;
+  if (previousAcquisition === undefined) delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ACQUISITION_ENABLED;
+  else process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ACQUISITION_ENABLED = previousAcquisition;
+});
+
+describe('isHumanTutorMarketplaceAcquisitionEnabled', () => {
+  test('is separately disabled by default and requires exact opt-in', () => {
+    delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ACQUISITION_ENABLED;
+    expect(isHumanTutorMarketplaceAcquisitionEnabled()).toBe(false);
+    process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ACQUISITION_ENABLED = 'true';
+    expect(isHumanTutorMarketplaceAcquisitionEnabled()).toBe(true);
+  });
 });
 
 describe('isHumanTutorLearningBridgeEnabled', () => {

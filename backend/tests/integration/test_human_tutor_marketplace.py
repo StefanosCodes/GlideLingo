@@ -359,6 +359,16 @@ def test_runtime_role_cannot_grant_capabilities_mutate_audit_or_run_ddl(
         "DELETE FROM marketplace_audit_event",
         "UPDATE marketplace_learning_context_audit SET event = 'revoked'",
         "DELETE FROM marketplace_learning_context_audit",
+        "UPDATE marketplace_booking_transition_audit SET reason_code = 'tampered'",
+        "DELETE FROM marketplace_booking_transition_audit",
+        "UPDATE marketplace_message_report_access_audit SET action = 'resolved'",
+        "DELETE FROM marketplace_message_report_access_audit",
+        "UPDATE marketplace_stripe_webhook_event SET outcome = 'applied'",
+        "DELETE FROM marketplace_stripe_webhook_event",
+        "UPDATE marketplace_booking_schedule_revision SET reason = 'tampered'",
+        "DELETE FROM marketplace_booking_schedule_revision",
+        "UPDATE marketplace_money_ledger SET amount_minor = 0",
+        "DELETE FROM marketplace_money_ledger",
         "ALTER TABLE marketplace_tutor_application ADD COLUMN forbidden text",
         "UPDATE marketplace_tutor_profile SET is_published = true",
     ]
@@ -371,6 +381,24 @@ def test_runtime_role_cannot_grant_capabilities_mutate_audit_or_run_ddl(
                 "'marketplace_operator_capability', 'SELECT')"
             )
         ).scalar_one()
+        assert not connection.execute(
+            text("SELECT has_schema_privilege(current_user, current_schema(), 'CREATE')")
+        ).scalar_one()
+        for table_name in (
+            "marketplace_audit_event",
+            "marketplace_booking_transition_audit",
+            "marketplace_learning_context_audit",
+            "marketplace_message_report_access_audit",
+            "marketplace_money_ledger",
+            "marketplace_stripe_webhook_event",
+        ):
+            assert not connection.execute(
+                text(
+                    "SELECT has_table_privilege(current_user, :table_name, 'UPDATE') "
+                    "OR has_table_privilege(current_user, :table_name, 'DELETE')"
+                ),
+                {"table_name": table_name},
+            ).scalar_one()
         for statement in denied:
             nested = connection.begin_nested()
             with pytest.raises(DBAPIError):

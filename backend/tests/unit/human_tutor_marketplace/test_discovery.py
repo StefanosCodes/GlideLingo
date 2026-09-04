@@ -7,7 +7,10 @@ from uuid import UUID
 import pytest
 
 from app.auth.clerk import ClerkPrincipal
-from app.core.errors import HumanTutorMarketplaceForbiddenError
+from app.core.errors import (
+    HumanTutorMarketplaceForbiddenError,
+    HumanTutorMarketplaceUnavailableError,
+)
 from app.modules.human_tutor_marketplace.calendar import (
     CalendarBusySnapshot,
     CalendarRepository,
@@ -103,13 +106,17 @@ class StaleCalendar:
 
 
 def service(
-    repository: Repository, calendar: CalendarRepository | None = None
+    repository: Repository,
+    calendar: CalendarRepository | None = None,
+    *,
+    acquisition_enabled: bool = True,
 ) -> MarketplaceDiscoveryService:
     return MarketplaceDiscoveryService(
         repository=repository,
         calendar_busy_reader=calendar,
         pseudonym_key=KEY,
         actor_allowlist=(LEARNER.user_id,),
+        acquisition_enabled=acquisition_enabled,
     )
 
 
@@ -180,3 +187,26 @@ def test_stale_calendar_never_appears_as_current_or_returns_bookable_slots() -> 
     assert result.source == "manual+google"
     assert result.freshness == "stale"
     assert result.slots == []
+
+
+def test_acquisition_kill_switch_blocks_discovery_but_preserves_tutor_schedule_access() -> None:
+    disabled = service(Repository(), acquisition_enabled=False)
+
+    with pytest.raises(HumanTutorMarketplaceUnavailableError):
+        asyncio.run(
+            disabled.list_tutors(
+                principal=LEARNER,
+                language=None,
+                dialect=None,
+                specialty=None,
+                duration_minutes=None,
+                maximum_amount_minor=None,
+                verified_credential=False,
+                favorite=False,
+                available_before=None,
+                cursor=None,
+                limit=20,
+            )
+        )
+
+    assert asyncio.run(disabled.get_own_availability(principal=LEARNER)).profile_version == 3

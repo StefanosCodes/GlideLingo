@@ -1229,6 +1229,7 @@ class BookingService:
         checkout_cancel_url: str | None,
         meeting_hosts: tuple[str, ...],
         hold_seconds: int = 600,
+        accepting_new_bookings: bool = True,
     ) -> None:
         self._enabled = enabled
         self._repository = repository
@@ -1244,6 +1245,7 @@ class BookingService:
         self._checkout_cancel_url = checkout_cancel_url
         self._meeting_hosts = meeting_hosts
         self._hold_seconds = hold_seconds
+        self._accepting_new_bookings = accepting_new_bookings
 
     async def connect_status(
         self, *, principal: ClerkPrincipal, refresh: bool
@@ -1307,6 +1309,8 @@ class BookingService:
         starts_at: datetime,
         idempotency_key: UUID,
     ) -> BookingView:
+        if not self._accepting_new_bookings:
+            raise HumanTutorMarketplaceUnavailableError
         actor_ref = self._actor_ref(principal)
         now = datetime.now(UTC)
         if starts_at.tzinfo is None or starts_at <= now or starts_at > now + timedelta(days=31):

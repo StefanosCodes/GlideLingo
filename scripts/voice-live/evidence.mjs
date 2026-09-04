@@ -15,10 +15,16 @@ export function createEvidenceTracker({ model, voice }) {
     sessionCreatedObserved: false,
     sessionModelMatches: false,
     sessionVoiceMatches: false,
+    transcriptionConfigured: false,
     transcriptionModelMatches: false,
     toolsDisabled: false,
     toolChoiceNone: false,
     turnDetectionDisabled: false,
+    responseDoneCompleted: false,
+    responseDoneCancelled: false,
+    responseDoneFailed: false,
+    responseDoneIncomplete: false,
+    responseLimitReached: false,
   };
   let resolveComplete;
   let rejectComplete;
@@ -82,6 +88,7 @@ export function createEvidenceTracker({ model, voice }) {
         const session = event.session;
         state.sessionModelMatches = session?.model === model;
         state.sessionVoiceMatches = session?.audio?.output?.voice === voice;
+        state.transcriptionConfigured = session?.audio?.input?.transcription != null;
         state.transcriptionModelMatches =
           session?.audio?.input?.transcription?.model === 'gpt-4o-mini-transcribe';
         state.toolsDisabled = Array.isArray(session?.tools) && session.tools.length === 0;
@@ -90,7 +97,7 @@ export function createEvidenceTracker({ model, voice }) {
         state.providerConfigurationObserved =
           state.sessionModelMatches &&
           state.sessionVoiceMatches &&
-          state.transcriptionModelMatches &&
+          state.transcriptionConfigured &&
           state.toolsDisabled &&
           state.toolChoiceNone &&
           state.turnDetectionDisabled;
@@ -111,7 +118,14 @@ export function createEvidenceTracker({ model, voice }) {
         }
       }
       if (event.type === 'response.done') {
-        if (event.response?.status !== 'completed') {
+        const status = event.response?.status;
+        state.responseDoneCompleted = status === 'completed';
+        state.responseDoneCancelled = status === 'cancelled';
+        state.responseDoneFailed = status === 'failed';
+        state.responseDoneIncomplete = status === 'incomplete';
+        state.responseLimitReached =
+          event.response?.status_details?.reason === 'max_output_tokens';
+        if (!state.responseDoneCompleted) {
           fail('OpenAI response did not complete successfully.');
           return;
         }
@@ -147,10 +161,16 @@ export function createEvidenceTracker({ model, voice }) {
         sessionCreatedObserved: state.sessionCreatedObserved,
         sessionModelMatches: state.sessionModelMatches,
         sessionVoiceMatches: state.sessionVoiceMatches,
+        transcriptionConfigured: state.transcriptionConfigured,
         transcriptionModelMatches: state.transcriptionModelMatches,
         toolsDisabled: state.toolsDisabled,
         toolChoiceNone: state.toolChoiceNone,
         turnDetectionDisabled: state.turnDetectionDisabled,
+        responseDoneCompleted: state.responseDoneCompleted,
+        responseDoneCancelled: state.responseDoneCancelled,
+        responseDoneFailed: state.responseDoneFailed,
+        responseDoneIncomplete: state.responseDoneIncomplete,
+        responseLimitReached: state.responseLimitReached,
       };
     },
   };

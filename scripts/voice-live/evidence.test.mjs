@@ -40,6 +40,7 @@ test('evidence waits for asynchronous transcript and audio signals in any order'
   tracker.observeEvent({ type: 'response.output_audio_transcript.done', transcript: 'Try alpha.' });
   await tracker.complete;
   assert.equal(tracker.snapshot().learnerTranscriptFinalCount, 1);
+  assert.equal(tracker.diagnostics().transcriptionConfigured, true);
   assert.equal(tracker.diagnostics().turnDetectionDisabled, true);
   assert.equal(JSON.stringify(tracker.diagnostics()).includes('άλφα'), false);
 });
@@ -74,4 +75,23 @@ test('evidence rejects failed responses and ignores empty transcripts', async ()
   assert.equal(tracker.snapshot().learnerTranscriptFinalCount, 0);
   tracker.observeEvent({ type: 'response.done', response: { status: 'cancelled' } });
   await assert.rejects(tracker.complete, /did not complete successfully/);
+  assert.equal(tracker.diagnostics().responseDoneCancelled, true);
+  assert.equal(tracker.diagnostics().responseDoneCompleted, false);
+});
+
+test('provider configuration accepts an echoed transcription config whose model is omitted', () => {
+  const tracker = createEvidenceTracker({ model: 'gpt-realtime-2.1', voice: 'marin' });
+  tracker.observeEvent({
+    ...sessionCreated,
+    session: {
+      ...sessionCreated.session,
+      audio: {
+        ...sessionCreated.session.audio,
+        input: { transcription: {}, turn_detection: null },
+      },
+    },
+  });
+  assert.equal(tracker.diagnostics().providerConfigurationObserved, true);
+  assert.equal(tracker.diagnostics().transcriptionConfigured, true);
+  assert.equal(tracker.diagnostics().transcriptionModelMatches, false);
 });

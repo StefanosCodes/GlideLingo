@@ -44,6 +44,19 @@ test('human tutor routes require both sign-in and the explicit client flag', () 
   }
 });
 
+test('marketplace message routes require sign-in plus both marketplace and messaging flags', () => {
+  const messagingBlock = rootLayout.match(
+    /<Stack\.Protected guard=\{signedIn && isHumanTutorMarketplaceEnabled\(\) && isHumanTutorMessagingEnabled\(\)\}>([\s\S]*?)<\/Stack\.Protected>/,
+  )?.[1];
+  assert.ok(messagingBlock, 'messaging feature-protected route group is missing');
+  for (const route of ['messages/index', 'messages/[conversationId]', 'marketplace-operations/message-reports']) {
+    assert.match(
+      messagingBlock,
+      new RegExp(`name=["']${route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`),
+    );
+  }
+});
+
 test('previously distributed learning routes remain authenticated redirects', () => {
   assert.match(legacyPath, /<Redirect href=["']\/quests["']/);
   assert.match(legacyReview, /<Redirect href=["']\/phrases["']/);

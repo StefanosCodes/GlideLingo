@@ -140,8 +140,37 @@ export type CalendarConnection = {
 
 export type CalendarOAuthStart = { authorizationUrl: string; expiresAt: string };
 
+export type MarketplaceConversation = {
+  conversationId: string;
+  tutorId: string;
+  participantRole: 'learner' | 'tutor';
+  state: 'open' | 'closed';
+  updatedAt: string;
+};
+
+export type MarketplaceMessage = {
+  messageId: string;
+  kind: 'user' | 'system';
+  senderRole: 'learner' | 'tutor' | 'system';
+  body: string;
+  isOwn: boolean;
+  createdAt: string;
+};
+
+export type MarketplaceMessagePage = { items: MarketplaceMessage[]; nextCursor: string | null };
+export type MarketplaceMessageReport = {
+  reportId: string;
+  conversationId: string;
+  messageId: string | null;
+  reason: 'harassment' | 'spam' | 'unsafe' | 'other';
+  details: string | null;
+  status: 'open' | 'resolved';
+  createdAt: string;
+  messages: MarketplaceMessage[];
+};
+
 export class TutorMarketplaceClientError extends Error {
-  readonly kind: 'not-found' | 'forbidden' | 'conflict' | 'validation' | 'unavailable';
+  readonly kind: 'not-found' | 'forbidden' | 'conflict' | 'limited' | 'validation' | 'unavailable';
 
   constructor(kind: TutorMarketplaceClientError['kind']) {
     super('The tutor marketplace request did not complete successfully.');
@@ -500,6 +529,163 @@ export async function revokeTutorCalendar(): Promise<CalendarConnection> {
   });
 }
 
+export async function createMarketplaceConversation(
+  tutorId: string,
+): Promise<MarketplaceConversation> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { tutor_id: tutorId },
+      parse: parseMarketplaceConversation,
+      path: '/v1/conversations',
+    });
+    return result.data;
+  });
+}
+
+export async function listMarketplaceConversations(
+  signal?: AbortSignal,
+): Promise<MarketplaceConversation[]> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({
+      parse: (value) => {
+        if (!isRecord(value) || !Array.isArray(value.items) || value.items.length > 100) return null;
+        const items = value.items.map(parseMarketplaceConversation);
+        return items.some((item) => item === null) ? null : items as MarketplaceConversation[];
+      },
+      path: '/v1/conversations',
+      signal,
+    });
+    return result.data;
+  });
+}
+
+export async function getMarketplaceMessageEmailPreference(signal?: AbortSignal): Promise<boolean> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({
+      parse: (value) => isRecord(value) && typeof value.email_enabled === 'boolean'
+        ? value.email_enabled : null,
+      path: '/v1/message-notification-preference',
+      signal,
+    });
+    return result.data;
+  });
+}
+
+export async function setMarketplaceMessageEmailPreference(emailEnabled: boolean): Promise<boolean> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { email_enabled: emailEnabled },
+      parse: (value) => isRecord(value) && typeof value.email_enabled === 'boolean'
+        ? value.email_enabled : null,
+      path: '/v1/message-notification-preference',
+    });
+    return result.data;
+  });
+}
+
+export async function listMarketplaceMessages(
+  conversationId: string,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<MarketplaceMessagePage> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({
+      parse: parseMarketplaceMessagePage,
+      path: `/v1/conversations/${conversationId}/messages`,
+      query: { cursor },
+      signal,
+    });
+    return result.data;
+  });
+}
+
+export async function sendMarketplaceMessage(
+  conversationId: string,
+  clientMessageId: string,
+  body: string,
+): Promise<MarketplaceMessage> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { client_message_id: clientMessageId, body },
+      parse: parseMarketplaceMessage,
+      path: `/v1/conversations/${conversationId}/messages`,
+    });
+    return result.data;
+  });
+}
+
+export async function blockMarketplaceParticipant(conversationId: string): Promise<void> {
+  await runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: {},
+      parse: (value) => isRecord(value) && value.success === true ? true : null,
+      path: `/v1/conversations/${conversationId}/block`,
+    });
+    return result.data;
+  });
+}
+
+export async function reportMarketplaceMessage(
+  conversationId: string,
+  messageId: string | null,
+  reason: MarketplaceMessageReport['reason'],
+  details: string | null,
+): Promise<MarketplaceMessageReport> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { message_id: messageId, reason, details },
+      parse: parseMarketplaceMessageReport,
+      path: `/v1/conversations/${conversationId}/reports`,
+    });
+    return result.data;
+  });
+}
+
+export async function listMarketplaceMessageReports(
+  signal?: AbortSignal,
+): Promise<MarketplaceMessageReport[]> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({
+      parse: (value) => {
+        if (!isRecord(value) || !Array.isArray(value.items) || value.items.length > 100) return null;
+        const items = value.items.map(parseMarketplaceMessageReport);
+        return items.some((item) => item === null) ? null : items as MarketplaceMessageReport[];
+      },
+      path: '/v1/marketplace-operations/message-reports',
+      signal,
+    });
+    return result.data;
+  });
+}
+
+export async function getMarketplaceMessageReport(
+  reportId: string,
+  signal?: AbortSignal,
+): Promise<MarketplaceMessageReport> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({
+      parse: parseMarketplaceMessageReport,
+      path: `/v1/marketplace-operations/message-reports/${reportId}`,
+      signal,
+    });
+    return result.data;
+  });
+}
+
+export async function resolveMarketplaceMessageReport(
+  reportId: string,
+  reason: string,
+): Promise<MarketplaceMessageReport> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { reason },
+      parse: parseMarketplaceMessageReport,
+      path: `/v1/marketplace-operations/message-reports/${reportId}/resolve`,
+    });
+    return result.data;
+  });
+}
+
 export async function getTutorProfileForOperations(applicationId: string): Promise<TutorProfile> {
   return runMarketplaceRequest(async () => {
     const result = await getJson({
@@ -693,6 +879,55 @@ export function parseCalendarOAuthStart(value: unknown): CalendarOAuthStart | nu
       !value.authorization_url.startsWith('https://accounts.google.com/o/oauth2/v2/auth?') ||
       !isIsoTimestamp(value.expires_at)) return null;
   return { authorizationUrl: value.authorization_url, expiresAt: value.expires_at };
+}
+
+export function parseMarketplaceConversation(value: unknown): MarketplaceConversation | null {
+  if (!isRecord(value) || !isUuid(value.conversation_id) || !isUuid(value.tutor_id) ||
+      (value.participant_role !== 'learner' && value.participant_role !== 'tutor') ||
+      (value.state !== 'open' && value.state !== 'closed') || !isIsoTimestamp(value.updated_at)) return null;
+  return {
+    conversationId: value.conversation_id, tutorId: value.tutor_id,
+    participantRole: value.participant_role, state: value.state, updatedAt: value.updated_at,
+  };
+}
+
+export function parseMarketplaceMessage(value: unknown): MarketplaceMessage | null {
+  if (!isRecord(value) || !isUuid(value.message_id) ||
+      (value.kind !== 'user' && value.kind !== 'system') ||
+      !['learner', 'tutor', 'system'].includes(value.sender_role as string) ||
+      !isBoundedString(value.body, 2000) || typeof value.is_own !== 'boolean' ||
+      !isIsoTimestamp(value.created_at)) return null;
+  return {
+    messageId: value.message_id, kind: value.kind,
+    senderRole: value.sender_role as MarketplaceMessage['senderRole'], body: value.body,
+    isOwn: value.is_own, createdAt: value.created_at,
+  };
+}
+
+export function parseMarketplaceMessagePage(value: unknown): MarketplaceMessagePage | null {
+  if (!isRecord(value) || !Array.isArray(value.items) || value.items.length > 100 ||
+      !(value.next_cursor === null || isBoundedString(value.next_cursor, 512))) return null;
+  const items = value.items.map(parseMarketplaceMessage);
+  return items.some((item) => item === null)
+    ? null
+    : { items: items as MarketplaceMessage[], nextCursor: value.next_cursor };
+}
+
+export function parseMarketplaceMessageReport(value: unknown): MarketplaceMessageReport | null {
+  if (!isRecord(value) || !isUuid(value.report_id) || !isUuid(value.conversation_id) ||
+      !(value.message_id === null || isUuid(value.message_id)) ||
+      !['harassment', 'spam', 'unsafe', 'other'].includes(value.reason as string) ||
+      !(value.details === null || isBoundedString(value.details, 1000)) ||
+      (value.status !== 'open' && value.status !== 'resolved') ||
+      !isIsoTimestamp(value.created_at) || !Array.isArray(value.messages) || value.messages.length > 201) return null;
+  const messages = value.messages.map(parseMarketplaceMessage);
+  if (messages.some((message) => message === null)) return null;
+  return {
+    reportId: value.report_id, conversationId: value.conversation_id,
+    messageId: value.message_id, reason: value.reason as MarketplaceMessageReport['reason'],
+    details: value.details, status: value.status, createdAt: value.created_at,
+    messages: messages as MarketplaceMessage[],
+  };
 }
 
 export function parseManualAvailability(value: unknown): ManualAvailability | null {
@@ -890,6 +1125,7 @@ async function runMarketplaceRequest<T>(operation: () => Promise<T>): Promise<T>
     }
     if (error.kind === 'http' && error.status === 403) throw new TutorMarketplaceClientError('forbidden');
     if (error.kind === 'http' && error.status === 409) throw new TutorMarketplaceClientError('conflict');
+    if (error.kind === 'http' && error.status === 429) throw new TutorMarketplaceClientError('limited');
     if (error.kind === 'http' && error.status === 422) throw new TutorMarketplaceClientError('validation');
     throw new TutorMarketplaceClientError('unavailable');
   }

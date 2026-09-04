@@ -16,6 +16,7 @@ from app.modules.human_tutor_marketplace.availability import TimeInterval
 from app.modules.human_tutor_marketplace.calendar import PostgresCalendarRepository
 from app.modules.human_tutor_marketplace.discovery import PostgresDiscoveryRepository
 from app.modules.human_tutor_marketplace.identity import derive_marketplace_actor_ref
+from app.modules.human_tutor_marketplace.messaging import PostgresMessagingRepository
 from app.modules.human_tutor_marketplace.repository import (
     PostgresTutorApplicationRepository,
     StoredTutorProfile,
@@ -39,6 +40,9 @@ MIGRATIONS = (
     Path(__file__).resolve().parents[2]
     / "migrations"
     / "009_human_tutor_marketplace_google_calendar.sql",
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "010_human_tutor_marketplace_messaging.sql",
 )
 SAFE_SEARCH_PATH = "pg_catalog, public, pg_temp"
 TUTOR_ACTOR = derive_marketplace_actor_ref(
@@ -52,6 +56,14 @@ OPERATOR_ACTOR = derive_marketplace_actor_ref(
 SECOND_OPERATOR_ACTOR = derive_marketplace_actor_ref(
     key=b"marketplace-integration-pseudonym-key-32-bytes",
     clerk_user_id="user_second_operator_integration",
+)
+LEARNER_ACTOR = derive_marketplace_actor_ref(
+    key=b"marketplace-integration-pseudonym-key-32-bytes",
+    clerk_user_id="user_learner_integration",
+)
+OUTSIDER_ACTOR = derive_marketplace_actor_ref(
+    key=b"marketplace-integration-pseudonym-key-32-bytes",
+    clerk_user_id="user_outsider_integration",
 )
 
 
@@ -109,6 +121,7 @@ def marketplace_engine() -> Generator[Engine]:
                     (OPERATOR_ACTOR, "review_tutor_applications"),
                     (OPERATOR_ACTOR, "manage_tutor_status"),
                     (OPERATOR_ACTOR, "verify_tutor_credentials"),
+                    (OPERATOR_ACTOR, "review_message_reports"),
                 ],
             )
         finally:
@@ -765,6 +778,243 @@ def test_calendar_oauth_replay_cache_concurrency_and_encrypted_storage(
         calendar.get_busy_snapshot(tutor_id=profile.tutor_id, now=now).freshness
         == "reconnect_required"
     )
+
+
+@pytest.mark.integration
+def test_messaging_participant_safety_reports_rate_limits_and_jobs(
+    marketplace_engine: Engine,
+) -> None:
+    core = PostgresTutorApplicationRepository(engine=marketplace_engine)
+    messaging = PostgresMessagingRepository(engine=marketplace_engine)
+    _, profile = create_approved_tutor(core)
+    with marketplace_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE marketplace_tutor_profile SET payout_ready = true "
+                "WHERE tutor_id = :tutor_id"
+            ),
+            {"tutor_id": profile.tutor_id},
+        )
+    offered = core.save_offering(
+        actor_ref=TUTOR_ACTOR,
+        request=SaveTutorOfferingRequest(
+            expected_version=0,
+            title="Safe conversation lesson",
+            duration_minutes=25,
+            amount_minor=2500,
+            currency="USD",
+        ),
+    )
+    assert offered is not None and offered.offering is not None
+    published = core.set_publication(
+        actor_ref=TUTOR_ACTOR,
+        expected_profile_version=offered.version,
+        expected_offering_version=offered.offering.version,
+        publish=True,
+    )
+    assert published is not None
+
+    conversation = messaging.create_prebooking_conversation(
+        learner_actor_ref=LEARNER_ACTOR, tutor_id=profile.tutor_id
+    )
+    assert conversation is not None
+    repeated = messaging.create_prebooking_conversation(
+        learner_actor_ref=LEARNER_ACTOR, tutor_id=profile.tutor_id
+    )
+    assert repeated is not None and repeated.conversation_id == conversation.conversation_id
+    assert (
+        messaging.get_conversation(
+            conversation_id=conversation.conversation_id, actor_ref=OUTSIDER_ACTOR
+        )
+        is None
+    )
+    assert messaging.list_messages(
+        conversation_id=conversation.conversation_id,
+        actor_ref=OUTSIDER_ACTOR,
+        before_created_at=None,
+        before_message_id=None,
+        limit=50,
+    ) == ((), False)
+
+    now = datetime.now(UTC)
+    learner_client_id = uuid4()
+    state, learner_message = messaging.send_message(
+        conversation_id=conversation.conversation_id,
+        actor_ref=LEARNER_ACTOR,
+        client_message_id=learner_client_id,
+        body='<script>alert("plain text")</script>',
+        now=now,
+    )
+    assert state == "created" and learner_message is not None
+    duplicate_state, duplicate = messaging.send_message(
+        conversation_id=conversation.conversation_id,
+        actor_ref=LEARNER_ACTOR,
+        client_message_id=learner_client_id,
+        body=learner_message.body,
+        now=now,
+    )
+    assert duplicate_state == "duplicate"
+    assert duplicate is not None and duplicate.message_id == learner_message.message_id
+    assert messaging.get_notification_preference(actor_ref=LEARNER_ACTOR)
+    assert not messaging.set_notification_preference(actor_ref=LEARNER_ACTOR, email_enabled=False)
+    tutor_state, tutor_message = messaging.send_message(
+        conversation_id=conversation.conversation_id,
+        actor_ref=TUTOR_ACTOR,
+        client_message_id=uuid4(),
+        body="Welcome to the conversation.",
+        now=now,
+    )
+    assert tutor_state == "created" and tutor_message is not None
+    with marketplace_engine.connect() as connection:
+        suppressed_job = connection.execute(
+            text(
+                "SELECT 1 FROM marketplace_message_notification_job "
+                "WHERE message_id = :message_id AND recipient_actor_ref = :recipient"
+            ),
+            {"message_id": tutor_message.message_id, "recipient": LEARNER_ACTOR},
+        ).scalar_one_or_none()
+    assert suppressed_job is None
+    report = messaging.create_report(
+        report_id=uuid4(),
+        conversation_id=conversation.conversation_id,
+        message_id=tutor_message.message_id,
+        reporter_actor_ref=LEARNER_ACTOR,
+        reason="unsafe",
+        details="This message needs a safety review.",
+    )
+    assert report is not None
+    assert (
+        messaging.get_report_for_operator(
+            operator_actor_ref=SECOND_OPERATOR_ACTOR, report_id=report.report_id
+        )
+        is None
+    )
+    scoped_report = messaging.get_report_for_operator(
+        operator_actor_ref=OPERATOR_ACTOR, report_id=report.report_id
+    )
+    assert scoped_report is not None
+    assert {message.conversation_id for message in scoped_report[2]} == {
+        conversation.conversation_id
+    }
+
+    assert messaging.block_other(
+        conversation_id=conversation.conversation_id, actor_ref=LEARNER_ACTOR
+    )
+    blocked, _ = messaging.send_message(
+        conversation_id=conversation.conversation_id,
+        actor_ref=TUTOR_ACTOR,
+        client_message_id=uuid4(),
+        body="This must not be delivered.",
+        now=now,
+    )
+    assert blocked == "blocked"
+
+    rate_conversation = messaging.create_prebooking_conversation(
+        learner_actor_ref=OUTSIDER_ACTOR, tutor_id=profile.tutor_id
+    )
+    assert rate_conversation is not None
+    for index in range(10):
+        result, _ = messaging.send_message(
+            conversation_id=rate_conversation.conversation_id,
+            actor_ref=OUTSIDER_ACTOR,
+            client_message_id=uuid4(),
+            body=f"Bounded message {index}",
+            now=now,
+        )
+        assert result == "created"
+    first_page, has_more = messaging.list_messages(
+        conversation_id=rate_conversation.conversation_id,
+        actor_ref=OUTSIDER_ACTOR,
+        before_created_at=None,
+        before_message_id=None,
+        limit=3,
+    )
+    assert has_more and len(first_page) == 3
+    second_page, second_has_more = messaging.list_messages(
+        conversation_id=rate_conversation.conversation_id,
+        actor_ref=OUTSIDER_ACTOR,
+        before_created_at=first_page[0].created_at,
+        before_message_id=first_page[0].message_id,
+        limit=3,
+    )
+    assert second_has_more and len(second_page) == 3
+    assert {message.message_id for message in first_page}.isdisjoint(
+        message.message_id for message in second_page
+    )
+    limited, _ = messaging.send_message(
+        conversation_id=rate_conversation.conversation_id,
+        actor_ref=OUTSIDER_ACTOR,
+        client_message_id=uuid4(),
+        body="This message exceeds the bounded minute rate.",
+        now=now,
+    )
+    assert limited == "limited"
+
+    job = messaging.claim_notification(lease_owner="worker-a", now=now, lease_seconds=30)
+    assert job is not None
+    assert not messaging.finish_notification(
+        job_id=job.job_id,
+        lease_owner="worker-b",
+        now=now,
+        outcome="completed",
+    )
+    assert messaging.finish_notification(
+        job_id=job.job_id,
+        lease_owner="worker-a",
+        now=now,
+        outcome="retryable",
+    )
+    with marketplace_engine.connect() as connection:
+        job_status = connection.execute(
+            text(
+                "SELECT status, safe_failure_code FROM marketplace_message_notification_job "
+                "WHERE job_id = :job_id"
+            ),
+            {"job_id": job.job_id},
+        ).one()
+    assert job_status == ("retryable", "unavailable")
+
+    old = now - timedelta(days=100)
+    with marketplace_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE marketplace_message SET created_at = :old "
+                "WHERE message_id IN (:learner_message_id, :reported_message_id)"
+            ),
+            {
+                "old": old,
+                "learner_message_id": learner_message.message_id,
+                "reported_message_id": tutor_message.message_id,
+            },
+        )
+    assert messaging.purge_expired_messages(cutoff=now - timedelta(days=90), limit=100) >= 1
+    with marketplace_engine.connect() as connection:
+        retained_reported_message = connection.execute(
+            text("SELECT 1 FROM marketplace_message WHERE message_id = :message_id"),
+            {"message_id": tutor_message.message_id},
+        ).scalar_one_or_none()
+    assert retained_reported_message == 1
+
+    resolved = messaging.resolve_report(
+        operator_actor_ref=OPERATOR_ACTOR,
+        report_id=report.report_id,
+        reason="Reviewed and applied the documented safety policy.",
+        now=now,
+    )
+    assert resolved is not None and resolved.status == "resolved"
+    with marketplace_engine.connect() as connection:
+        audit_actions = (
+            connection.execute(
+                text(
+                    "SELECT action FROM marketplace_message_report_access_audit "
+                    "WHERE report_id = :report_id ORDER BY occurred_at, audit_id"
+                ),
+                {"report_id": report.report_id},
+            )
+            .scalars()
+            .all()
+        )
+    assert audit_actions == ["viewed", "resolved"]
 
 
 @pytest.mark.integration

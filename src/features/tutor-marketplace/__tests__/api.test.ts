@@ -6,6 +6,10 @@ import {
   isTutorApplicationDraftValid,
   parseCalendarConnection,
   parseCalendarOAuthStart,
+  parseMarketplaceConversation,
+  parseMarketplaceMessage,
+  parseMarketplaceMessagePage,
+  parseMarketplaceMessageReport,
   parseTutorApplication,
   parseTutorProfile,
   parseTutorSlots,
@@ -55,6 +59,43 @@ describe('calendar and slot response boundaries', () => {
     };
     expect(parseCalendarOAuthStart(valid)).not.toBeNull();
     expect(parseCalendarOAuthStart({ ...valid, authorization_url: 'https://attacker.test/' })).toBeNull();
+  });
+});
+
+describe('messaging response boundaries', () => {
+  const message = {
+    message_id: '2382f687-0ca0-4340-8e78-21ba32912869',
+    kind: 'user', sender_role: 'learner', body: '<script>alert(1)</script>',
+    is_own: true, created_at: '2026-09-04T12:10:00Z',
+  };
+
+  test('maps only participant-safe conversation and text message projections', () => {
+    expect(parseMarketplaceConversation({
+      conversation_id: 'f8d97d12-3e8a-49c6-bb22-55c49956c8b9',
+      tutor_id: '7da10dbc-0546-4f74-a751-3cad7b5058b3', participant_role: 'learner',
+      state: 'open', updated_at: '2026-09-04T12:10:00Z',
+    })).toMatchObject({ participantRole: 'learner', state: 'open' });
+    expect(parseMarketplaceMessage(message)).toMatchObject({ body: message.body, isOwn: true });
+    expect(parseMarketplaceMessagePage({ items: [message], next_cursor: null })?.items).toHaveLength(1);
+  });
+
+  test('rejects executable message kinds, unbounded pages, and private actor identifiers', () => {
+    expect(parseMarketplaceMessage({ ...message, kind: 'html' })).toBeNull();
+    expect(parseMarketplaceMessagePage({ items: Array(101).fill(message), next_cursor: null })).toBeNull();
+    expect(parseMarketplaceConversation({
+      conversation_id: 'f8d97d12-3e8a-49c6-bb22-55c49956c8b9',
+      tutor_id: '7da10dbc-0546-4f74-a751-3cad7b5058b3', participant_role: 'learner',
+      state: 'open', updated_at: '2026-09-04T12:10:00Z', actor_ref: 'private',
+    })).not.toHaveProperty('actorRef');
+  });
+
+  test('requires bounded report context', () => {
+    expect(parseMarketplaceMessageReport({
+      report_id: '335516e3-6ab7-4de4-83ae-1ac7d6b76cdb',
+      conversation_id: 'f8d97d12-3e8a-49c6-bb22-55c49956c8b9', message_id: message.message_id,
+      reason: 'unsafe', details: null, status: 'open', created_at: '2026-09-04T12:10:00Z',
+      messages: [message],
+    })).toMatchObject({ reason: 'unsafe', messages: [{ body: message.body }] });
   });
 });
 

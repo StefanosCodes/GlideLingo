@@ -78,6 +78,8 @@ def test_human_tutor_marketplace_is_disabled_by_default() -> None:
     assert settings.human_tutor_marketplace_pseudonym_key is None
     assert settings.human_tutor_marketplace_actor_allowlist == ()
     assert settings.human_tutor_google_calendar_enabled is False
+    assert settings.human_tutor_messaging_enabled is False
+    assert settings.human_tutor_message_retention_days is None
 
 
 def test_enabled_human_tutor_marketplace_requires_fail_closed_configuration() -> None:
@@ -155,6 +157,33 @@ def test_google_calendar_rejects_unsafe_redirects_and_bad_token_keys() -> None:
                 "https://user:password@app.glidelingo.test/oauth/google-calendar",
             ),
         )
+
+
+def test_tutor_messaging_requires_retention_and_exact_meeting_hosts() -> None:
+    common: dict[str, Any] = {
+        "_env_file": None,
+        "human_tutor_marketplace_enabled": True,
+        "human_tutor_marketplace_pseudonym_key": "m" * 32,
+        "human_tutor_marketplace_actor_allowlist": ("user_tutor_123",),
+        "clerk_issuer": "https://clerk.glidelingo.test",
+        "clerk_jwks_url": "https://clerk.glidelingo.test/.well-known/jwks.json",
+        "human_tutor_messaging_enabled": True,
+    }
+    with pytest.raises(ValidationError, match="retention"):
+        Settings(**common)
+    with pytest.raises(ValidationError, match="lowercase DNS"):
+        Settings(
+            **common,
+            human_tutor_message_retention_days=90,
+            human_tutor_approved_meeting_hosts=("*.Example.com",),
+        )
+
+    settings = Settings(
+        **common,
+        human_tutor_message_retention_days=90,
+        human_tutor_approved_meeting_hosts=("meet.example.com",),
+    )
+    assert settings.human_tutor_messaging_enabled is True
 
 
 def test_enabled_revenuecat_requires_all_server_only_secrets() -> None:

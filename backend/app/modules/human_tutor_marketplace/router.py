@@ -10,6 +10,7 @@ from app.auth.clerk import CurrentClerkPrincipal
 from app.core.errors import ErrorResponse
 from app.modules.human_tutor_marketplace.calendar import CalendarService
 from app.modules.human_tutor_marketplace.discovery import MarketplaceDiscoveryService
+from app.modules.human_tutor_marketplace.messaging import MessagingService
 from app.modules.human_tutor_marketplace.schemas import (
     ApplicationVersionRequest,
     CalendarConnectionResponse,
@@ -17,14 +18,27 @@ from app.modules.human_tutor_marketplace.schemas import (
     CalendarOAuthStartRequest,
     CalendarOAuthStartResponse,
     ChangeTutorStatusRequest,
+    ConversationListResponse,
+    ConversationResponse,
+    CreateConversationRequest,
+    CreateMessageReportRequest,
     CreateTutorApplicationRequest,
     DecideTutorApplicationRequest,
     DecideTutorCredentialRequest,
     ManualAvailabilityResponse,
+    MarketplaceActionResponse,
+    MessageNotificationPreferenceRequest,
+    MessageNotificationPreferenceResponse,
+    MessagePageResponse,
+    MessageReportListResponse,
+    MessageReportResponse,
+    MessageResponse,
     PublicTutorResponse,
     ReplaceManualAvailabilityRequest,
+    ResolveMessageReportRequest,
     SaveTutorCredentialRequest,
     SaveTutorOfferingRequest,
+    SendMessageRequest,
     SetTutorFavoriteRequest,
     SetTutorPublicationRequest,
     TutorApplicationQueue,
@@ -71,6 +85,197 @@ MarketplaceCalendarServiceDependency = Annotated[
     CalendarService,
     Depends(get_marketplace_calendar_service),
 ]
+
+
+def get_marketplace_messaging_service(request: Request) -> MessagingService:
+    return cast(MessagingService, request.app.state.marketplace_messaging_service)
+
+
+MarketplaceMessagingServiceDependency = Annotated[
+    MessagingService,
+    Depends(get_marketplace_messaging_service),
+]
+
+
+@router.get(
+    "/message-notification-preference",
+    operation_id="get_marketplace_message_notification_preference",
+    response_model=MessageNotificationPreferenceResponse,
+)
+async def get_marketplace_message_notification_preference(
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceMessagingServiceDependency,
+) -> MessageNotificationPreferenceResponse:
+    enabled = await service.get_notification_preference(principal=principal)
+    return MessageNotificationPreferenceResponse(email_enabled=enabled)
+
+
+@router.post(
+    "/message-notification-preference",
+    operation_id="set_marketplace_message_notification_preference",
+    response_model=MessageNotificationPreferenceResponse,
+)
+async def set_marketplace_message_notification_preference(
+    request: MessageNotificationPreferenceRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceMessagingServiceDependency,
+) -> MessageNotificationPreferenceResponse:
+    enabled = await service.set_notification_preference(
+        principal=principal, email_enabled=request.email_enabled
+    )
+    return MessageNotificationPreferenceResponse(email_enabled=enabled)
+
+
+@router.post(
+    "/conversations",
+    operation_id="create_marketplace_conversation",
+    response_model=ConversationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_marketplace_conversation(
+    request: CreateConversationRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceMessagingServiceDependency,
+) -> ConversationResponse:
+    result = await service.create_conversation(principal=principal, tutor_id=request.tutor_id)
+    return ConversationResponse.model_validate(result, from_attributes=True)
+
+
+@router.get(
+    "/conversations",
+    operation_id="list_marketplace_conversations",
+    response_model=ConversationListResponse,
+)
+async def list_marketplace_conversations(
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceMessagingServiceDependency,
+) -> ConversationListResponse:
+    result = await service.list_conversations(principal=principal)
+    return ConversationListResponse(
+        items=[ConversationResponse.model_validate(item, from_attributes=True) for item in result]
+    )
+
+
+@router.get(
+    "/conversations/{conversation_id}/messages",
+    operation_id="list_marketplace_messages",
+    response_model=MessagePageResponse,
+)
+async def list_marketplace_messages(
+    conversation_id: UUID,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceMessagingServiceDependency,
+    cursor: Annotated[str | None, Query(max_length=512)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> MessagePageResponse:
+    page = await service.list_messages(
+        principal=principal, conversation_id=conversation_id, cursor=cursor, limit=limit
+    )
+    return MessagePageResponse.model_validate(page, from_attributes=True)
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages",
+    operation_id="send_marketplace_message",
+    response_model=MessageResponse,
+)
+async def send_marketplace_message(
+    conversation_id: UUID,
+    request: SendMessageRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceMessagingServiceDependency,
+) -> MessageResponse:
+    message = await service.send_message(
+        principal=principal,
+        conversation_id=conversation_id,
+        client_message_id=request.client_message_id,
+        body=request.body,
+    )
+    return MessageResponse.model_validate(message, from_attributes=True)
+
+
+@router.post(
+    "/conversations/{conversation_id}/block",
+    operation_id="block_marketplace_participant",
+    response_model=MarketplaceActionResponse,
+)
+async def block_marketplace_participant(
+    conversation_id: UUID,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceMessagingServiceDependency,
+) -> MarketplaceActionResponse:
+    await service.block_other(principal=principal, conversation_id=conversation_id)
+    return MarketplaceActionResponse()
+
+
+@router.post(
+    "/conversations/{conversation_id}/reports",
+    operation_id="report_marketplace_message",
+    response_model=MessageReportResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def report_marketplace_message(
+    conversation_id: UUID,
+    request: CreateMessageReportRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceMessagingServiceDependency,
+) -> MessageReportResponse:
+    report = await service.report(
+        principal=principal,
+        conversation_id=conversation_id,
+        message_id=request.message_id,
+        reason=request.reason,
+        details=request.details,
+    )
+    return MessageReportResponse.model_validate(report, from_attributes=True)
+
+
+@router.get(
+    "/marketplace-operations/message-reports",
+    operation_id="list_marketplace_message_reports",
+    response_model=MessageReportListResponse,
+)
+async def list_marketplace_message_reports(
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceMessagingServiceDependency,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> MessageReportListResponse:
+    reports = await service.list_reports(principal=principal, offset=offset, limit=limit)
+    return MessageReportListResponse(
+        items=[MessageReportResponse.model_validate(item, from_attributes=True) for item in reports]
+    )
+
+
+@router.get(
+    "/marketplace-operations/message-reports/{report_id}",
+    operation_id="get_marketplace_message_report",
+    response_model=MessageReportResponse,
+)
+async def get_marketplace_message_report(
+    report_id: UUID,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceMessagingServiceDependency,
+) -> MessageReportResponse:
+    report = await service.get_report(principal=principal, report_id=report_id)
+    return MessageReportResponse.model_validate(report, from_attributes=True)
+
+
+@router.post(
+    "/marketplace-operations/message-reports/{report_id}/resolve",
+    operation_id="resolve_marketplace_message_report",
+    response_model=MessageReportResponse,
+)
+async def resolve_marketplace_message_report(
+    report_id: UUID,
+    request: ResolveMessageReportRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceMessagingServiceDependency,
+) -> MessageReportResponse:
+    report = await service.resolve_report(
+        principal=principal, report_id=report_id, reason=request.reason
+    )
+    return MessageReportResponse.model_validate(report, from_attributes=True)
 
 
 def _calendar_response(view: object) -> CalendarConnectionResponse:

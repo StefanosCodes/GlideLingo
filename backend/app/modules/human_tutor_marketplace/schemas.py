@@ -1,11 +1,18 @@
 """Public contracts for the first human tutor marketplace vertical slice."""
 
 from datetime import date, datetime, time
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 type TutorApplicationStatus = Literal[
     "draft",
@@ -404,6 +411,110 @@ class CalendarConnectionResponse(BaseModel):
     freshness: Literal["not_connected", "current", "stale", "reconnect_required"]
     last_refreshed_at: datetime | None
     safe_failure_code: str | None
+
+
+class CreateConversationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tutor_id: UUID
+
+
+class ConversationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    conversation_id: UUID
+    tutor_id: UUID
+    participant_role: Literal["learner", "tutor"]
+    state: Literal["open", "closed"]
+    updated_at: datetime
+
+
+class ConversationListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[ConversationResponse]
+
+
+class SendMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_message_id: UUID
+    body: str = Field(min_length=1, max_length=2000)
+
+
+class MessageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message_id: UUID
+    kind: Literal["user", "system"]
+    sender_role: Literal["learner", "tutor", "system"]
+    body: str
+    is_own: bool
+    created_at: datetime
+
+
+class MessagePageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[MessageResponse]
+    next_cursor: str | None
+
+
+class MarketplaceActionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    success: Literal[True] = True
+
+
+class MessageNotificationPreferenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email_enabled: bool
+
+
+class MessageNotificationPreferenceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email_enabled: bool
+
+
+class CreateMessageReportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message_id: UUID | None = None
+    reason: Literal["harassment", "spam", "unsafe", "other"]
+    details: str | None = Field(default=None, min_length=8, max_length=1000)
+
+    @model_validator(mode="after")
+    def require_other_details(self) -> Self:
+        if self.reason == "other" and self.details is None:
+            raise ValueError("details are required for another report reason")
+        return self
+
+
+class MessageReportResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    report_id: UUID
+    conversation_id: UUID
+    message_id: UUID | None
+    reason: Literal["harassment", "spam", "unsafe", "other"]
+    details: str | None
+    status: Literal["open", "resolved"]
+    created_at: datetime
+    messages: list[MessageResponse] = Field(default_factory=list)
+
+
+class MessageReportListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[MessageReportResponse]
+
+
+class ResolveMessageReportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=8, max_length=1000)
 
 
 class PublicTutorResponse(BaseModel):

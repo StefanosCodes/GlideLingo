@@ -8,8 +8,11 @@ import { TutorPublicProfileScreen } from '@/features/tutor-marketplace/tutor-pub
 const mockGetTutor = jest.fn<() => Promise<PublicTutor>>();
 const mockGetSlots = jest.fn<() => Promise<TutorSlots>>();
 const mockFavorite = jest.fn<() => Promise<PublicTutor>>();
+const mockConversation = jest.fn<() => Promise<{ conversationId: string }>>();
+const mockPush = jest.fn();
 
 jest.mock('@/features/tutor-marketplace/api', () => ({
+  createMarketplaceConversation: () => mockConversation(),
   getPublicTutor: () => mockGetTutor(),
   listPublicTutorSlots: () => mockGetSlots(),
   setPublicTutorFavorite: () => mockFavorite(),
@@ -21,7 +24,7 @@ jest.mock('@/components/screen-frame', () => {
 });
 jest.mock('expo-router', () => ({
   useLocalSearchParams: () => ({ tutorId: 'tutor-1' }),
-  useRouter: () => ({ push: jest.fn() }),
+  useRouter: () => ({ push: mockPush }),
 }));
 jest.mock('@/hooks/use-theme', () => ({
   useTheme: () => jest.requireActual<typeof import('@/constants/theme')>('@/constants/theme').Colors.light,
@@ -38,9 +41,9 @@ const tutor: PublicTutor = {
 };
 
 beforeEach(() => {
-  mockGetTutor.mockReset(); mockGetSlots.mockReset(); mockFavorite.mockReset();
+  mockGetTutor.mockReset(); mockGetSlots.mockReset(); mockFavorite.mockReset(); mockConversation.mockReset(); mockPush.mockReset();
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_MESSAGING_ENABLED; });
 
 test('public profile renders only safe fields, empty slots, and a race-safe favorite action', async () => {
   mockGetTutor.mockResolvedValue(tutor);
@@ -85,4 +88,16 @@ test('stale Google availability is never presented as silently bookable', async 
 
   await waitFor(() => expect(screen.getByText(/temporarily stale/)).toBeTruthy());
   expect(screen.queryByText('No manual slots are available in the next two weeks.')).toBeNull();
+});
+
+test('opens a participant-scoped conversation when messaging is enabled', async () => {
+  process.env.EXPO_PUBLIC_HUMAN_TUTOR_MESSAGING_ENABLED = 'true';
+  mockGetTutor.mockResolvedValue(tutor);
+  mockGetSlots.mockResolvedValue({ tutorId: tutor.tutorId, timeZone: tutor.timeZone, source: 'manual', freshness: 'current', slots: [] });
+  mockConversation.mockResolvedValue({ conversationId: 'f8d97d12-3e8a-49c6-bb22-55c49956c8b9' });
+  const screen = await render(<SafeAreaProvider initialMetrics={metrics}><TutorPublicProfileScreen /></SafeAreaProvider>);
+
+  await waitFor(() => expect(screen.getByText('Message tutor')).toBeTruthy());
+  await fireEvent.press(screen.getByText('Message tutor'));
+  await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/messages/f8d97d12-3e8a-49c6-bb22-55c49956c8b9'));
 });

@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
@@ -7,7 +7,8 @@ import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { Spacing } from '@/constants/theme';
-import { getPublicTutor, listPublicTutorSlots, setPublicTutorFavorite, type PublicTutor, type TutorSlot } from '@/features/tutor-marketplace/api';
+import { createMarketplaceConversation, getPublicTutor, listPublicTutorSlots, setPublicTutorFavorite, type PublicTutor, type TutorSlot } from '@/features/tutor-marketplace/api';
+import { isHumanTutorMessagingEnabled } from '@/features/tutor-marketplace/config';
 import { useTheme } from '@/hooks/use-theme';
 
 type State = { kind: 'loading' } | { kind: 'error' } | {
@@ -19,10 +20,13 @@ type State = { kind: 'loading' } | { kind: 'error' } | {
 
 export function TutorPublicProfileScreen() {
   const { tutorId } = useLocalSearchParams<{ tutorId: string }>();
+  const router = useRouter();
   const theme = useTheme();
   const sequence = useRef(0);
   const [retry, setRetry] = useState(0);
   const [savingFavorite, setSavingFavorite] = useState(false);
+  const [startingConversation, setStartingConversation] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [state, setState] = useState<State>({ kind: 'loading' });
   useEffect(() => {
     const controller = new AbortController();
@@ -59,6 +63,16 @@ export function TutorPublicProfileScreen() {
       setSavingFavorite(false);
     }
   };
+  const startConversation = async () => {
+    if (startingConversation) return;
+    setStartingConversation(true); setActionError(null);
+    try {
+      const conversation = await createMarketplaceConversation(state.tutor.tutorId);
+      router.push(`/messages/${conversation.conversationId}`);
+    } catch {
+      setActionError('A conversation could not be opened. Try again.');
+    } finally { setStartingConversation(false); }
+  };
   return <ScreenFrame testID="tutor-public-profile-screen">
     <View style={styles.header}><ThemedText type="eyebrow" themeColor="textSecondary">PUBLIC TUTOR PROFILE</ThemedText>
       <ThemedText type="display">{state.tutor.headline}</ThemedText>
@@ -71,6 +85,9 @@ export function TutorPublicProfileScreen() {
       {state.tutor.verifiedCredentials.map((credential) => <ThemedText key={credential} type="footnote">Verified credential: {credential}</ThemedText>)}
       <GlideButton disabled={savingFavorite} label={state.tutor.isFavorite ? 'Remove from favorites' : 'Save tutor'}
         onPress={() => void toggleFavorite()} variant="secondary" />
+      {isHumanTutorMessagingEnabled() ? <GlideButton disabled={startingConversation}
+        label={startingConversation ? 'Opening messages…' : 'Message tutor'} onPress={() => void startConversation()} /> : null}
+      {actionError ? <ThemedText accessibilityRole="alert" type="footnote">{actionError}</ThemedText> : null}
     </GlideSurface>
     <GlideSurface padding="roomy" style={styles.card}>
       <ThemedText type="title2">Available times</ThemedText>

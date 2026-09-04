@@ -5,3 +5,7 @@ export function isHumanTutorMarketplaceEnabled(): boolean {
 export function isHumanTutorGoogleCalendarEnabled(): boolean {
   return process.env.EXPO_PUBLIC_HUMAN_TUTOR_GOOGLE_CALENDAR_ENABLED === 'true';
 }
+
+export function isHumanTutorMessagingEnabled(): boolean {
+  return process.env.EXPO_PUBLIC_HUMAN_TUTOR_MESSAGING_ENABLED === 'true';
+}

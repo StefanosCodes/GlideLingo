@@ -26,6 +26,7 @@ type ErrorCode = Literal[
     "human_tutor_marketplace_forbidden",
     "tutor_application_not_found",
     "tutor_application_conflict",
+    "marketplace_message_limited",
 ]
 
 
@@ -93,6 +94,10 @@ class TutorApplicationNotFoundError(Exception):
 
 class TutorApplicationConflictError(Exception):
     """The tutor application cannot make the requested state transition."""
+
+
+class MarketplaceMessageLimitedError(Exception):
+    """A bounded marketplace messaging rate limit rejected the request."""
 
 
 def error_response(
@@ -223,6 +228,15 @@ async def tutor_application_conflict_handler(request: Request, _error: Exception
         status_code=409,
         code="tutor_application_conflict",
         message="The tutor application changed or cannot make this transition.",
+        request_id=request.state.request_id,
+    )
+
+
+async def marketplace_message_limited_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=429,
+        code="marketplace_message_limited",
+        message="The messaging limit has been reached. Try again later.",
         request_id=request.state.request_id,
     )
 

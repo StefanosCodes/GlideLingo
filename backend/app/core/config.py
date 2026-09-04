@@ -1,5 +1,6 @@
 """Typed application configuration loaded from the process environment."""
 
+import re
 from typing import Literal, Self
 from urllib.parse import urlsplit
 
@@ -73,6 +74,9 @@ class Settings(BaseSettings):
     human_tutor_google_calendar_state_key: SecretStr | None = None
     human_tutor_google_calendar_redirect_allowlist: tuple[str, ...] = ()
     human_tutor_google_calendar_timeout_seconds: float = Field(default=4.0, gt=0, le=6)
+    human_tutor_messaging_enabled: bool = False
+    human_tutor_message_retention_days: int | None = Field(default=None, ge=7, le=3650)
+    human_tutor_approved_meeting_hosts: tuple[str, ...] = ()
     clerk_issuer: str | None = None
     clerk_jwks_url: str | None = None
     clerk_audience: str | None = None
@@ -287,6 +291,24 @@ class Settings(BaseSettings):
                     "Google Calendar redirects must be exact HTTPS, loopback HTTP, "
                     "or the reviewed native URL"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def validate_human_tutor_messaging_configuration(self) -> Self:
+        if not self.human_tutor_messaging_enabled:
+            return self
+        if not self.human_tutor_marketplace_enabled:
+            raise ValueError("Tutor messaging requires the human tutor marketplace")
+        if self.human_tutor_message_retention_days is None:
+            raise ValueError("Tutor messaging requires an approved message retention period")
+        if not self.human_tutor_approved_meeting_hosts:
+            raise ValueError("Tutor messaging requires at least one approved meeting host")
+        host_pattern = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$")
+        if any(
+            host != host.lower() or "*" in host or host_pattern.fullmatch(host) is None
+            for host in self.human_tutor_approved_meeting_hosts
+        ):
+            raise ValueError("Approved meeting hosts must be exact lowercase DNS names")
         return self
 
     @property

@@ -22,6 +22,7 @@ from app.core.errors import (
     LessonTutorLimitedError,
     LessonTutorTimeoutError,
     LessonTutorUnavailableError,
+    MarketplaceMessageLimitedError,
     ProRequiredError,
     TutorApplicationConflictError,
     TutorApplicationNotFoundError,
@@ -35,6 +36,7 @@ from app.core.errors import (
     lesson_tutor_limited_handler,
     lesson_tutor_timeout_handler,
     lesson_tutor_unavailable_handler,
+    marketplace_message_limited_handler,
     pro_required_handler,
     tutor_application_conflict_handler,
     tutor_application_not_found_handler,
@@ -58,6 +60,10 @@ from app.modules.human_tutor_marketplace.discovery import (
     MarketplaceDiscoveryService,
     PostgresDiscoveryRepository,
 )
+from app.modules.human_tutor_marketplace.messaging import (
+    MessagingService,
+    PostgresMessagingRepository,
+)
 from app.modules.human_tutor_marketplace.repository import (
     PostgresTutorApplicationRepository,
 )
@@ -80,6 +86,7 @@ def create_app(
     human_tutor_marketplace_service: HumanTutorMarketplaceService | None = None,
     marketplace_discovery_service: MarketplaceDiscoveryService | None = None,
     marketplace_calendar_service: CalendarService | None = None,
+    marketplace_messaging_service: MessagingService | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings.log_level)
@@ -160,6 +167,17 @@ def create_app(
         ),
         actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
         redirect_allowlist=settings.human_tutor_google_calendar_redirect_allowlist,
+    )
+    messaging_runtime = marketplace_messaging_service or MessagingService(
+        enabled=settings.human_tutor_messaging_enabled,
+        repository=PostgresMessagingRepository(engine=database_engine),
+        pseudonym_key=(
+            settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
+            if settings.human_tutor_marketplace_pseudonym_key is not None
+            else None
+        ),
+        actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+        retention_days=settings.human_tutor_message_retention_days,
     )
     discovery_service = marketplace_discovery_service
     if discovery_service is None and settings.human_tutor_marketplace_enabled:
@@ -263,6 +281,7 @@ def create_app(
         application.state.marketplace_discovery_service = discovery_service
     if marketplace_service is not None:
         application.state.marketplace_calendar_service = calendar_runtime
+        application.state.marketplace_messaging_service = messaging_runtime
     application.add_exception_handler(
         DependencyUnavailableError,
         dependency_unavailable_handler,
@@ -285,6 +304,9 @@ def create_app(
     )
     application.add_exception_handler(LessonTutorConflictError, lesson_tutor_conflict_handler)
     application.add_exception_handler(LessonTutorLimitedError, lesson_tutor_limited_handler)
+    application.add_exception_handler(
+        MarketplaceMessageLimitedError, marketplace_message_limited_handler
+    )
     application.add_exception_handler(ProRequiredError, pro_required_handler)
     application.add_exception_handler(BillingUnavailableError, billing_unavailable_handler)
     application.add_exception_handler(

@@ -1,9 +1,11 @@
 import hashlib
 import json
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Barrier
 from typing import Any, cast
 from uuid import UUID, uuid4
 
@@ -424,6 +426,63 @@ def test_handoff_is_minimized_single_use_expiring_and_cannot_replace_a_lock(
         connection.execute(text("UPDATE affiliate_creator SET status = 'suspended'"))
     with pytest.raises(AffiliateReferralNotFoundError):
         affiliate_service.resolve_referral(link_slug="creator-link", campaign_slug=None)
+
+
+@pytest.mark.integration
+def test_concurrent_handoffs_for_one_principal_serialize_attribution_replacement(
+    affiliate_database: AffiliateDatabase,
+) -> None:
+    seed_referral(affiliate_database)
+    tokens = ["E" * 43, "F" * 43]
+    affiliate_service = service(affiliate_database, clock=[NOW], tokens=tokens)
+    for _token in tokens:
+        affiliate_service.resolve_referral(link_slug="creator-link", campaign_slug=None)
+
+    repository = PostgresAffiliateRepository(engine=affiliate_database.engine)
+    principal = ClerkPrincipal(user_id="user_concurrent", issuer="https://clerk.test")
+    principal_ref = derive_affiliate_principal_ref(key=KEY, principal=principal)
+    start = Barrier(2)
+
+    def bind(token: str) -> BindStatus:
+        start.wait()
+        return repository.bind_attribution(
+            token_digest=hashlib.sha256(token.encode()).hexdigest(),
+            principal_ref=principal_ref,
+            now=NOW,
+        ).status
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        statuses = list(pool.map(bind, tokens))
+
+    assert statuses == [BindStatus.BOUND, BindStatus.BOUND]
+    with affiliate_database.engine.connect() as connection:
+        states = (
+            connection.execute(
+                text(
+                    """
+                SELECT state
+                FROM affiliate_attribution
+                WHERE principal_ref = :principal_ref
+                ORDER BY state
+                """
+                ),
+                {"principal_ref": principal_ref},
+            )
+            .scalars()
+            .all()
+        )
+        consumed_count = connection.execute(
+            text(
+                """
+                SELECT count(*)
+                FROM affiliate_handoff
+                WHERE consumed_by_principal_ref = :principal_ref
+                """
+            ),
+            {"principal_ref": principal_ref},
+        ).scalar_one()
+    assert states == ["bound", "replaced"]
+    assert consumed_count == 2
 
 
 @pytest.mark.integration

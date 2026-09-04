@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.auth.clerk import ClerkPrincipal
 from app.core.config import Settings
+from app.core.errors import BillingEventConflictError
 from app.integrations.revenuecat.client import RevenueCatSnapshot
 from app.main import create_app
 from app.modules.billing.identity import derive_billing_actor_ref
@@ -294,11 +295,14 @@ def test_billing_openapi_separates_clerk_status_from_public_webhook() -> None:
 
 
 class CapturingEventRepository:
-    def __init__(self) -> None:
+    def __init__(self, *, conflicts: bool = False) -> None:
         self.events: list[NormalizedBillingEvent] = []
+        self.conflicts = conflicts
 
     def accept(self, *, event: NormalizedBillingEvent, **_kwargs: object) -> IntakeReceipt:
         self.events.append(event)
+        if self.conflicts:
+            raise BillingEventConflictError
         return IntakeReceipt(status="accepted")
 
 
@@ -349,3 +353,47 @@ def test_flagged_webhook_routes_to_durable_intake_before_acknowledgement() -> No
     assert [event.provider_event_id for event in event_repository.events] == ["evt_durable_router"]
     assert provider.users == []
     assert entitlement_repository.events == set()
+
+
+def test_flagged_webhook_rejects_conflicting_provider_event_identity() -> None:
+    event_repository = CapturingEventRepository(conflicts=True)
+    service = BillingService(
+        enabled=True,
+        repository=cast(EntitlementRepository, MemoryRepository()),
+        provider=None,
+        pseudonym_key=KEY,
+        environment="SANDBOX",
+        freshness_seconds=900,
+        webhook_authorization=AUTHORIZATION,
+        webhook_signing_secret=SIGNING_SECRET.decode(),
+        webhook_signature_tolerance_seconds=300,
+        event_intake_enabled=True,
+        event_repository=cast(BillingEventRepository, event_repository),
+        event_provider_account_ref="app_router_test",
+        provider_actor_cipher=ProviderActorCipher(secret=KEY),
+    )
+    application = create_app(Settings(_env_file=None), billing_service=service)
+    raw = json.dumps(
+        {
+            "api_version": "1.0",
+            "event": {
+                "id": "evt_reused",
+                "type": "INITIAL_PURCHASE",
+                "event_timestamp_ms": int(NOW.timestamp() * 1000),
+                "environment": "SANDBOX",
+                "app_id": "app_router_test",
+                "app_user_id": "user_route_123",
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+
+    with TestClient(application) as client:
+        response = client.post(
+            "/v1/billing/revenuecat/webhook",
+            content=raw,
+            headers=signed_webhook_headers(raw),
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "billing_event_conflict"

@@ -22,6 +22,7 @@ type ErrorCode = Literal[
     "lesson_tutor_limited",
     "pro_required",
     "billing_unavailable",
+    "billing_event_conflict",
     "affiliate_unavailable",
     "affiliate_forbidden",
     "affiliate_referral_not_found",
@@ -78,6 +79,10 @@ class ProRequiredError(Exception):
 
 class BillingUnavailableError(Exception):
     """Billing cannot currently establish a fresh authorization decision."""
+
+
+class BillingEventConflictError(Exception):
+    """A provider event identity was reused for a conflicting payload."""
 
 
 class AffiliateUnavailableError(Exception):
@@ -188,6 +193,15 @@ async def billing_unavailable_handler(request: Request, _error: Exception) -> JS
         status_code=503,
         code="billing_unavailable",
         message="Billing authorization is unavailable.",
+        request_id=request.state.request_id,
+    )
+
+
+async def billing_event_conflict_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=409,
+        code="billing_event_conflict",
+        message="The provider event identifier conflicts with an earlier payload.",
         request_id=request.state.request_id,
     )
 

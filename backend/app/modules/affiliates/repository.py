@@ -241,6 +241,14 @@ class PostgresAffiliateRepository:
                 if handoff["expires_at"] <= now:
                     return BoundAttribution(status=BindStatus.EXPIRED)
 
+                # Two valid handoffs can target the same principal concurrently. Serialize that
+                # principal's attribution transition before observing or replacing current state;
+                # otherwise both transactions can observe no current row and race the partial
+                # unique index, leaking an infrastructure-shaped 503 to one caller.
+                connection.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:principal_ref, 0))"),
+                    {"principal_ref": principal_ref},
+                )
                 self._upsert_principal(connection, principal_ref=principal_ref, now=now)
                 connection.execute(
                     text(

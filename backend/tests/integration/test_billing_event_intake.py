@@ -3,6 +3,7 @@ from collections.abc import Generator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Barrier
 from typing import Any, cast
 from uuid import uuid4
 
@@ -11,7 +12,7 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import DBAPIError
 
 from app.core.config import Settings
-from app.core.errors import DependencyUnavailableError
+from app.core.errors import BillingEventConflictError, DependencyUnavailableError
 from app.integrations.revenuecat.client import RevenueCatSnapshot, RevenueCatUnavailableError
 from app.modules.billing.identity import derive_billing_actor_ref
 from app.modules.billing.repository import PostgresEntitlementRepository
@@ -107,6 +108,7 @@ def event(
     occurred_at: datetime = NOW,
     received_at: datetime = NOW,
     actor_id: str | None = ACTOR_ID,
+    payload_sha256: str = "a" * 64,
 ) -> NormalizedBillingEvent:
     actor_ref = (
         derive_billing_actor_ref(key=KEY, app_user_id=actor_id) if actor_id is not None else None
@@ -135,7 +137,7 @@ def event(
         provider_actor_ciphertext=ciphertext,
         object_refs={"product": "monthly"},
         schema_version=1,
-        payload_sha256="a" * 64,
+        payload_sha256=payload_sha256,
     )
 
 
@@ -237,6 +239,52 @@ def test_inbox_and_deliveries_commit_atomically(billing_event_engine: Engine) ->
             ).scalar_one()
             == 0
         )
+
+
+@pytest.mark.integration
+def test_concurrent_reuse_of_event_id_with_different_payload_is_rejected(
+    billing_event_engine: Engine,
+) -> None:
+    repository = PostgresBillingEventRepository(engine=billing_event_engine)
+    hashes = ("a" * 64, "b" * 64)
+    start = Barrier(2)
+
+    def accept_conflicting(payload_sha256: str) -> IntakeStatus | str:
+        start.wait()
+        try:
+            return accept(
+                repository,
+                event(event_id="evt_conflicting_payload", payload_sha256=payload_sha256),
+            )
+        except BillingEventConflictError:
+            return "conflict"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = dict(zip(hashes, pool.map(accept_conflicting, hashes), strict=True))
+
+    assert sorted(results.values()) == ["accepted", "conflict"]
+    with billing_event_engine.connect() as connection:
+        stored_hash = connection.execute(
+            text(
+                """
+                SELECT payload_sha256
+                FROM billing_event_inbox
+                WHERE provider_event_id = 'evt_conflicting_payload'
+                """
+            )
+        ).scalar_one()
+        delivery_count = connection.execute(
+            text("SELECT count(*) FROM billing_event_delivery")
+        ).scalar_one()
+    assert results[stored_hash] == "accepted"
+    assert (
+        accept(
+            repository,
+            event(event_id="evt_conflicting_payload", payload_sha256=stored_hash),
+        )
+        == "duplicate"
+    )
+    assert delivery_count == 2
 
 
 @pytest.mark.integration

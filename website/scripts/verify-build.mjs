@@ -26,7 +26,6 @@ await Promise.all([
   access(new URL('images/blog/calm-momentum-gradient.jpg', root)),
   access(new URL('images/blog/speaking-confidence-gradient.jpg', root)),
   access(new URL('referral/index.html', root)),
-  access(new URL('images/blog/from-words-to-conversation.webp', root)),
   access(new URL('_headers', root)),
   access(new URL('robots.txt', root)),
   access(new URL('sitemap-index.xml', root)),

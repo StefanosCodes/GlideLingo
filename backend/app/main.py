@@ -17,6 +17,7 @@ from app.core.errors import (
     AffiliateResourceNotFoundError,
     AffiliateUnavailableError,
     AuthenticationUnavailableError,
+    BillingEventConflictError,
     BillingUnavailableError,
     DependencyUnavailableError,
     InternalErrorMiddleware,
@@ -32,6 +33,7 @@ from app.core.errors import (
     affiliate_resource_not_found_handler,
     affiliate_unavailable_handler,
     authentication_unavailable_handler,
+    billing_event_conflict_handler,
     billing_unavailable_handler,
     dependency_unavailable_handler,
     lesson_context_not_found_handler,
@@ -218,6 +220,7 @@ def create_app(
     application.add_exception_handler(LessonTutorConflictError, lesson_tutor_conflict_handler)
     application.add_exception_handler(LessonTutorLimitedError, lesson_tutor_limited_handler)
     application.add_exception_handler(ProRequiredError, pro_required_handler)
+    application.add_exception_handler(BillingEventConflictError, billing_event_conflict_handler)
     application.add_exception_handler(BillingUnavailableError, billing_unavailable_handler)
     application.add_exception_handler(AffiliateUnavailableError, affiliate_unavailable_handler)
     application.add_exception_handler(AffiliateForbiddenError, affiliate_forbidden_handler)

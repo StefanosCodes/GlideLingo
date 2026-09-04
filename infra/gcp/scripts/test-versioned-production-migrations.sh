@@ -20,8 +20,8 @@ migration_file=""
 command_sql=""
 for argument in "$@"; do
   case "${argument}" in
-    --set=migration_version=*) version="${argument#*=}" ;;
-    --set=migration_checksum=*) checksum="${argument#*=}" ;;
+    --set=migration_version=*) version="${argument#--set=migration_version=}" ;;
+    --set=migration_checksum=*) checksum="${argument#--set=migration_checksum=}" ;;
     --file=*) migration_file="${argument#*=}" ;;
     --command=*) command_sql="${argument#*=}" ;;
   esac

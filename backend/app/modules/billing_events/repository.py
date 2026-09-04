@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.errors import DependencyUnavailableError
+from app.core.errors import BillingEventConflictError, DependencyUnavailableError
 from app.modules.billing_events.models import (
     BillingEventConsumer,
     ClaimedBillingEventDelivery,
@@ -92,6 +92,26 @@ class PostgresBillingEventRepository:
                     },
                 ).scalar_one_or_none()
                 if inserted is None:
+                    existing_payload_sha256 = connection.execute(
+                        text(
+                            """
+                            SELECT payload_sha256
+                            FROM billing_event_inbox
+                            WHERE provider = :provider
+                              AND environment = :environment
+                              AND provider_account_ref = :provider_account_ref
+                              AND provider_event_id = :provider_event_id
+                            """
+                        ),
+                        {
+                            "provider": event.provider,
+                            "environment": event.environment,
+                            "provider_account_ref": event.provider_account_ref,
+                            "provider_event_id": event.provider_event_id,
+                        },
+                    ).scalar_one()
+                    if existing_payload_sha256 != event.payload_sha256:
+                        raise BillingEventConflictError
                     return IntakeReceipt(status="duplicate")
                 if event.actor_ref is not None and event.provider_actor_ciphertext is not None:
                     connection.execute(

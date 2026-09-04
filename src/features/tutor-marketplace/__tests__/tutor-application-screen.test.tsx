@@ -11,6 +11,7 @@ import {
 const mockGetOwnTutorApplication = jest.fn<(...args: unknown[]) => Promise<TutorApplication>>();
 const mockCreateTutorApplication = jest.fn<(...args: unknown[]) => Promise<TutorApplication>>();
 const mockSubmitTutorApplication = jest.fn<(...args: unknown[]) => Promise<TutorApplication>>();
+const mockUpdateTutorApplicationDraft = jest.fn<(...args: unknown[]) => Promise<TutorApplication>>();
 
 jest.mock('@/features/tutor-marketplace/api', () => ({
   ...jest.requireActual<typeof import('@/features/tutor-marketplace/api')>(
@@ -19,6 +20,7 @@ jest.mock('@/features/tutor-marketplace/api', () => ({
   getOwnTutorApplication: (...args: unknown[]) => mockGetOwnTutorApplication(...args),
   createTutorApplication: (...args: unknown[]) => mockCreateTutorApplication(...args),
   submitTutorApplication: (...args: unknown[]) => mockSubmitTutorApplication(...args),
+  updateTutorApplicationDraft: (...args: unknown[]) => mockUpdateTutorApplicationDraft(...args),
 }));
 
 jest.mock('@/hooks/use-theme', () => ({
@@ -38,6 +40,7 @@ beforeEach(() => {
   mockGetOwnTutorApplication.mockReset();
   mockCreateTutorApplication.mockReset();
   mockSubmitTutorApplication.mockReset();
+  mockUpdateTutorApplicationDraft.mockReset();
 });
 
 afterEach(() => {
@@ -158,4 +161,46 @@ test('a stale submit offers a reload path and converges on server state', async 
   await fireEvent.press(screen.getByText('Reload application'));
   await waitFor(() => expect(screen.getByText('SUBMITTED')).toBeTruthy());
   expect(mockGetOwnTutorApplication).toHaveBeenCalledTimes(2);
+});
+
+test('a tutor can edit an existing draft with its current version', async () => {
+  process.env.EXPO_PUBLIC_HUMAN_TUTOR_MARKETPLACE_ENABLED = 'true';
+  const draft: TutorApplication = {
+    applicationId: 'f8d97d12-3e8a-49c6-bb22-55c49956c8b9',
+    status: 'draft',
+    version: 3,
+    headline: 'Patient conversation tutor',
+    biography: 'I help adults build confidence through practical conversation.',
+    timeZone: 'America/Chicago',
+    languages: ['el'],
+    specialties: ['Conversation'],
+    submittedAt: null,
+    reviewedAt: null,
+    decisionReason: null,
+  };
+  mockGetOwnTutorApplication.mockResolvedValue(draft);
+  mockUpdateTutorApplicationDraft.mockImplementation(async (input: unknown) => ({
+    ...draft,
+    ...(input as object),
+    version: 4,
+  }));
+
+  const screen = await render(
+    <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+      <TutorApplicationScreen />
+    </SafeAreaProvider>,
+  );
+
+  await waitFor(() => expect(screen.getByTestId('edit-tutor-application')).toBeTruthy());
+  await fireEvent.press(screen.getByTestId('edit-tutor-application'));
+  await waitFor(() => expect(screen.getByLabelText('Profile headline')).toBeTruthy());
+  await fireEvent.changeText(screen.getByLabelText('Profile headline'), 'Updated conversation tutor');
+  await fireEvent.press(screen.getByTestId('save-tutor-application'));
+
+  await waitFor(() => expect(mockUpdateTutorApplicationDraft).toHaveBeenCalledTimes(1));
+  expect(mockUpdateTutorApplicationDraft).toHaveBeenCalledWith(
+    expect.objectContaining({ headline: 'Updated conversation tutor' }),
+    3,
+  );
+  expect(mockCreateTutorApplication).not.toHaveBeenCalled();
 });

@@ -5,6 +5,7 @@ import {
   getOwnTutorApplication,
   isTutorApplicationDraftValid,
   parseTutorApplication,
+  parseTutorProfile,
   TutorMarketplaceClientError,
 } from '@/features/tutor-marketplace/api';
 
@@ -27,6 +28,89 @@ const validApplication = {
   reviewed_at: null,
   decision_reason: null,
 };
+
+describe('parseTutorProfile', () => {
+  const validProfile = {
+    tutor_id: '2382f687-0ca0-4340-8e78-21ba32912869',
+    application_id: validApplication.application_id,
+    application_status: 'approved',
+    version: 1,
+    headline: validApplication.headline,
+    biography: validApplication.biography,
+    time_zone: validApplication.time_zone,
+    is_published: false,
+    payout_ready: false,
+    publication_blockers: ['payout_not_ready'],
+    credential: {
+      credential_id: '7da10dbc-0546-4f74-a751-3cad7b5058b3',
+      version: 1,
+      credential_type: 'certificate',
+      title: 'Adult language teaching certificate',
+      issuer: 'Example Institute',
+      verification_status: 'unverified',
+      verification_reason: null,
+      reviewed_at: null,
+    },
+    offering: {
+      offering_id: '335516e3-6ab7-4de4-83ae-1ac7d6b76cdb',
+      version: 1,
+      title: '25-minute conversation lesson',
+      duration_minutes: 25,
+      amount_minor: 2500,
+      currency: 'USD',
+      state: 'draft',
+      commission_policy: {
+        policy_id: '10000000-0000-4000-8000-000000000001',
+        policy_type: 'commission',
+        version: 1,
+        commission_basis_points: 2000,
+        cancellation_cutoff_hours: null,
+        dispute_window_hours: null,
+        effective_at: '2026-09-04T00:00:00Z',
+      },
+      cancellation_policy: {
+        policy_id: '20000000-0000-4000-8000-000000000001',
+        policy_type: 'cancellation',
+        version: 1,
+        commission_basis_points: null,
+        cancellation_cutoff_hours: 12,
+        dispute_window_hours: 24,
+        effective_at: '2026-09-04T00:00:00Z',
+      },
+    },
+  };
+
+  test('accepts the private supply projection and immutable policy snapshots', () => {
+    expect(parseTutorProfile(validProfile)).toMatchObject({
+      applicationStatus: 'approved',
+      payoutReady: false,
+      credential: { verificationStatus: 'unverified' },
+      offering: {
+        state: 'draft',
+        commissionPolicy: { commissionBasisPoints: 2000 },
+        cancellationPolicy: { cancellationCutoffHours: 12, disputeWindowHours: 24 },
+      },
+    });
+  });
+
+  test.each([
+    { ...validProfile, payout_ready: 'false' },
+    { ...validProfile, publication_blockers: ['unknown'] },
+    { ...validProfile, offering: { ...validProfile.offering, state: 'paid' } },
+    {
+      ...validProfile,
+      offering: {
+        ...validProfile.offering,
+        commission_policy: {
+          ...validProfile.offering.commission_policy,
+          cancellation_cutoff_hours: 12,
+        },
+      },
+    },
+  ])('rejects unsafe or inconsistent private supply responses', (responseValue) => {
+    expect(parseTutorProfile(responseValue)).toBeNull();
+  });
+});
 
 describe('parseTutorApplication', () => {
   test('accepts and maps the bounded API contract', () => {

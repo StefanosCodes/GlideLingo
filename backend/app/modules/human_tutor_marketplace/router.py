@@ -9,10 +9,18 @@ from app.auth.clerk import CurrentClerkPrincipal
 from app.core.errors import ErrorResponse
 from app.modules.human_tutor_marketplace.schemas import (
     ApplicationVersionRequest,
+    ChangeTutorStatusRequest,
     CreateTutorApplicationRequest,
     DecideTutorApplicationRequest,
+    DecideTutorCredentialRequest,
+    SaveTutorCredentialRequest,
+    SaveTutorOfferingRequest,
+    SetTutorPublicationRequest,
     TutorApplicationQueue,
     TutorApplicationResponse,
+    TutorProfileResponse,
+    UpdateTutorApplicationDraftRequest,
+    UpdateTutorProfileDraftRequest,
 )
 from app.modules.human_tutor_marketplace.service import HumanTutorMarketplaceService
 
@@ -71,6 +79,26 @@ async def get_own_tutor_application(
 
 
 @router.post(
+    "/tutor-application/draft",
+    operation_id="update_tutor_application_draft",
+    response_model=TutorApplicationResponse,
+    responses={
+        401: {"description": "The Clerk session token is missing or invalid."},
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def update_tutor_application_draft(
+    request: UpdateTutorApplicationDraftRequest,
+    principal: CurrentClerkPrincipal,
+    service: HumanTutorMarketplaceServiceDependency,
+) -> TutorApplicationResponse:
+    return await service.update_application_draft(principal=principal, request=request)
+
+
+@router.post(
     "/tutor-application/submit",
     operation_id="submit_tutor_application",
     response_model=TutorApplicationResponse,
@@ -91,6 +119,104 @@ async def submit_tutor_application(
         principal=principal,
         expected_version=request.expected_version,
     )
+
+
+@router.get(
+    "/tutor-profile",
+    operation_id="get_own_tutor_profile",
+    response_model=TutorProfileResponse,
+    responses={
+        401: {"description": "The Clerk session token is missing or invalid."},
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def get_own_tutor_profile(
+    principal: CurrentClerkPrincipal,
+    service: HumanTutorMarketplaceServiceDependency,
+) -> TutorProfileResponse:
+    return await service.get_own_profile(principal=principal)
+
+
+@router.post(
+    "/tutor-profile/draft",
+    operation_id="update_tutor_profile_draft",
+    response_model=TutorProfileResponse,
+    responses={
+        401: {"description": "The Clerk session token is missing or invalid."},
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def update_tutor_profile_draft(
+    request: UpdateTutorProfileDraftRequest,
+    principal: CurrentClerkPrincipal,
+    service: HumanTutorMarketplaceServiceDependency,
+) -> TutorProfileResponse:
+    return await service.update_profile_draft(principal=principal, request=request)
+
+
+@router.post(
+    "/tutor-profile/credential",
+    operation_id="save_tutor_credential",
+    response_model=TutorProfileResponse,
+    responses={
+        401: {"description": "The Clerk session token is missing or invalid."},
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def save_tutor_credential(
+    request: SaveTutorCredentialRequest,
+    principal: CurrentClerkPrincipal,
+    service: HumanTutorMarketplaceServiceDependency,
+) -> TutorProfileResponse:
+    return await service.save_credential(principal=principal, request=request)
+
+
+@router.post(
+    "/tutor-profile/offering",
+    operation_id="save_tutor_offering",
+    response_model=TutorProfileResponse,
+    responses={
+        401: {"description": "The Clerk session token is missing or invalid."},
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def save_tutor_offering(
+    request: SaveTutorOfferingRequest,
+    principal: CurrentClerkPrincipal,
+    service: HumanTutorMarketplaceServiceDependency,
+) -> TutorProfileResponse:
+    return await service.save_offering(principal=principal, request=request)
+
+
+@router.post(
+    "/tutor-profile/publication",
+    operation_id="set_tutor_profile_publication",
+    response_model=TutorProfileResponse,
+    responses={
+        401: {"description": "The Clerk session token is missing or invalid."},
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def set_tutor_profile_publication(
+    request: SetTutorPublicationRequest,
+    principal: CurrentClerkPrincipal,
+    service: HumanTutorMarketplaceServiceDependency,
+) -> TutorProfileResponse:
+    return await service.set_publication(principal=principal, request=request)
 
 
 @router.get(
@@ -141,6 +267,28 @@ async def start_tutor_application_review(
     )
 
 
+@router.get(
+    "/marketplace-operations/tutor-applications/{application_id}/profile",
+    operation_id="get_tutor_profile_for_operations",
+    response_model=TutorProfileResponse,
+    responses={
+        401: {"description": "The Clerk session token is missing or invalid."},
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def get_tutor_profile_for_operations(
+    application_id: UUID,
+    principal: CurrentClerkPrincipal,
+    service: HumanTutorMarketplaceServiceDependency,
+) -> TutorProfileResponse:
+    return await service.get_profile_for_operations(
+        principal=principal,
+        application_id=application_id,
+    )
+
+
 @router.post(
     "/marketplace-operations/tutor-applications/{application_id}/decision",
     operation_id="decide_tutor_application",
@@ -162,5 +310,55 @@ async def decide_tutor_application(
     return await service.decide_application(
         principal=principal,
         application_id=application_id,
+        request=request,
+    )
+
+
+@router.post(
+    "/marketplace-operations/tutor-applications/{application_id}/status",
+    operation_id="change_tutor_status",
+    response_model=TutorApplicationResponse,
+    responses={
+        401: {"description": "The Clerk session token is missing or invalid."},
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def change_tutor_status(
+    application_id: UUID,
+    request: ChangeTutorStatusRequest,
+    principal: CurrentClerkPrincipal,
+    service: HumanTutorMarketplaceServiceDependency,
+) -> TutorApplicationResponse:
+    return await service.change_tutor_status(
+        principal=principal,
+        application_id=application_id,
+        request=request,
+    )
+
+
+@router.post(
+    "/marketplace-operations/tutor-credentials/{credential_id}/decision",
+    operation_id="decide_tutor_credential",
+    response_model=TutorProfileResponse,
+    responses={
+        401: {"description": "The Clerk session token is missing or invalid."},
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def decide_tutor_credential(
+    credential_id: UUID,
+    request: DecideTutorCredentialRequest,
+    principal: CurrentClerkPrincipal,
+    service: HumanTutorMarketplaceServiceDependency,
+) -> TutorProfileResponse:
+    return await service.decide_credential(
+        principal=principal,
+        credential_id=credential_id,
         request=request,
     )

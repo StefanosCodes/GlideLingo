@@ -134,6 +134,8 @@ function AppNavigation({ signedIn }: { signedIn: boolean }) {
         </Stack.Protected>
         <Stack.Protected guard={signedIn && isHumanTutorMarketplaceEnabled()}>
           <Stack.Screen name="tutor/apply" />
+          <Stack.Screen name="tutor/profile" />
+          <Stack.Screen name="marketplace-operations/tutor-applications" />
         </Stack.Protected>
         <Stack.Screen name="sso-callback" />
       </Stack>

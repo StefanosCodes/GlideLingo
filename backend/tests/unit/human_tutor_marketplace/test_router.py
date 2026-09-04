@@ -12,12 +12,23 @@ from app.main import create_app
 from app.modules.human_tutor_marketplace.identity import derive_marketplace_actor_ref
 from app.modules.human_tutor_marketplace.repository import (
     ApplicationAlreadyExistsError,
+    StoredMarketplacePolicyVersion,
     StoredTutorApplication,
+    StoredTutorCredential,
+    StoredTutorOffering,
+    StoredTutorProfile,
     TutorApplicationRepository,
 )
 from app.modules.human_tutor_marketplace.schemas import (
+    ChangeTutorStatusRequest,
     CreateTutorApplicationRequest,
+    SaveTutorCredentialRequest,
+    SaveTutorOfferingRequest,
     TutorApplicationDecision,
+    TutorApplicationStatus,
+    TutorCredentialDecision,
+    UpdateTutorApplicationDraftRequest,
+    UpdateTutorProfileDraftRequest,
 )
 from app.modules.human_tutor_marketplace.service import HumanTutorMarketplaceService
 
@@ -41,7 +52,8 @@ class MemoryRepository:
     def __init__(self) -> None:
         self.applications: dict[UUID, StoredTutorApplication] = {}
         self.application_by_actor: dict[str, UUID] = {}
-        self.operator_refs: set[str] = set()
+        self.operator_capabilities: set[tuple[str, str]] = set()
+        self.profiles: dict[str, StoredTutorProfile] = {}
 
     def get_by_actor(self, *, actor_ref: str) -> StoredTutorApplication | None:
         application_id = self.application_by_actor.get(actor_ref)
@@ -78,6 +90,31 @@ class MemoryRepository:
         self.application_by_actor[actor_ref] = application_id
         return application
 
+    def update_draft(
+        self,
+        *,
+        actor_ref: str,
+        request: UpdateTutorApplicationDraftRequest,
+    ) -> StoredTutorApplication | None:
+        application = self.get_by_actor(actor_ref=actor_ref)
+        if (
+            application is None
+            or application.status != "draft"
+            or application.version != request.expected_version
+        ):
+            return None
+        updated = replace(
+            application,
+            version=application.version + 1,
+            headline=request.headline,
+            biography=request.biography,
+            time_zone=request.time_zone,
+            languages=tuple(request.languages),
+            specialties=tuple(request.specialties),
+        )
+        self.applications[application.application_id] = updated
+        return updated
+
     def submit(self, *, actor_ref: str, expected_version: int) -> StoredTutorApplication | None:
         application = self.get_by_actor(actor_ref=actor_ref)
         if (
@@ -96,8 +133,7 @@ class MemoryRepository:
         return updated
 
     def has_operator_capability(self, *, actor_ref: str, capability: str) -> bool:
-        assert capability == "review_tutor_applications"
-        return actor_ref in self.operator_refs
+        return (actor_ref, capability) in self.operator_capabilities
 
     def list_review_queue(
         self, *, offset: int, limit: int
@@ -106,7 +142,7 @@ class MemoryRepository:
             (
                 application
                 for application in self.applications.values()
-                if application.status in {"submitted", "under_review"}
+                if application.status in {"submitted", "under_review", "approved", "suspended"}
             ),
             key=lambda application: (
                 application.submitted_at or datetime.min.replace(tzinfo=UTC),
@@ -138,6 +174,258 @@ class MemoryRepository:
         self.applications[application_id] = updated
         return updated
 
+    def get_profile_by_actor(self, *, actor_ref: str) -> StoredTutorProfile | None:
+        return self.profiles.get(actor_ref)
+
+    def get_profile_by_credential_id(self, *, credential_id: UUID) -> StoredTutorProfile | None:
+        return next(
+            (
+                profile
+                for profile in self.profiles.values()
+                if profile.credential is not None
+                and profile.credential.credential_id == credential_id
+            ),
+            None,
+        )
+
+    def get_profile_by_application_id(self, *, application_id: UUID) -> StoredTutorProfile | None:
+        return next(
+            (
+                profile
+                for profile in self.profiles.values()
+                if profile.application_id == application_id
+            ),
+            None,
+        )
+
+    def update_profile_draft(
+        self,
+        *,
+        actor_ref: str,
+        request: UpdateTutorProfileDraftRequest,
+    ) -> StoredTutorProfile | None:
+        profile = self.profiles.get(actor_ref)
+        if (
+            profile is None
+            or profile.application_status != "approved"
+            or profile.version != request.expected_version
+        ):
+            return None
+        updated = replace(
+            profile,
+            version=profile.version + 1,
+            headline=request.headline,
+            biography=request.biography,
+            time_zone=request.time_zone,
+        )
+        self.profiles[actor_ref] = updated
+        return updated
+
+    def save_credential(
+        self,
+        *,
+        actor_ref: str,
+        request: SaveTutorCredentialRequest,
+    ) -> StoredTutorProfile | None:
+        profile = self.profiles.get(actor_ref)
+        if profile is None or profile.application_status != "approved":
+            return None
+        current = profile.credential
+        if current is None and request.expected_version == 0:
+            credential = StoredTutorCredential(
+                credential_id=UUID("9948afe2-59ac-46f6-88cf-15c5f9992345"),
+                version=1,
+                credential_type=request.credential_type,
+                title=request.title,
+                issuer=request.issuer,
+                verification_status="unverified",
+                verification_reason=None,
+                reviewed_at=None,
+                verified_by_actor_ref=None,
+            )
+        elif (
+            current is not None
+            and current.version == request.expected_version
+            and current.verification_status == "unverified"
+        ):
+            credential = replace(
+                current,
+                version=current.version + 1,
+                credential_type=request.credential_type,
+                title=request.title,
+                issuer=request.issuer,
+            )
+        else:
+            return None
+        updated = replace(profile, credential=credential)
+        self.profiles[actor_ref] = updated
+        return updated
+
+    def decide_credential(
+        self,
+        *,
+        credential_id: UUID,
+        operator_actor_ref: str,
+        request_version: int,
+        decision: TutorCredentialDecision,
+        reason: str,
+    ) -> StoredTutorProfile | None:
+        profile = self.get_profile_by_credential_id(credential_id=credential_id)
+        credential = profile.credential if profile is not None else None
+        if (
+            profile is None
+            or credential is None
+            or profile.actor_ref == operator_actor_ref
+            or credential.version != request_version
+            or credential.verification_status != "unverified"
+            or (operator_actor_ref, "verify_tutor_credentials") not in self.operator_capabilities
+        ):
+            return None
+        updated = replace(
+            profile,
+            credential=replace(
+                credential,
+                version=credential.version + 1,
+                verification_status=decision,
+                verification_reason=reason,
+                reviewed_at=datetime.now(UTC),
+                verified_by_actor_ref=operator_actor_ref,
+            ),
+        )
+        self.profiles[profile.actor_ref] = updated
+        return updated
+
+    def save_offering(
+        self,
+        *,
+        actor_ref: str,
+        request: SaveTutorOfferingRequest,
+    ) -> StoredTutorProfile | None:
+        profile = self.profiles.get(actor_ref)
+        if profile is None or profile.application_status != "approved":
+            return None
+        current = profile.offering
+        policy_time = datetime(2026, 9, 4, tzinfo=UTC)
+        if current is None and request.expected_version == 0:
+            offering = StoredTutorOffering(
+                offering_id=UUID("9948afe2-59ac-46f6-88cf-15c5f9993456"),
+                version=1,
+                title=request.title,
+                duration_minutes=request.duration_minutes,
+                amount_minor=request.amount_minor,
+                currency=request.currency,
+                state="draft",
+                commission_policy=StoredMarketplacePolicyVersion(
+                    policy_id=UUID("10000000-0000-4000-8000-000000000001"),
+                    policy_type="commission",
+                    version=1,
+                    commission_basis_points=2000,
+                    cancellation_cutoff_hours=None,
+                    dispute_window_hours=None,
+                    effective_at=policy_time,
+                ),
+                cancellation_policy=StoredMarketplacePolicyVersion(
+                    policy_id=UUID("20000000-0000-4000-8000-000000000001"),
+                    policy_type="cancellation",
+                    version=1,
+                    commission_basis_points=None,
+                    cancellation_cutoff_hours=12,
+                    dispute_window_hours=24,
+                    effective_at=policy_time,
+                ),
+            )
+        elif (
+            current is not None
+            and current.version == request.expected_version
+            and current.state == "draft"
+        ):
+            offering = replace(
+                current,
+                version=current.version + 1,
+                title=request.title,
+                duration_minutes=request.duration_minutes,
+                amount_minor=request.amount_minor,
+                currency=request.currency,
+            )
+        else:
+            return None
+        updated = replace(profile, offering=offering)
+        self.profiles[actor_ref] = updated
+        return updated
+
+    def set_publication(
+        self,
+        *,
+        actor_ref: str,
+        expected_profile_version: int,
+        expected_offering_version: int,
+        publish: bool,
+    ) -> StoredTutorProfile | None:
+        profile = self.profiles.get(actor_ref)
+        offering = profile.offering if profile is not None else None
+        if (
+            profile is None
+            or offering is None
+            or profile.application_status != "approved"
+            or profile.version != expected_profile_version
+            or offering.version != expected_offering_version
+            or (publish and not profile.payout_ready)
+        ):
+            return None
+        updated = replace(
+            profile,
+            version=profile.version + 1,
+            is_published=publish,
+            offering=replace(
+                offering,
+                version=offering.version + 1,
+                state="active" if publish else "draft",
+            ),
+        )
+        self.profiles[actor_ref] = updated
+        return updated
+
+    def change_tutor_status(
+        self,
+        *,
+        application_id: UUID,
+        operator_actor_ref: str,
+        request: ChangeTutorStatusRequest,
+    ) -> StoredTutorApplication | None:
+        application = self.applications.get(application_id)
+        from_status = "approved" if request.action == "suspend" else "suspended"
+        desired: TutorApplicationStatus = "suspended" if request.action == "suspend" else "approved"
+        if (
+            application is None
+            or application.status != from_status
+            or application.version != request.expected_version
+            or application.actor_ref == operator_actor_ref
+            or (operator_actor_ref, "manage_tutor_status") not in self.operator_capabilities
+        ):
+            return None
+        updated = replace(
+            application,
+            status=desired,
+            version=application.version + 1,
+            reviewer_actor_ref=operator_actor_ref,
+            reviewed_at=datetime.now(UTC),
+            decision_reason=request.reason,
+        )
+        self.applications[application_id] = updated
+        profile = self.profiles.get(application.actor_ref)
+        if profile is not None:
+            self.profiles[application.actor_ref] = replace(
+                profile,
+                application_status=desired,
+                is_published=False,
+                offering=(
+                    replace(profile.offering, state="draft")
+                    if profile.offering is not None
+                    else None
+                ),
+            )
+        return updated
+
     def decide(
         self,
         *,
@@ -164,6 +452,21 @@ class MemoryRepository:
             decision_reason=reason,
         )
         self.applications[application_id] = updated
+        if decision == "approved":
+            self.profiles[application.actor_ref] = StoredTutorProfile(
+                tutor_id=UUID("9948afe2-59ac-46f6-88cf-15c5f9991234"),
+                application_id=application.application_id,
+                actor_ref=application.actor_ref,
+                application_status="approved",
+                version=1,
+                headline=application.headline,
+                biography=application.biography,
+                time_zone=application.time_zone,
+                payout_ready=False,
+                is_published=False,
+                credential=None,
+                offering=None,
+            )
         return updated
 
 
@@ -183,7 +486,13 @@ def make_client() -> tuple[TestClient, MemoryRepository]:
         key=KEY,
         clerk_user_id=OPERATOR_USER_ID,
     )
-    repository.operator_refs.add(operator_ref)
+    repository.operator_capabilities.update(
+        {
+            (operator_ref, "review_tutor_applications"),
+            (operator_ref, "manage_tutor_status"),
+            (operator_ref, "verify_tutor_credentials"),
+        }
+    )
     service = HumanTutorMarketplaceService(
         enabled=True,
         repository=cast(TutorApplicationRepository, repository),
@@ -394,3 +703,203 @@ def test_openapi_marks_every_marketplace_operation_as_clerk_authenticated() -> N
     for operations in paths.values():
         for operation in operations.values():
             assert operation["security"] == [{"ClerkSessionToken": []}]
+    assert not any(path.startswith("/v1/tutors") for path in schema["paths"])
+    assert not any("payout" in path for path in schema["paths"])
+
+
+def approve_tutor(client: TestClient) -> dict[str, object]:
+    created = client.post(
+        "/v1/tutor-applications",
+        json=application_payload(),
+        headers=authorization("tutor-token"),
+    )
+    submitted = client.post(
+        "/v1/tutor-application/submit",
+        json={"expected_version": created.json()["version"]},
+        headers=authorization("tutor-token"),
+    )
+    application_id = submitted.json()["application_id"]
+    review = client.post(
+        f"/v1/marketplace-operations/tutor-applications/{application_id}/review",
+        json={"expected_version": submitted.json()["version"]},
+        headers=authorization("operator-token"),
+    )
+    decision = client.post(
+        f"/v1/marketplace-operations/tutor-applications/{application_id}/decision",
+        json={
+            "decision": "approved",
+            "reason": "Application identity and teaching details passed review.",
+            "expected_version": review.json()["version"],
+        },
+        headers=authorization("operator-token"),
+    )
+    assert decision.status_code == 200
+    return cast(dict[str, object], decision.json())
+
+
+def test_tutor_can_edit_only_their_current_application_draft() -> None:
+    client, _repository = make_client()
+    with client:
+        created = client.post(
+            "/v1/tutor-applications",
+            json=application_payload(),
+            headers=authorization("tutor-token"),
+        )
+        update_payload = {
+            **application_payload(headline="Updated tutor headline"),
+            "expected_version": created.json()["version"],
+        }
+        updated = client.post(
+            "/v1/tutor-application/draft",
+            json=update_payload,
+            headers=authorization("tutor-token"),
+        )
+        retry = client.post(
+            "/v1/tutor-application/draft",
+            json=update_payload,
+            headers=authorization("tutor-token"),
+        )
+        stale_change = client.post(
+            "/v1/tutor-application/draft",
+            json={**update_payload, "headline": "Conflicting stale headline"},
+            headers=authorization("tutor-token"),
+        )
+        outsider = client.post(
+            "/v1/tutor-application/draft",
+            json=update_payload,
+            headers=authorization("outsider-token"),
+        )
+
+    assert updated.status_code == 200
+    assert updated.json()["version"] == created.json()["version"] + 1
+    assert retry.json() == updated.json()
+    assert stale_change.status_code == 409
+    assert outsider.status_code == 403
+
+
+def test_approved_tutor_can_prepare_private_supply_but_cannot_publish_without_payout() -> None:
+    client, _repository = make_client()
+    with client:
+        approved = approve_tutor(client)
+        profile = client.get(
+            "/v1/tutor-profile",
+            headers=authorization("tutor-token"),
+        )
+        edited = client.post(
+            "/v1/tutor-profile/draft",
+            json={
+                "expected_version": profile.json()["version"],
+                "headline": "Practical Greek conversation",
+                "biography": (
+                    "I help adult learners practice useful Greek conversation at a calm pace."
+                ),
+                "time_zone": "Europe/Athens",
+            },
+            headers=authorization("tutor-token"),
+        )
+        credential = client.post(
+            "/v1/tutor-profile/credential",
+            json={
+                "expected_version": 0,
+                "credential_type": "certificate",
+                "title": "Adult language teaching certificate",
+                "issuer": "Example Institute",
+            },
+            headers=authorization("tutor-token"),
+        )
+        offering = client.post(
+            "/v1/tutor-profile/offering",
+            json={
+                "expected_version": 0,
+                "title": "25-minute conversation lesson",
+                "duration_minutes": 25,
+                "amount_minor": 2500,
+                "currency": "USD",
+            },
+            headers=authorization("tutor-token"),
+        )
+        publication = client.post(
+            "/v1/tutor-profile/publication",
+            json={
+                "expected_profile_version": offering.json()["version"],
+                "expected_offering_version": offering.json()["offering"]["version"],
+                "publish": True,
+            },
+            headers=authorization("tutor-token"),
+        )
+        operator_profile = client.get(
+            f"/v1/marketplace-operations/tutor-applications/{approved['application_id']}/profile",
+            headers=authorization("operator-token"),
+        )
+        tutor_cannot_use_operator_projection = client.get(
+            f"/v1/marketplace-operations/tutor-applications/{approved['application_id']}/profile",
+            headers=authorization("tutor-token"),
+        )
+        credential_decision = client.post(
+            "/v1/marketplace-operations/tutor-credentials/"
+            f"{credential.json()['credential']['credential_id']}/decision",
+            json={
+                "expected_version": credential.json()["credential"]["version"],
+                "decision": "verified",
+                "reason": "Credential issuer and certificate reference were verified.",
+            },
+            headers=authorization("operator-token"),
+        )
+        suspended = client.post(
+            f"/v1/marketplace-operations/tutor-applications/{approved['application_id']}/status",
+            json={
+                "expected_version": approved["version"],
+                "action": "suspend",
+                "reason": "Temporary safety suspension while a report is reviewed.",
+            },
+            headers=authorization("operator-token"),
+        )
+
+    assert profile.status_code == 200
+    assert profile.json()["is_published"] is False
+    assert profile.json()["publication_blockers"] == ["payout_not_ready", "offering_missing"]
+    assert edited.status_code == 200
+    assert credential.status_code == 200
+    assert offering.status_code == 200
+    assert offering.json()["offering"]["state"] == "draft"
+    assert offering.json()["offering"]["commission_policy"]["commission_basis_points"] == 2000
+    assert publication.status_code == 409
+    assert operator_profile.status_code == 200
+    assert operator_profile.json()["credential"]["verification_status"] == "unverified"
+    assert tutor_cannot_use_operator_projection.status_code == 403
+    assert credential_decision.status_code == 200
+    assert credential_decision.json()["credential"]["verification_status"] == "verified"
+    assert suspended.status_code == 200
+    assert suspended.json()["status"] == "suspended"
+
+
+def test_unapproved_and_non_capable_actors_cannot_mutate_supply_or_status() -> None:
+    client, _repository = make_client()
+    with client:
+        created = client.post(
+            "/v1/tutor-applications",
+            json=application_payload(),
+            headers=authorization("tutor-token"),
+        )
+        no_profile = client.get(
+            "/v1/tutor-profile",
+            headers=authorization("tutor-token"),
+        )
+        forbidden_status = client.post(
+            "/v1/marketplace-operations/tutor-applications/"
+            f"{created.json()['application_id']}/status",
+            json={
+                "expected_version": created.json()["version"],
+                "action": "suspend",
+                "reason": "A tutor cannot suspend another marketplace tutor.",
+            },
+            headers=authorization("tutor-token"),
+        )
+        outsider_profile = client.get(
+            "/v1/tutor-profile",
+            headers=authorization("outsider-token"),
+        )
+
+    assert no_profile.status_code == 404
+    assert forbidden_status.status_code == 403
+    assert outsider_profile.status_code == 403

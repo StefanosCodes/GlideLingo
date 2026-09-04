@@ -1,4 +1,5 @@
 import { type ComponentProps, useEffect, useMemo, useRef, useState } from 'react';
+import { router } from 'expo-router';
 import { ActivityIndicator, StyleSheet, TextInput, View } from 'react-native';
 
 import { ApiClientError } from '@/api/client';
@@ -14,6 +15,7 @@ import {
   submitTutorApplication,
   type TutorApplication,
   TutorMarketplaceClientError,
+  updateTutorApplicationDraft,
 } from '@/features/tutor-marketplace/api';
 import { isHumanTutorMarketplaceEnabled } from '@/features/tutor-marketplace/config';
 import { useTheme } from '@/hooks/use-theme';
@@ -48,6 +50,7 @@ export function TutorApplicationScreen() {
   const [retryCount, setRetryCount] = useState(0);
   const [screenState, setScreenState] = useState<ScreenState>(enabled ? { kind: 'loading' } : { kind: 'error' });
   const [form, setForm] = useState(initialForm);
+  const [editingApplication, setEditingApplication] = useState<TutorApplication | null>(null);
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<{ message: string; reload: boolean } | null>(null);
 
@@ -107,7 +110,10 @@ export function TutorApplicationScreen() {
     setSaving(true);
     setActionError(null);
     try {
-      const application = await createTutorApplication(normalizedDraft);
+      const application = editingApplication
+        ? await updateTutorApplicationDraft(normalizedDraft, editingApplication.version)
+        : await createTutorApplication(normalizedDraft);
+      setEditingApplication(null);
       setScreenState({ kind: 'application', application });
     } catch (error) {
       setActionError(actionErrorPresentation(error));
@@ -151,7 +157,7 @@ export function TutorApplicationScreen() {
         </GlideSurface>
       ) : null}
 
-      {screenState.kind === 'form' ? (
+      {screenState.kind === 'form' || editingApplication ? (
         <GlideSurface padding="roomy" style={styles.card}>
           <ThemedText type="title2">Tutor application</ThemedText>
           <LabeledInput
@@ -198,7 +204,7 @@ export function TutorApplicationScreen() {
           <GlideButton
             disabled={!canCreate}
             fullWidth
-            label={saving ? 'Saving…' : 'Save application'}
+            label={saving ? 'Saving…' : editingApplication ? 'Save changes' : 'Save application'}
             onPress={() => void saveDraft()}
             testID="save-tutor-application"
           />
@@ -211,9 +217,20 @@ export function TutorApplicationScreen() {
         </GlideSurface>
       ) : null}
 
-      {screenState.kind === 'application' ? (
+      {screenState.kind === 'application' && !editingApplication ? (
         <ApplicationSummary
           application={screenState.application}
+          onEdit={() => {
+            const application = screenState.application;
+            setForm({
+              headline: application.headline,
+              biography: application.biography,
+              timeZone: application.timeZone,
+              languages: application.languages.join(', '),
+              specialties: application.specialties.join(', '),
+            });
+            setEditingApplication(application);
+          }}
           onSubmit={() => void submitDraft(screenState.application)}
           saving={saving}
         />
@@ -300,10 +317,12 @@ function LabeledInput({
 
 function ApplicationSummary({
   application,
+  onEdit,
   onSubmit,
   saving,
 }: {
   application: TutorApplication;
+  onEdit: () => void;
   onSubmit: () => void;
   saving: boolean;
 }) {
@@ -352,14 +371,30 @@ function ApplicationSummary({
           <GlideButton
             disabled={saving}
             fullWidth
+            label="Edit application"
+            onPress={onEdit}
+            testID="edit-tutor-application"
+            variant="secondary"
+          />
+          <GlideButton
+            disabled={saving}
+            fullWidth
             label={saving ? 'Submitting…' : 'Submit for review'}
             onPress={onSubmit}
             testID="submit-tutor-application"
           />
           <ThemedText type="footnote" themeColor="textTertiary">
-            This first MVP does not support editing after submission. Review these details before submitting.
+            You can edit this draft until you submit it. Submitted applications are locked for review.
           </ThemedText>
         </>
+      ) : null}
+      {application.status === 'approved' ? (
+        <GlideButton
+          fullWidth
+          label="Prepare tutor profile"
+          onPress={() => router.push('/tutor/profile')}
+          testID="open-tutor-profile"
+        />
       ) : null}
     </GlideSurface>
   );

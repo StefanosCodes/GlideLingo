@@ -22,6 +22,10 @@ type ErrorCode = Literal[
     "lesson_tutor_limited",
     "pro_required",
     "billing_unavailable",
+    "voice_session_unavailable",
+    "voice_session_timeout",
+    "voice_session_conflict",
+    "voice_session_not_found",
 ]
 
 
@@ -73,6 +77,26 @@ class ProRequiredError(Exception):
 
 class BillingUnavailableError(Exception):
     """Billing cannot currently establish a fresh authorization decision."""
+
+
+class VoiceSessionUnavailableError(Exception):
+    pass
+
+
+class VoiceSessionNotSentError(VoiceSessionUnavailableError):
+    pass
+
+
+class VoiceSessionTimeoutError(Exception):
+    pass
+
+
+class VoiceSessionConflictError(Exception):
+    pass
+
+
+class VoiceSessionNotFoundError(Exception):
+    pass
 
 
 def error_response(
@@ -163,6 +187,42 @@ async def billing_unavailable_handler(request: Request, _error: Exception) -> JS
         status_code=503,
         code="billing_unavailable",
         message="Billing authorization is unavailable.",
+        request_id=request.state.request_id,
+    )
+
+
+async def voice_session_unavailable_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=503,
+        code="voice_session_unavailable",
+        message="Voice conversation is unavailable.",
+        request_id=request.state.request_id,
+    )
+
+
+async def voice_session_timeout_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=504,
+        code="voice_session_timeout",
+        message="Voice setup took too long.",
+        request_id=request.state.request_id,
+    )
+
+
+async def voice_session_conflict_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=409,
+        code="voice_session_conflict",
+        message="This voice session conflicts with an earlier request.",
+        request_id=request.state.request_id,
+    )
+
+
+async def voice_session_not_found_handler(request: Request, _error: Exception) -> JSONResponse:
+    return error_response(
+        status_code=404,
+        code="voice_session_not_found",
+        message="The voice session could not be found.",
         request_id=request.state.request_id,
     )
 

@@ -57,7 +57,27 @@ def test_lesson_tutor_is_disabled_by_default() -> None:
     assert settings.lesson_tutor_enabled is False
     assert settings.lesson_tutor_service_timeout_seconds == 6
     assert settings.lesson_tutor_pseudonym_key is None
+    assert settings.voice_enabled is False
+    assert settings.voice_service_url is None
+    assert settings.voice_service_audience is None
+    assert settings.voice_pseudonym_key is None
     assert not hasattr(settings, "openai_api_key")
+
+
+def test_voice_activation_requires_private_boundary_auth_and_entitlement() -> None:
+    with pytest.raises(ValidationError, match="Voice service URL and audience"):
+        Settings(_env_file=None, voice_enabled=True)
+
+    with pytest.raises(ValidationError, match="entitlement authorization"):
+        Settings(
+            _env_file=None,
+            voice_enabled=True,
+            voice_service_url="https://voice.internal.test",
+            voice_service_audience="https://voice.internal.test",
+            voice_pseudonym_key="v" * 32,
+            clerk_issuer="https://clerk.test",
+            clerk_jwks_url="https://clerk.test/.well-known/jwks.json",
+        )
 
 
 def test_revenuecat_server_authorization_is_disabled_by_default() -> None:

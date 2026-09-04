@@ -41,19 +41,26 @@ class MarketplaceJobProcessor:
         lifecycle: LifecycleService,
         messaging: MessagingService,
         calendar: CalendarService,
+        commerce_enabled: bool,
     ) -> None:
         self._booking = booking
         self._lifecycle = lifecycle
         self._messaging = messaging
         self._calendar = calendar
+        self._commerce_enabled = commerce_enabled
 
     async def run_one_job(self, *, worker: str) -> bool:
-        if await self._booking.expire_holds(now=_utc_now(), limit=100):
-            return True
+        if self._commerce_enabled:
+            if await self._booking.expire_holds(now=_utc_now(), limit=100):
+                return True
+            for process in (
+                self._booking.run_one_reconciliation_job,
+                self._lifecycle.run_one_money_job,
+                self._lifecycle.run_one_reminder_job,
+            ):
+                if await process(worker=worker):
+                    return True
         for process in (
-            self._booking.run_one_reconciliation_job,
-            self._lifecycle.run_one_money_job,
-            self._lifecycle.run_one_reminder_job,
             self._messaging.run_one_notification_job,
             self._calendar.run_one_refresh_job,
         ):
@@ -112,8 +119,8 @@ def _arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 async def _run(arguments: argparse.Namespace, settings: Settings) -> None:
-    if not settings.human_tutor_marketplace_enabled or not settings.human_tutor_commerce_enabled:
-        raise RuntimeError("marketplace and commerce flags must be enabled for the money worker")
+    if not settings.human_tutor_marketplace_enabled:
+        raise RuntimeError("the marketplace flag must be enabled for the marketplace worker")
 
     # Import after fail-closed configuration validation so a disabled worker does not
     # construct provider clients or database engines.
@@ -132,6 +139,7 @@ async def _run(arguments: argparse.Namespace, settings: Settings) -> None:
             lifecycle=cast(LifecycleService, app.state.marketplace_lifecycle_service),
             messaging=cast(MessagingService, app.state.marketplace_messaging_service),
             calendar=cast(CalendarService, app.state.marketplace_calendar_service),
+            commerce_enabled=settings.human_tutor_commerce_enabled,
         )
         await run_worker(
             service,

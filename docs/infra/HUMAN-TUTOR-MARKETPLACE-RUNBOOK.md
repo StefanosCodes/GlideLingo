@@ -109,6 +109,9 @@ delivery adapter, refreshes Google free/busy caches, and applies message retenti
 uses a 60-second lease and stable provider idempotency keys where applicable; transient work retries
 with bounds and terminalizes after eight attempts. Money recovery requires `manage_bookings`.
 Revoked Google access becomes reconnect-required, and a new OAuth connection resets its refresh job.
+The worker may start once the base marketplace flag is enabled: it skips all commerce-owned expiry,
+reconciliation, money, and reminder queues until commerce is enabled, while independently enabled
+calendar and messaging queues remain available during staged activation.
 `SIGTERM` and `SIGINT` stop after the current bounded claim; no actor, booking, payment, provider,
 token, message content, or calendar event content is logged.
 

@@ -54,12 +54,15 @@ class JobComponents:
         return self.completed == "retention"
 
 
-def processor(components: JobComponents) -> MarketplaceJobProcessor:
+def processor(
+    components: JobComponents, *, commerce_enabled: bool = True
+) -> MarketplaceJobProcessor:
     return MarketplaceJobProcessor(
         booking=cast(BookingService, components),
         lifecycle=cast(LifecycleService, components),
         messaging=cast(MessagingService, components),
         calendar=cast(CalendarService, components),
+        commerce_enabled=commerce_enabled,
     )
 
 
@@ -128,3 +131,13 @@ def test_processor_reaches_calendar_and_retention_when_earlier_queues_are_idle()
         "calendar",
         "retention",
     ]
+
+
+def test_processor_skips_commerce_queues_during_staged_activation() -> None:
+    components = JobComponents("calendar")
+
+    assert (
+        asyncio.run(processor(components, commerce_enabled=False).run_one_job(worker="worker-a"))
+        is True
+    )
+    assert components.calls == ["notification", "calendar"]

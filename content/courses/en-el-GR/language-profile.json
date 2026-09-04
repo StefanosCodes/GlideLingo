@@ -21,7 +21,7 @@
   "regionalVariation": ["Regional variants are outside the current prototype and require explicit review"],
   "culturalRepresentationRules": ["Do not infer cultural claims from a script-and-sound lesson"],
   "speechConstraints": ["Saved audio supports listening and self-comparison only"],
-  "ttsConstraints": ["Use the existing reviewed Google TTS profile and committed MP3 assets"],
+  "ttsConstraints": ["Use the existing reviewed static TTS profile and committed MP3 assets"],
   "asrConstraints": ["No speech-recognition or pronunciation score is enabled"],
   "accessibilityInputConstraints": ["Every required check has a non-audio selectable response"],
   "externalReferences": ["https://www.coe.int/en/web/common-european-framework-reference-languages/"],

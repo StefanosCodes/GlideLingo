@@ -1869,9 +1869,7 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         new_starts_at=None,
         now=now,
     )
-    abandoned = lifecycle.claim_money_operation(
-        worker="crashed-worker", now=now, lease_seconds=60
-    )
+    abandoned = lifecycle.claim_money_operation(worker="crashed-worker", now=now, lease_seconds=60)
     assert abandoned is not None and abandoned.booking_id == leased.booking_id
     reclaimed = lifecycle.claim_money_operation(
         worker="restart-worker", now=now + timedelta(seconds=61), lease_seconds=60
@@ -1915,9 +1913,10 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         )
         retry_at += timedelta(minutes=2)
     assert exhausted_operation is not None
-    assert lifecycle.claim_money_operation(
-        worker="automatic-worker", now=retry_at, lease_seconds=60
-    ) is None
+    assert (
+        lifecycle.claim_money_operation(worker="automatic-worker", now=retry_at, lease_seconds=60)
+        is None
+    )
     assert lifecycle.recover_money_operation(
         booking_id=exhausted.booking_id,
         operator_actor_ref=OPERATOR_ACTOR,

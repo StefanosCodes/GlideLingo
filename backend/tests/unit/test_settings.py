@@ -1,4 +1,6 @@
+import base64
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -75,6 +77,7 @@ def test_human_tutor_marketplace_is_disabled_by_default() -> None:
     assert settings.human_tutor_marketplace_enabled is False
     assert settings.human_tutor_marketplace_pseudonym_key is None
     assert settings.human_tutor_marketplace_actor_allowlist == ()
+    assert settings.human_tutor_google_calendar_enabled is False
 
 
 def test_enabled_human_tutor_marketplace_requires_fail_closed_configuration() -> None:
@@ -93,6 +96,65 @@ def test_enabled_human_tutor_marketplace_accepts_clerk_and_allowlist() -> None:
     )
 
     assert settings.human_tutor_marketplace_enabled is True
+
+
+def test_enabled_google_calendar_requires_complete_minimal_scope_configuration() -> None:
+    base: dict[str, Any] = {
+        "_env_file": None,
+        "human_tutor_marketplace_enabled": True,
+        "human_tutor_marketplace_pseudonym_key": "m" * 32,
+        "human_tutor_marketplace_actor_allowlist": ("user_tutor_123",),
+        "clerk_issuer": "https://clerk.glidelingo.test",
+        "clerk_jwks_url": "https://clerk.glidelingo.test/.well-known/jwks.json",
+        "human_tutor_google_calendar_enabled": True,
+    }
+    with pytest.raises(ValidationError, match="client ID"):
+        Settings(**base)
+
+    settings = Settings(
+        **base,
+        human_tutor_google_calendar_client_id="google-calendar-client-id",
+        human_tutor_google_calendar_client_secret="s" * 32,
+        human_tutor_google_calendar_token_key=base64.urlsafe_b64encode(b"k" * 32).decode(),
+        human_tutor_google_calendar_state_key="c" * 32,
+        human_tutor_google_calendar_redirect_allowlist=(
+            "https://app.glidelingo.test/oauth/google-calendar",
+            "http://localhost:8081/oauth/google-calendar",
+        ),
+    )
+
+    assert settings.human_tutor_google_calendar_enabled is True
+
+
+def test_google_calendar_rejects_unsafe_redirects_and_bad_token_keys() -> None:
+    common: dict[str, Any] = {
+        "_env_file": None,
+        "human_tutor_marketplace_enabled": True,
+        "human_tutor_marketplace_pseudonym_key": "m" * 32,
+        "human_tutor_marketplace_actor_allowlist": ("user_tutor_123",),
+        "clerk_issuer": "https://clerk.glidelingo.test",
+        "clerk_jwks_url": "https://clerk.glidelingo.test/.well-known/jwks.json",
+        "human_tutor_google_calendar_enabled": True,
+        "human_tutor_google_calendar_client_id": "google-calendar-client-id",
+        "human_tutor_google_calendar_client_secret": "s" * 32,
+        "human_tutor_google_calendar_state_key": "c" * 32,
+    }
+    with pytest.raises(ValidationError, match="exactly 32 bytes"):
+        Settings(
+            **common,
+            human_tutor_google_calendar_token_key=base64.urlsafe_b64encode(b"too-short").decode(),
+            human_tutor_google_calendar_redirect_allowlist=(
+                "https://app.glidelingo.test/oauth/google-calendar",
+            ),
+        )
+    with pytest.raises(ValidationError, match="exact HTTPS"):
+        Settings(
+            **common,
+            human_tutor_google_calendar_token_key=base64.urlsafe_b64encode(b"k" * 32).decode(),
+            human_tutor_google_calendar_redirect_allowlist=(
+                "https://user:password@app.glidelingo.test/oauth/google-calendar",
+            ),
+        )
 
 
 def test_enabled_revenuecat_requires_all_server_only_secrets() -> None:

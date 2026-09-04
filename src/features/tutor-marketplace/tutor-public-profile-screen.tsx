@@ -10,7 +10,12 @@ import { Spacing } from '@/constants/theme';
 import { getPublicTutor, listPublicTutorSlots, setPublicTutorFavorite, type PublicTutor, type TutorSlot } from '@/features/tutor-marketplace/api';
 import { useTheme } from '@/hooks/use-theme';
 
-type State = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; tutor: PublicTutor; slots: TutorSlot[] };
+type State = { kind: 'loading' } | { kind: 'error' } | {
+  kind: 'ready';
+  tutor: PublicTutor;
+  slots: TutorSlot[];
+  slotFreshness: 'current' | 'stale' | 'reconnect_required';
+};
 
 export function TutorPublicProfileScreen() {
   const { tutorId } = useLocalSearchParams<{ tutorId: string }>();
@@ -28,7 +33,9 @@ export function TutorPublicProfileScreen() {
       getPublicTutor(tutorId, controller.signal),
       listPublicTutorSlots(tutorId, startsAt.toISOString(), endsAt.toISOString(), controller.signal),
     ]).then(([tutor, slots]) => {
-      if (!controller.signal.aborted && current === sequence.current) setState({ kind: 'ready', tutor, slots: slots.slots });
+      if (!controller.signal.aborted && current === sequence.current) {
+        setState({ kind: 'ready', tutor, slots: slots.slots, slotFreshness: slots.freshness });
+      }
     }).catch(() => {
       if (!controller.signal.aborted && current === sequence.current) setState({ kind: 'error' });
     });
@@ -67,7 +74,9 @@ export function TutorPublicProfileScreen() {
     </GlideSurface>
     <GlideSurface padding="roomy" style={styles.card}>
       <ThemedText type="title2">Available times</ThemedText>
-      {state.slots.length === 0 ? <ThemedText type="body" themeColor="textSecondary">No manual slots are available in the next two weeks.</ThemedText> :
+      {state.slotFreshness === 'stale' ? <ThemedText type="body" themeColor="textSecondary">Calendar availability is temporarily stale. No time is shown as bookable until it refreshes.</ThemedText> :
+        state.slotFreshness === 'reconnect_required' ? <ThemedText type="body" themeColor="textSecondary">This tutor needs to reconnect their calendar before calendar-backed times can appear.</ThemedText> :
+        state.slots.length === 0 ? <ThemedText type="body" themeColor="textSecondary">No manual slots are available in the next two weeks.</ThemedText> :
         state.slots.slice(0, 8).map((slot) => <ThemedText key={slot.startsAt} type="body">{new Date(slot.startsAt).toLocaleString()}</ThemedText>)}
     </GlideSurface>
   </ScreenFrame>;

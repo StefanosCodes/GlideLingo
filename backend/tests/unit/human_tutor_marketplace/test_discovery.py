@@ -1,12 +1,17 @@
 import asyncio
 from dataclasses import replace
-from datetime import date, time
+from datetime import UTC, date, datetime, time, timedelta
+from typing import cast
 from uuid import UUID
 
 import pytest
 
 from app.auth.clerk import ClerkPrincipal
 from app.core.errors import HumanTutorMarketplaceForbiddenError
+from app.modules.human_tutor_marketplace.calendar import (
+    CalendarBusySnapshot,
+    CalendarRepository,
+)
 from app.modules.human_tutor_marketplace.discovery import (
     MarketplaceDiscoveryService,
     StoredAvailabilityRule,
@@ -92,9 +97,17 @@ class Repository:
         return True
 
 
-def service(repository: Repository) -> MarketplaceDiscoveryService:
+class StaleCalendar:
+    def get_busy_snapshot(self, *, tutor_id: UUID, now: datetime) -> CalendarBusySnapshot:
+        return CalendarBusySnapshot("stale", (), now - timedelta(minutes=30))
+
+
+def service(
+    repository: Repository, calendar: CalendarRepository | None = None
+) -> MarketplaceDiscoveryService:
     return MarketplaceDiscoveryService(
         repository=repository,
+        calendar_busy_reader=calendar,
         pseudonym_key=KEY,
         actor_allowlist=(LEARNER.user_id,),
     )
@@ -150,3 +163,20 @@ def test_discovery_rejects_non_allowlisted_actor_before_repository_access() -> N
                 limit=20,
             )
         )
+
+
+def test_stale_calendar_never_appears_as_current_or_returns_bookable_slots() -> None:
+    starts_at = datetime.now(UTC) + timedelta(hours=2)
+    result = asyncio.run(
+        service(Repository(), cast(CalendarRepository, StaleCalendar())).list_slots(
+            principal=LEARNER,
+            tutor_id=TUTOR_ID,
+            starts_at=starts_at,
+            ends_at=starts_at + timedelta(days=1),
+            limit=20,
+        )
+    )
+
+    assert result.source == "manual+google"
+    assert result.freshness == "stale"
+    assert result.slots == []

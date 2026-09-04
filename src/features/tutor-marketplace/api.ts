@@ -123,7 +123,22 @@ export type ManualAvailability = Omit<ManualAvailabilityDraft, 'expectedProfileV
 };
 
 export type TutorSlot = { startsAt: string; endsAt: string };
-export type TutorSlots = { tutorId: string; timeZone: string; source: 'manual'; freshness: 'current'; slots: TutorSlot[] };
+export type TutorSlots = {
+  tutorId: string;
+  timeZone: string;
+  source: 'manual' | 'manual+google';
+  freshness: 'current' | 'stale' | 'reconnect_required';
+  slots: TutorSlot[];
+};
+
+export type CalendarConnection = {
+  status: 'disconnected' | 'connected' | 'stale' | 'reconnect_required';
+  freshness: 'not_connected' | 'current' | 'stale' | 'reconnect_required';
+  lastRefreshedAt: string | null;
+  safeFailureCode: string | null;
+};
+
+export type CalendarOAuthStart = { authorizationUrl: string; expiresAt: string };
 
 export class TutorMarketplaceClientError extends Error {
   readonly kind: 'not-found' | 'forbidden' | 'conflict' | 'validation' | 'unavailable';
@@ -430,6 +445,61 @@ export async function replaceOwnManualAvailability(
   });
 }
 
+export async function getTutorCalendarConnection(signal?: AbortSignal): Promise<CalendarConnection> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({ parse: parseCalendarConnection, path: '/v1/tutor-calendar', signal });
+    return result.data;
+  });
+}
+
+export async function startTutorCalendarOAuth(
+  redirectUri: string,
+  signal?: AbortSignal,
+): Promise<CalendarOAuthStart> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { redirect_uri: redirectUri },
+      parse: parseCalendarOAuthStart,
+      path: '/v1/tutor-calendar/oauth/start',
+      signal,
+    });
+    return result.data;
+  });
+}
+
+export async function completeTutorCalendarOAuth(
+  state: string,
+  code: string,
+  redirectUri: string,
+): Promise<CalendarConnection> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { state, code, redirect_uri: redirectUri },
+      parse: parseCalendarConnection,
+      path: '/v1/tutor-calendar/oauth/callback',
+    });
+    return result.data;
+  });
+}
+
+export async function refreshTutorCalendar(): Promise<CalendarConnection> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: {}, parse: parseCalendarConnection, path: '/v1/tutor-calendar/refresh',
+    });
+    return result.data;
+  });
+}
+
+export async function revokeTutorCalendar(): Promise<CalendarConnection> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: {}, parse: parseCalendarConnection, path: '/v1/tutor-calendar/revoke',
+    });
+    return result.data;
+  });
+}
+
 export async function getTutorProfileForOperations(applicationId: string): Promise<TutorProfile> {
   return runMarketplaceRequest(async () => {
     const result = await getJson({
@@ -588,7 +658,9 @@ export function parseTutorSearchResult(value: unknown): TutorSearchResult | null
 
 export function parseTutorSlots(value: unknown): TutorSlots | null {
   if (!isRecord(value) || !isUuid(value.tutor_id) || !isBoundedString(value.time_zone, 64) ||
-      value.source !== 'manual' || value.freshness !== 'current' || !Array.isArray(value.slots) ||
+      (value.source !== 'manual' && value.source !== 'manual+google') ||
+      !['current', 'stale', 'reconnect_required'].includes(value.freshness as string) ||
+      !Array.isArray(value.slots) ||
       value.slots.length > 256) return null;
   const slots = value.slots.map((slot): TutorSlot | null => {
     if (!isRecord(slot) || !isIsoTimestamp(slot.starts_at) || !isIsoTimestamp(slot.ends_at) ||
@@ -596,7 +668,31 @@ export function parseTutorSlots(value: unknown): TutorSlots | null {
     return { startsAt: slot.starts_at, endsAt: slot.ends_at };
   });
   if (slots.some((slot) => slot === null)) return null;
-  return { tutorId: value.tutor_id, timeZone: value.time_zone, source: 'manual', freshness: 'current', slots: slots as TutorSlot[] };
+  return {
+    tutorId: value.tutor_id, timeZone: value.time_zone,
+    source: value.source, freshness: value.freshness as TutorSlots['freshness'], slots: slots as TutorSlot[],
+  };
+}
+
+export function parseCalendarConnection(value: unknown): CalendarConnection | null {
+  if (!isRecord(value) ||
+      !['disconnected', 'connected', 'stale', 'reconnect_required'].includes(value.status as string) ||
+      !['not_connected', 'current', 'stale', 'reconnect_required'].includes(value.freshness as string) ||
+      !(value.last_refreshed_at === null || isIsoTimestamp(value.last_refreshed_at)) ||
+      !(value.safe_failure_code === null || isBoundedString(value.safe_failure_code, 64))) return null;
+  return {
+    status: value.status as CalendarConnection['status'],
+    freshness: value.freshness as CalendarConnection['freshness'],
+    lastRefreshedAt: value.last_refreshed_at,
+    safeFailureCode: value.safe_failure_code,
+  };
+}
+
+export function parseCalendarOAuthStart(value: unknown): CalendarOAuthStart | null {
+  if (!isRecord(value) || !isBoundedString(value.authorization_url, 4096) ||
+      !value.authorization_url.startsWith('https://accounts.google.com/o/oauth2/v2/auth?') ||
+      !isIsoTimestamp(value.expires_at)) return null;
+  return { authorizationUrl: value.authorization_url, expiresAt: value.expires_at };
 }
 
 export function parseManualAvailability(value: unknown): ManualAvailability | null {

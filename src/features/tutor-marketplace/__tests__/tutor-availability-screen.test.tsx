@@ -2,17 +2,26 @@ import { afterEach, beforeEach, expect, jest, test } from '@jest/globals';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import type { ManualAvailability, TutorSlots } from '@/features/tutor-marketplace/api';
+import type { CalendarConnection, CalendarOAuthStart, ManualAvailability, TutorSlots } from '@/features/tutor-marketplace/api';
 import { TutorAvailabilityScreen } from '@/features/tutor-marketplace/tutor-availability-screen';
 
 const mockGet = jest.fn<(...args: unknown[]) => Promise<ManualAvailability>>();
 const mockPreview = jest.fn<(...args: unknown[]) => Promise<TutorSlots>>();
 const mockReplace = jest.fn<(...args: unknown[]) => Promise<ManualAvailability>>();
+const mockCalendar = jest.fn<(...args: unknown[]) => Promise<CalendarConnection>>();
+const mockCalendarStart = jest.fn<(...args: unknown[]) => Promise<CalendarOAuthStart>>();
+const mockOpenUrl = jest.fn<(...args: unknown[]) => Promise<void>>();
 jest.mock('@/features/tutor-marketplace/api', () => ({
   ...jest.requireActual<typeof import('@/features/tutor-marketplace/api')>('@/features/tutor-marketplace/api'),
   getOwnManualAvailability: (...args: unknown[]) => mockGet(...args),
   previewOwnManualSlots: (...args: unknown[]) => mockPreview(...args),
   replaceOwnManualAvailability: (...args: unknown[]) => mockReplace(...args),
+  getTutorCalendarConnection: (...args: unknown[]) => mockCalendar(...args),
+  startTutorCalendarOAuth: (...args: unknown[]) => mockCalendarStart(...args),
+}));
+jest.mock('expo-linking', () => ({
+  createURL: () => 'glidelingo:///tutor/availability',
+  openURL: (...args: unknown[]) => mockOpenUrl(...args),
 }));
 jest.mock('@/hooks/use-theme', () => ({ useTheme: () => jest.requireActual<typeof import('@/constants/theme')>('@/constants/theme').Colors.light }));
 jest.mock('@/components/screen-header', () => ({ ScreenHeader: () => null }));
@@ -24,9 +33,18 @@ const availability: ManualAvailability = {
   dialects: ['el-cy'], rules: [], exceptions: [],
 };
 const preview: TutorSlots = { tutorId: availability.tutorId, timeZone: availability.timeZone, source: 'manual', freshness: 'current', slots: [] };
+const previousCalendarFlag = process.env.EXPO_PUBLIC_HUMAN_TUTOR_GOOGLE_CALENDAR_ENABLED;
 
-beforeEach(() => { mockGet.mockReset(); mockPreview.mockReset(); mockReplace.mockReset(); });
-afterEach(cleanup);
+beforeEach(() => {
+  delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_GOOGLE_CALENDAR_ENABLED;
+  mockGet.mockReset(); mockPreview.mockReset(); mockReplace.mockReset();
+  mockCalendar.mockReset(); mockCalendarStart.mockReset(); mockOpenUrl.mockReset();
+});
+afterEach(() => {
+  cleanup();
+  if (previousCalendarFlag === undefined) delete process.env.EXPO_PUBLIC_HUMAN_TUTOR_GOOGLE_CALENDAR_ENABLED;
+  else process.env.EXPO_PUBLIC_HUMAN_TUTOR_GOOGLE_CALENDAR_ENABLED = previousCalendarFlag;
+});
 
 test('tutor can recover from load failure and save a bounded weekly rule', async () => {
   mockGet.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(availability);
@@ -39,4 +57,25 @@ test('tutor can recover from load failure and save a bounded weekly rule', async
   await fireEvent.press(screen.getByText('Save weekly hours'));
   await waitFor(() => expect(mockReplace).toHaveBeenCalledTimes(1));
   expect(mockReplace).toHaveBeenCalledWith(expect.objectContaining({ expectedProfileVersion: 2, dialects: ['el-cy'] }));
+});
+
+test('calendar connection is explicit, minimal, and never blocks manual availability', async () => {
+  process.env.EXPO_PUBLIC_HUMAN_TUTOR_GOOGLE_CALENDAR_ENABLED = 'true';
+  mockGet.mockResolvedValue(availability);
+  mockPreview.mockResolvedValue(preview);
+  mockCalendar.mockResolvedValue({
+    status: 'disconnected', freshness: 'not_connected', lastRefreshedAt: null, safeFailureCode: null,
+  });
+  mockCalendarStart.mockResolvedValue({
+    authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth?scope=freebusy',
+    expiresAt: '2026-09-04T12:10:00Z',
+  });
+  mockOpenUrl.mockResolvedValue();
+  const screen = await render(<SafeAreaProvider initialMetrics={metrics}><TutorAvailabilityScreen /></SafeAreaProvider>);
+
+  await waitFor(() => expect(screen.getByText('Google Calendar free/busy')).toBeTruthy());
+  expect(screen.getByText(/Event names, descriptions, attendees, and locations are never retained/)).toBeTruthy();
+  await fireEvent.press(screen.getByText('Connect Google Calendar'));
+  await waitFor(() => expect(mockOpenUrl).toHaveBeenCalledTimes(1));
+  expect(mockCalendarStart).toHaveBeenCalledWith('glidelingo:///tutor/availability');
 });

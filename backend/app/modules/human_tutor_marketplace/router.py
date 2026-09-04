@@ -8,9 +8,14 @@ from fastapi import APIRouter, Depends, Query, Request, status
 
 from app.auth.clerk import CurrentClerkPrincipal
 from app.core.errors import ErrorResponse
+from app.modules.human_tutor_marketplace.calendar import CalendarService
 from app.modules.human_tutor_marketplace.discovery import MarketplaceDiscoveryService
 from app.modules.human_tutor_marketplace.schemas import (
     ApplicationVersionRequest,
+    CalendarConnectionResponse,
+    CalendarOAuthCallbackRequest,
+    CalendarOAuthStartRequest,
+    CalendarOAuthStartResponse,
     ChangeTutorStatusRequest,
     CreateTutorApplicationRequest,
     DecideTutorApplicationRequest,
@@ -56,6 +61,90 @@ MarketplaceDiscoveryServiceDependency = Annotated[
     MarketplaceDiscoveryService,
     Depends(get_marketplace_discovery_service),
 ]
+
+
+def get_marketplace_calendar_service(request: Request) -> CalendarService:
+    return cast(CalendarService, request.app.state.marketplace_calendar_service)
+
+
+MarketplaceCalendarServiceDependency = Annotated[
+    CalendarService,
+    Depends(get_marketplace_calendar_service),
+]
+
+
+def _calendar_response(view: object) -> CalendarConnectionResponse:
+    return CalendarConnectionResponse.model_validate(view, from_attributes=True)
+
+
+@router.get(
+    "/tutor-calendar",
+    operation_id="get_tutor_calendar_connection",
+    response_model=CalendarConnectionResponse,
+)
+async def get_tutor_calendar_connection(
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceCalendarServiceDependency,
+) -> CalendarConnectionResponse:
+    return _calendar_response(await service.status(principal=principal))
+
+
+@router.post(
+    "/tutor-calendar/oauth/start",
+    operation_id="start_tutor_calendar_oauth",
+    response_model=CalendarOAuthStartResponse,
+)
+async def start_tutor_calendar_oauth(
+    request: CalendarOAuthStartRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceCalendarServiceDependency,
+) -> CalendarOAuthStartResponse:
+    result = await service.start_oauth(principal=principal, redirect_uri=request.redirect_uri)
+    return CalendarOAuthStartResponse.model_validate(result, from_attributes=True)
+
+
+@router.post(
+    "/tutor-calendar/oauth/callback",
+    operation_id="complete_tutor_calendar_oauth",
+    response_model=CalendarConnectionResponse,
+)
+async def complete_tutor_calendar_oauth(
+    request: CalendarOAuthCallbackRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceCalendarServiceDependency,
+) -> CalendarConnectionResponse:
+    return _calendar_response(
+        await service.complete_oauth(
+            principal=principal,
+            state=request.state,
+            code=request.code,
+            redirect_uri=request.redirect_uri,
+        )
+    )
+
+
+@router.post(
+    "/tutor-calendar/refresh",
+    operation_id="refresh_tutor_calendar",
+    response_model=CalendarConnectionResponse,
+)
+async def refresh_tutor_calendar(
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceCalendarServiceDependency,
+) -> CalendarConnectionResponse:
+    return _calendar_response(await service.refresh(principal=principal))
+
+
+@router.post(
+    "/tutor-calendar/revoke",
+    operation_id="revoke_tutor_calendar",
+    response_model=CalendarConnectionResponse,
+)
+async def revoke_tutor_calendar(
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceCalendarServiceDependency,
+) -> CalendarConnectionResponse:
+    return _calendar_response(await service.revoke(principal=principal))
 
 
 @router.get(

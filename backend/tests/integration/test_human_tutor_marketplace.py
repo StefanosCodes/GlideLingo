@@ -1,7 +1,7 @@
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from datetime import date, time
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from threading import Barrier
 from typing import Any, cast
@@ -12,6 +12,8 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import DBAPIError
 
 from app.core.config import Settings
+from app.modules.human_tutor_marketplace.availability import TimeInterval
+from app.modules.human_tutor_marketplace.calendar import PostgresCalendarRepository
 from app.modules.human_tutor_marketplace.discovery import PostgresDiscoveryRepository
 from app.modules.human_tutor_marketplace.identity import derive_marketplace_actor_ref
 from app.modules.human_tutor_marketplace.repository import (
@@ -34,6 +36,9 @@ MIGRATIONS = (
     Path(__file__).resolve().parents[2]
     / "migrations"
     / "008_human_tutor_marketplace_discovery_availability.sql",
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "009_human_tutor_marketplace_google_calendar.sql",
 )
 SAFE_SEARCH_PATH = "pg_catalog, public, pg_temp"
 TUTOR_ACTOR = derive_marketplace_actor_ref(
@@ -584,6 +589,7 @@ def test_discovery_availability_and_favorites_use_only_eligible_public_supply(
             currency="USD",
         ),
     )
+
     assert offered is not None and offered.offering is not None
     published = core.set_publication(
         actor_ref=TUTOR_ACTOR,
@@ -662,6 +668,102 @@ def test_discovery_availability_and_favorites_use_only_eligible_public_supply(
             verified_credential=False,
         )
         == []
+    )
+
+
+@pytest.mark.integration
+def test_calendar_oauth_replay_cache_concurrency_and_encrypted_storage(
+    marketplace_engine: Engine,
+) -> None:
+    core = PostgresTutorApplicationRepository(engine=marketplace_engine)
+    calendar = PostgresCalendarRepository(engine=marketplace_engine)
+    _, profile = create_approved_tutor(core)
+    now = datetime.now(UTC)
+    state_hash = b"s" * 32
+    redirect = "https://app.glidelingo.test/tutor/availability"
+    calendar.insert_oauth_state(
+        state_hash=state_hash,
+        tutor_id=profile.tutor_id,
+        actor_ref=TUTOR_ACTOR,
+        redirect_uri=redirect,
+        expires_at=now + timedelta(minutes=10),
+    )
+    assert calendar.consume_oauth_state(
+        state_hash=state_hash,
+        tutor_id=profile.tutor_id,
+        actor_ref=TUTOR_ACTOR,
+        redirect_uri=redirect,
+        now=now,
+    )
+    assert not calendar.consume_oauth_state(
+        state_hash=state_hash,
+        tutor_id=profile.tutor_id,
+        actor_ref=TUTOR_ACTOR,
+        redirect_uri=redirect,
+        now=now,
+    )
+
+    ciphertext = b"encrypted-refresh-token-ciphertext" + b"x" * 16
+    connected = calendar.upsert_connection(
+        tutor_id=profile.tutor_id,
+        actor_ref=TUTOR_ACTOR,
+        encrypted_refresh_token=ciphertext,
+        token_key_version=1,
+    )
+    busy = (TimeInterval(now + timedelta(hours=1), now + timedelta(hours=2)),)
+    refreshed = calendar.replace_busy_cache(
+        tutor_id=profile.tutor_id,
+        expected_version=connected.version,
+        intervals=busy,
+        refreshed_at=now,
+        expires_at=now + timedelta(minutes=10),
+    )
+    assert refreshed is not None
+    assert (
+        calendar.replace_busy_cache(
+            tutor_id=profile.tutor_id,
+            expected_version=connected.version,
+            intervals=busy,
+            refreshed_at=now,
+            expires_at=now + timedelta(minutes=10),
+        )
+        is None
+    )
+    snapshot = calendar.get_busy_snapshot(tutor_id=profile.tutor_id, now=now)
+    assert snapshot.freshness == "current"
+    assert snapshot.intervals == busy
+
+    with marketplace_engine.connect() as connection:
+        serialized = str(
+            connection.execute(
+                text("SELECT encrypted_refresh_token FROM marketplace_calendar_connection")
+            ).all()
+        )
+        columns = set(
+            connection.execute(
+                text(
+                    """
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name IN ('marketplace_calendar_connection',
+                                         'marketplace_calendar_busy_interval')
+                    """
+                )
+            ).scalars()
+        )
+    assert "refresh-token-secret" not in serialized
+    assert not {"summary", "description", "attendees", "location", "calendar_id"} & columns
+
+    reconnect = calendar.mark_failure(
+        tutor_id=profile.tutor_id,
+        expected_version=refreshed.version,
+        code="revoked",
+        reconnect_required=True,
+    )
+    assert reconnect is not None and reconnect.encrypted_refresh_token is None
+    assert (
+        calendar.get_busy_snapshot(tutor_id=profile.tutor_id, now=now).freshness
+        == "reconnect_required"
     )
 
 

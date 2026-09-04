@@ -71,3 +71,18 @@ test('public profile exposes a retry after either request fails', async () => {
   await fireEvent.press(screen.getByText('Try again'));
   await waitFor(() => expect(screen.getByText(tutor.headline)).toBeTruthy());
 });
+
+test('stale Google availability is never presented as silently bookable', async () => {
+  mockGetTutor.mockResolvedValue(tutor);
+  mockGetSlots.mockResolvedValue({
+    tutorId: tutor.tutorId,
+    timeZone: tutor.timeZone,
+    source: 'manual+google',
+    freshness: 'stale',
+    slots: [],
+  });
+  const screen = await render(<SafeAreaProvider initialMetrics={metrics}><TutorPublicProfileScreen /></SafeAreaProvider>);
+
+  await waitFor(() => expect(screen.getByText(/temporarily stale/)).toBeTruthy());
+  expect(screen.queryByText('No manual slots are available in the next two weeks.')).toBeNull();
+});

@@ -371,9 +371,39 @@ class TutorSlotsResponse(BaseModel):
 
     tutor_id: UUID
     time_zone: str
-    source: Literal["manual"] = "manual"
-    freshness: Literal["current"] = "current"
+    source: Literal["manual", "manual+google"] = "manual"
+    freshness: Literal["current", "stale", "reconnect_required"] = "current"
     slots: list[TutorSlotResponse]
+
+
+class CalendarOAuthStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    redirect_uri: str = Field(min_length=12, max_length=500)
+
+
+class CalendarOAuthStartResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    authorization_url: str
+    expires_at: datetime
+
+
+class CalendarOAuthCallbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: str = Field(min_length=32, max_length=2048)
+    code: str = Field(min_length=1, max_length=4096)
+    redirect_uri: str = Field(min_length=12, max_length=500)
+
+
+class CalendarConnectionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["disconnected", "connected", "stale", "reconnect_required"]
+    freshness: Literal["not_connected", "current", "stale", "reconnect_required"]
+    last_refreshed_at: datetime | None
+    safe_failure_code: str | None
 
 
 class PublicTutorResponse(BaseModel):

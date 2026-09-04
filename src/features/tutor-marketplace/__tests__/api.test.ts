@@ -4,8 +4,11 @@ import { setApiAccessTokenProvider } from '@/api/auth-token';
 import {
   getOwnTutorApplication,
   isTutorApplicationDraftValid,
+  parseCalendarConnection,
+  parseCalendarOAuthStart,
   parseTutorApplication,
   parseTutorProfile,
+  parseTutorSlots,
   TutorMarketplaceClientError,
 } from '@/features/tutor-marketplace/api';
 
@@ -28,6 +31,32 @@ const validApplication = {
   reviewed_at: null,
   decision_reason: null,
 };
+
+describe('calendar and slot response boundaries', () => {
+  test('preserves explicit Google freshness without accepting event content', () => {
+    expect(parseTutorSlots({
+      tutor_id: '2382f687-0ca0-4340-8e78-21ba32912869',
+      time_zone: 'America/Chicago', source: 'manual+google', freshness: 'stale', slots: [],
+    })).toMatchObject({ source: 'manual+google', freshness: 'stale' });
+    expect(parseTutorSlots({
+      tutor_id: '2382f687-0ca0-4340-8e78-21ba32912869',
+      time_zone: 'America/Chicago', source: 'google-event', freshness: 'current', slots: [],
+    })).toBeNull();
+    expect(parseCalendarConnection({
+      status: 'reconnect_required', freshness: 'reconnect_required',
+      last_refreshed_at: null, safe_failure_code: 'revoked',
+    })).toMatchObject({ status: 'reconnect_required', safeFailureCode: 'revoked' });
+  });
+
+  test('accepts only the reviewed Google authorization origin', () => {
+    const valid = {
+      authorization_url: 'https://accounts.google.com/o/oauth2/v2/auth?scope=freebusy',
+      expires_at: '2026-09-04T12:10:00Z',
+    };
+    expect(parseCalendarOAuthStart(valid)).not.toBeNull();
+    expect(parseCalendarOAuthStart({ ...valid, authorization_url: 'https://attacker.test/' })).toBeNull();
+  });
+});
 
 describe('parseTutorProfile', () => {
   const validProfile = {

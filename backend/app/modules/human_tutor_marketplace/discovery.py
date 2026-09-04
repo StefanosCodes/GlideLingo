@@ -25,6 +25,10 @@ from app.modules.human_tutor_marketplace.availability import (
     TimeInterval,
     derive_slots,
 )
+from app.modules.human_tutor_marketplace.calendar import (
+    CalendarBusySnapshot,
+    CalendarRepository,
+)
 from app.modules.human_tutor_marketplace.identity import derive_marketplace_actor_ref
 from app.modules.human_tutor_marketplace.schemas import (
     AvailabilityExceptionResponse,
@@ -634,10 +638,12 @@ class MarketplaceDiscoveryService:
         self,
         *,
         repository: DiscoveryRepository,
+        calendar_busy_reader: CalendarRepository | None = None,
         pseudonym_key: bytes | None,
         actor_allowlist: tuple[str, ...],
     ) -> None:
         self._repository = repository
+        self._calendar_busy_reader = calendar_busy_reader
         self._pseudonym_key = pseudonym_key
         self._actor_allowlist = frozenset(actor_allowlist)
 
@@ -715,12 +721,16 @@ class MarketplaceDiscoveryService:
                     require_public=True,
                 )
                 if schedule is not None and schedule.duration_minutes is not None:
+                    calendar = await self._busy_snapshot(tutor_id=tutor.tutor_id, now=now)
+                    if calendar.freshness in {"stale", "reconnect_required"}:
+                        continue
                     slots = self._derive(
                         schedule,
                         now=now,
                         starts_at=now,
                         ends_at=available_before,
                         limit=1,
+                        busy_intervals=calendar.intervals,
                     )
                     if slots:
                         available.append(tutor)
@@ -780,16 +790,28 @@ class MarketplaceDiscoveryService:
         )
         if schedule is None or schedule.duration_minutes is None:
             raise TutorApplicationNotFoundError
+        now = datetime.now(UTC)
+        calendar = await self._busy_snapshot(tutor_id=tutor_id, now=now)
+        if calendar.freshness in {"stale", "reconnect_required"}:
+            return TutorSlotsResponse(
+                tutor_id=tutor_id,
+                time_zone=schedule.time_zone,
+                source="manual+google",
+                freshness=calendar.freshness,
+                slots=[],
+            )
         slots = self._derive(
             schedule,
-            now=datetime.now(UTC),
+            now=now,
             starts_at=starts_at,
             ends_at=ends_at,
             limit=limit,
+            busy_intervals=calendar.intervals,
         )
         return TutorSlotsResponse(
             tutor_id=tutor_id,
             time_zone=schedule.time_zone,
+            source="manual+google" if calendar.freshness != "not_connected" else "manual",
             slots=[
                 TutorSlotResponse(starts_at=slot.starts_at, ends_at=slot.ends_at) for slot in slots
             ],
@@ -815,16 +837,28 @@ class MarketplaceDiscoveryService:
                 time_zone=schedule.time_zone,
                 slots=[],
             )
+        now = datetime.now(UTC)
+        calendar = await self._busy_snapshot(tutor_id=schedule.tutor_id, now=now)
+        if calendar.freshness in {"stale", "reconnect_required"}:
+            return TutorSlotsResponse(
+                tutor_id=schedule.tutor_id,
+                time_zone=schedule.time_zone,
+                source="manual+google",
+                freshness=calendar.freshness,
+                slots=[],
+            )
         slots = self._derive(
             schedule,
-            now=datetime.now(UTC),
+            now=now,
             starts_at=starts_at,
             ends_at=ends_at,
             limit=limit,
+            busy_intervals=calendar.intervals,
         )
         return TutorSlotsResponse(
             tutor_id=schedule.tutor_id,
             time_zone=schedule.time_zone,
+            source="manual+google" if calendar.freshness != "not_connected" else "manual",
             slots=[
                 TutorSlotResponse(starts_at=slot.starts_at, ends_at=slot.ends_at) for slot in slots
             ],
@@ -838,6 +872,7 @@ class MarketplaceDiscoveryService:
         starts_at: datetime,
         ends_at: datetime,
         limit: int,
+        busy_intervals: tuple[TimeInterval, ...] = (),
     ) -> tuple[TimeInterval, ...]:
         assert schedule.duration_minutes is not None
         return derive_slots(
@@ -870,6 +905,16 @@ class MarketplaceDiscoveryService:
             buffer_before_minutes=schedule.buffer_before_minutes,
             buffer_after_minutes=schedule.buffer_after_minutes,
             limit=limit,
+            busy_intervals=busy_intervals,
+        )
+
+    async def _busy_snapshot(self, *, tutor_id: UUID, now: datetime) -> CalendarBusySnapshot:
+        if self._calendar_busy_reader is None:
+            return CalendarBusySnapshot("not_connected", (), None)
+        return await asyncio.to_thread(
+            self._calendar_busy_reader.get_busy_snapshot,
+            tutor_id=tutor_id,
+            now=now,
         )
 
     def _actor_ref(self, principal: ClerkPrincipal) -> str:

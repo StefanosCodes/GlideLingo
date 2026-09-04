@@ -66,6 +66,13 @@ class Settings(BaseSettings):
     human_tutor_marketplace_enabled: bool = False
     human_tutor_marketplace_pseudonym_key: SecretStr | None = None
     human_tutor_marketplace_actor_allowlist: tuple[str, ...] = ()
+    human_tutor_google_calendar_enabled: bool = False
+    human_tutor_google_calendar_client_id: str | None = None
+    human_tutor_google_calendar_client_secret: SecretStr | None = None
+    human_tutor_google_calendar_token_key: SecretStr | None = None
+    human_tutor_google_calendar_state_key: SecretStr | None = None
+    human_tutor_google_calendar_redirect_allowlist: tuple[str, ...] = ()
+    human_tutor_google_calendar_timeout_seconds: float = Field(default=4.0, gt=0, le=6)
     clerk_issuer: str | None = None
     clerk_jwks_url: str | None = None
     clerk_audience: str | None = None
@@ -231,6 +238,55 @@ class Settings(BaseSettings):
                 "Clerk authentication must be configured when the human tutor marketplace "
                 "is enabled"
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_human_tutor_google_calendar_configuration(self) -> Self:
+        if not self.human_tutor_google_calendar_enabled:
+            return self
+        if not self.human_tutor_marketplace_enabled:
+            raise ValueError("Google Calendar requires the human tutor marketplace")
+        if (
+            self.human_tutor_google_calendar_client_id is None
+            or len(self.human_tutor_google_calendar_client_id.strip()) < 8
+        ):
+            raise ValueError("Google Calendar client ID is required when enabled")
+        for name, secret, minimum in (
+            ("Google Calendar client secret", self.human_tutor_google_calendar_client_secret, 16),
+            ("Google Calendar state key", self.human_tutor_google_calendar_state_key, 32),
+        ):
+            if secret is None or len(secret.get_secret_value().encode()) < minimum:
+                raise ValueError(f"{name} must be at least {minimum} bytes when enabled")
+        if self.human_tutor_google_calendar_token_key is None:
+            raise ValueError("Google Calendar token encryption key is required when enabled")
+        from app.modules.human_tutor_marketplace.calendar import decode_calendar_encryption_key
+
+        decode_calendar_encryption_key(
+            self.human_tutor_google_calendar_token_key.get_secret_value()
+        )
+        if not self.human_tutor_google_calendar_redirect_allowlist:
+            raise ValueError("Google Calendar redirect allowlist is required when enabled")
+        for redirect in self.human_tutor_google_calendar_redirect_allowlist:
+            parsed = urlsplit(redirect)
+            loopback = parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"}
+            native = (
+                parsed.scheme == "glidelingo"
+                and not parsed.netloc
+                and parsed.path == "/tutor/availability"
+            )
+            if (
+                (parsed.scheme != "https" and not loopback and not native)
+                or (not native and not parsed.netloc)
+                or parsed.username is not None
+                or parsed.password is not None
+                or not parsed.path.startswith("/")
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError(
+                    "Google Calendar redirects must be exact HTTPS, loopback HTTP, "
+                    "or the reviewed native URL"
+                )
         return self
 
     @property

@@ -47,6 +47,13 @@ from app.integrations.revenuecat.client import RevenueCatHttpClient
 from app.modules.billing.repository import PostgresEntitlementRepository
 from app.modules.billing.router import router as billing_router
 from app.modules.billing.service import BillingService
+from app.modules.human_tutor_marketplace.calendar import (
+    CalendarService,
+    CalendarTokenCipher,
+    GoogleCalendarHttpAdapter,
+    PostgresCalendarRepository,
+    decode_calendar_encryption_key,
+)
 from app.modules.human_tutor_marketplace.discovery import (
     MarketplaceDiscoveryService,
     PostgresDiscoveryRepository,
@@ -72,6 +79,7 @@ def create_app(
     billing_service: BillingService | None = None,
     human_tutor_marketplace_service: HumanTutorMarketplaceService | None = None,
     marketplace_discovery_service: MarketplaceDiscoveryService | None = None,
+    marketplace_calendar_service: CalendarService | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings.log_level)
@@ -113,10 +121,53 @@ def create_app(
             ),
             actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
         )
+    calendar_repository = PostgresCalendarRepository(engine=database_engine)
+    calendar_provider = (
+        GoogleCalendarHttpAdapter(
+            client_id=settings.human_tutor_google_calendar_client_id,
+            client_secret=settings.human_tutor_google_calendar_client_secret.get_secret_value(),
+            timeout_seconds=settings.human_tutor_google_calendar_timeout_seconds,
+        )
+        if marketplace_calendar_service is None
+        and settings.human_tutor_google_calendar_enabled
+        and settings.human_tutor_google_calendar_client_id is not None
+        and settings.human_tutor_google_calendar_client_secret is not None
+        else None
+    )
+    calendar_runtime = marketplace_calendar_service or CalendarService(
+        enabled=settings.human_tutor_google_calendar_enabled,
+        repository=calendar_repository,
+        provider=calendar_provider,
+        cipher=(
+            CalendarTokenCipher(
+                key=decode_calendar_encryption_key(
+                    settings.human_tutor_google_calendar_token_key.get_secret_value()
+                )
+            )
+            if settings.human_tutor_google_calendar_enabled
+            and settings.human_tutor_google_calendar_token_key is not None
+            else None
+        ),
+        state_key=(
+            settings.human_tutor_google_calendar_state_key.get_secret_value().encode()
+            if settings.human_tutor_google_calendar_state_key is not None
+            else None
+        ),
+        pseudonym_key=(
+            settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
+            if settings.human_tutor_marketplace_pseudonym_key is not None
+            else None
+        ),
+        actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+        redirect_allowlist=settings.human_tutor_google_calendar_redirect_allowlist,
+    )
     discovery_service = marketplace_discovery_service
     if discovery_service is None and settings.human_tutor_marketplace_enabled:
         discovery_service = MarketplaceDiscoveryService(
             repository=PostgresDiscoveryRepository(engine=database_engine),
+            calendar_busy_reader=(
+                calendar_repository if settings.human_tutor_google_calendar_enabled else None
+            ),
             pseudonym_key=(
                 settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
                 if settings.human_tutor_marketplace_pseudonym_key is not None
@@ -138,7 +189,11 @@ def create_app(
                     if revenuecat_provider is not None:
                         await revenuecat_provider.close()
                 finally:
-                    database_engine.dispose()
+                    try:
+                        if calendar_provider is not None:
+                            await calendar_provider.close()
+                    finally:
+                        database_engine.dispose()
 
     application = FastAPI(
         title="GlideLingo API",
@@ -206,6 +261,8 @@ def create_app(
         application.state.human_tutor_marketplace_service = marketplace_service
     if discovery_service is not None:
         application.state.marketplace_discovery_service = discovery_service
+    if marketplace_service is not None:
+        application.state.marketplace_calendar_service = calendar_runtime
     application.add_exception_handler(
         DependencyUnavailableError,
         dependency_unavailable_handler,

@@ -663,6 +663,97 @@ class RecoverMoneyOperationRequest(BaseModel):
     reason: str = Field(min_length=8, max_length=1000)
 
 
+class SaveLearningContextRequest(BaseModel):
+    """Learner-selected context; never an official progress or mastery record."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    selected_goal: str = Field(min_length=3, max_length=300)
+    language_code: str = Field(pattern=r"^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
+    course_id: str | None = Field(default=None, min_length=1, max_length=100)
+    course_title: str | None = Field(default=None, min_length=1, max_length=200)
+    capabilities: list[str] = Field(default_factory=list, max_length=12)
+    review_focus: list[str] = Field(default_factory=list, max_length=12)
+
+    @field_validator("capabilities", "review_focus")
+    @classmethod
+    def validate_context_items(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip() for value in values]
+        if any(len(value) < 2 or len(value) > 160 for value in normalized):
+            raise ValueError("learning context items must be between 2 and 160 characters")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("learning context items must be unique")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_course_pair(self) -> Self:
+        if (self.course_id is None) != (self.course_title is None):
+            raise ValueError("course_id and course_title must be supplied together")
+        return self
+
+
+class FollowUpRecommendationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["course_content", "free_text"]
+    content_reference: str | None = Field(default=None, min_length=1, max_length=160)
+    recommendation: str = Field(min_length=3, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_content_reference(self) -> Self:
+        if (self.kind == "course_content") != (self.content_reference is not None):
+            raise ValueError("only course-content recommendations require a content reference")
+        return self
+
+
+class SaveTutorFollowUpRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(min_length=8, max_length=2000)
+    recommendations: list[FollowUpRecommendationRequest] = Field(default_factory=list, max_length=8)
+
+
+class LearningBriefResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    selected_goal: str
+    language_code: str
+    course_id: str | None
+    course_title: str | None
+    capabilities: list[str]
+    review_focus: list[str]
+
+
+class FollowUpRecommendationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["course_content", "free_text"]
+    content_reference: str | None
+    recommendation: str
+
+
+class TutorFollowUpResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    follow_up_id: UUID
+    version: int = Field(ge=1)
+    summary: str
+    recommendations: list[FollowUpRecommendationResponse]
+    created_at: datetime
+    updated_at: datetime
+
+
+class LearningContextResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    booking_id: UUID
+    role: Literal["learner", "tutor"]
+    consent_state: Literal["not_shared", "granted", "revoked", "expired"]
+    access_expires_at: datetime | None
+    brief: LearningBriefResponse | None
+    follow_up: TutorFollowUpResponse | None
+
+
 class PublicTutorResponse(BaseModel):
     """Safe discovery projection with no application, actor, payout, or private-review facts."""
 

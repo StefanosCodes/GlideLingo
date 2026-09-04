@@ -11,6 +11,7 @@ import {
   parseMarketplaceMessagePage,
   parseMarketplaceMessageReport,
   parseMarketplaceBooking,
+  parseMarketplaceLearningContext,
   parseTutorApplication,
   parseTutorProfile,
   parseTutorSlots,
@@ -116,6 +117,34 @@ describe('booking response boundary', () => {
     expect(parseMarketplaceBooking(booking)).toMatchObject({ state: 'payment_pending', amountMinor: 2500 });
     expect(parseMarketplaceBooking({ ...booking, checkout_url: 'https://attacker.test/pay' })).toBeNull();
     expect(parseMarketplaceBooking({ ...booking, state: 'confirmed' })).toBeNull();
+  });
+});
+
+describe('learning context response boundary', () => {
+  const context = {
+    booking_id: 'f8d97d12-3e8a-49c6-bb22-55c49956c8b9',
+    role: 'tutor', consent_state: 'granted', access_expires_at: '2026-09-12T12:25:00Z',
+    brief: {
+      selected_goal: 'Practice a family introduction', language_code: 'el',
+      course_id: null, course_title: null,
+      capabilities: ['Introduce myself'], review_focus: ['Family vocabulary'],
+    },
+    follow_up: null,
+  };
+
+  test('accepts learner-selected no-course context without progress authority', () => {
+    expect(parseMarketplaceLearningContext(context)).toMatchObject({
+      role: 'tutor', consentState: 'granted',
+      brief: { courseId: null, selectedGoal: 'Practice a family introduction' },
+    });
+    expect(parseMarketplaceLearningContext({ ...context, mastery: 1 })).not.toHaveProperty('mastery');
+  });
+
+  test('requires a hidden brief after revocation or expiry', () => {
+    expect(parseMarketplaceLearningContext({
+      ...context, consent_state: 'revoked', access_expires_at: null, brief: null,
+    })).toMatchObject({ consentState: 'revoked', brief: null });
+    expect(parseMarketplaceLearningContext({ ...context, consent_state: 'revoked' })).toBeNull();
   });
 });
 

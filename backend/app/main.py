@@ -65,6 +65,10 @@ from app.modules.human_tutor_marketplace.discovery import (
     MarketplaceDiscoveryService,
     PostgresDiscoveryRepository,
 )
+from app.modules.human_tutor_marketplace.learning_bridge import (
+    LearningBridgeService,
+    PostgresLearningBridgeRepository,
+)
 from app.modules.human_tutor_marketplace.lifecycle import (
     LifecycleService,
     PostgresLifecycleRepository,
@@ -98,6 +102,7 @@ def create_app(
     marketplace_messaging_service: MessagingService | None = None,
     marketplace_booking_service: BookingService | None = None,
     marketplace_lifecycle_service: LifecycleService | None = None,
+    marketplace_learning_bridge_service: LearningBridgeService | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings.log_level)
@@ -257,6 +262,16 @@ def create_app(
         ),
         actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
     )
+    learning_bridge_runtime = marketplace_learning_bridge_service or LearningBridgeService(
+        enabled=settings.human_tutor_learning_bridge_enabled,
+        repository=PostgresLearningBridgeRepository(engine=database_engine),
+        pseudonym_key=(
+            settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
+            if settings.human_tutor_marketplace_pseudonym_key is not None
+            else None
+        ),
+        actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -352,6 +367,7 @@ def create_app(
     application.state.marketplace_messaging_service = messaging_runtime
     application.state.marketplace_booking_service = booking_runtime
     application.state.marketplace_lifecycle_service = lifecycle_runtime
+    application.state.marketplace_learning_bridge_service = learning_bridge_runtime
     application.state.marketplace_stripe_webhook_max_body_bytes = (
         settings.human_tutor_stripe_webhook_max_body_bytes
     )

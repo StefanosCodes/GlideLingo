@@ -196,6 +196,39 @@ export type MarketplaceBooking = {
 
 export type TutorEarnings = { pendingMinor: number; transferredMinor: number; currency: 'USD' };
 
+export type LearningBrief = {
+  selectedGoal: string;
+  languageCode: string;
+  courseId: string | null;
+  courseTitle: string | null;
+  capabilities: string[];
+  reviewFocus: string[];
+};
+
+export type TutorFollowUpRecommendation = {
+  kind: 'course_content' | 'free_text';
+  contentReference: string | null;
+  recommendation: string;
+};
+
+export type TutorFollowUp = {
+  followUpId: string;
+  version: number;
+  summary: string;
+  recommendations: TutorFollowUpRecommendation[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MarketplaceLearningContext = {
+  bookingId: string;
+  role: 'learner' | 'tutor';
+  consentState: 'not_shared' | 'granted' | 'revoked' | 'expired';
+  accessExpiresAt: string | null;
+  brief: LearningBrief | null;
+  followUp: TutorFollowUp | null;
+};
+
 export class TutorMarketplaceClientError extends Error {
   readonly kind: 'not-found' | 'forbidden' | 'conflict' | 'limited' | 'validation' | 'unavailable';
 
@@ -710,6 +743,76 @@ export async function getTutorEarnings(signal?: AbortSignal): Promise<TutorEarni
   });
 }
 
+export async function getMarketplaceLearningContext(
+  bookingId: string,
+  signal?: AbortSignal,
+): Promise<MarketplaceLearningContext> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({
+      parse: parseMarketplaceLearningContext,
+      path: `/v1/bookings/${bookingId}/learning-context`,
+      signal,
+    });
+    return result.data;
+  });
+}
+
+export async function saveMarketplaceLearningContext(
+  bookingId: string,
+  brief: LearningBrief,
+): Promise<MarketplaceLearningContext> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: {
+        selected_goal: brief.selectedGoal,
+        language_code: brief.languageCode,
+        course_id: brief.courseId,
+        course_title: brief.courseTitle,
+        capabilities: brief.capabilities,
+        review_focus: brief.reviewFocus,
+      },
+      parse: parseMarketplaceLearningContext,
+      path: `/v1/bookings/${bookingId}/learning-context`,
+    });
+    return result.data;
+  });
+}
+
+export async function revokeMarketplaceLearningContext(
+  bookingId: string,
+): Promise<MarketplaceLearningContext> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: {},
+      parse: parseMarketplaceLearningContext,
+      path: `/v1/bookings/${bookingId}/learning-context/revoke`,
+    });
+    return result.data;
+  });
+}
+
+export async function saveMarketplaceTutorFollowUp(
+  bookingId: string,
+  summary: string,
+  recommendations: TutorFollowUpRecommendation[],
+): Promise<MarketplaceLearningContext> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: {
+        summary,
+        recommendations: recommendations.map((item) => ({
+          kind: item.kind,
+          content_reference: item.contentReference,
+          recommendation: item.recommendation,
+        })),
+      },
+      parse: parseMarketplaceLearningContext,
+      path: `/v1/bookings/${bookingId}/tutor-follow-up`,
+    });
+    return result.data;
+  });
+}
+
 export async function listMarketplaceConversations(
   signal?: AbortSignal,
 ): Promise<MarketplaceConversation[]> {
@@ -1073,6 +1176,68 @@ export function parseMarketplaceBooking(value: unknown): MarketplaceBooking | nu
     scheduleVersion: value.schedule_version as number,
     moneyState: value.money_state as MarketplaceBooking['moneyState'],
     disputeDeadlineAt: value.dispute_deadline_at,
+  };
+}
+
+export function parseMarketplaceLearningContext(value: unknown): MarketplaceLearningContext | null {
+  if (!isRecord(value) || !isUuid(value.booking_id) ||
+      !['learner', 'tutor'].includes(value.role as string) ||
+      !['not_shared', 'granted', 'revoked', 'expired'].includes(value.consent_state as string) ||
+      !isNullableIsoTimestamp(value.access_expires_at)) return null;
+  let brief: LearningBrief | null = null;
+  if (value.brief !== null) {
+    if (!isRecord(value.brief) || !isBoundedString(value.brief.selected_goal, 300) ||
+        !isBoundedString(value.brief.language_code, 64) ||
+        !isNullableBoundedString(value.brief.course_id, 100) ||
+        !isNullableBoundedString(value.brief.course_title, 200) ||
+        ((value.brief.course_id === null) !== (value.brief.course_title === null)) ||
+        !isBoundedStringArrayAllowEmpty(value.brief.capabilities, 12, 160) ||
+        !isBoundedStringArrayAllowEmpty(value.brief.review_focus, 12, 160)) return null;
+    brief = {
+      selectedGoal: value.brief.selected_goal,
+      languageCode: value.brief.language_code,
+      courseId: value.brief.course_id,
+      courseTitle: value.brief.course_title,
+      capabilities: value.brief.capabilities,
+      reviewFocus: value.brief.review_focus,
+    };
+  }
+  let followUp: TutorFollowUp | null = null;
+  if (value.follow_up !== null) {
+    const follow = value.follow_up;
+    if (!isRecord(follow) || !isUuid(follow.follow_up_id) || !isPositiveVersion(follow.version) ||
+        !isBoundedString(follow.summary, 2000) || !isIsoTimestamp(follow.created_at) ||
+        !isIsoTimestamp(follow.updated_at) || !Array.isArray(follow.recommendations) ||
+        follow.recommendations.length > 8) return null;
+    const recommendations: TutorFollowUpRecommendation[] = [];
+    for (const item of follow.recommendations) {
+      if (!isRecord(item) || !['course_content', 'free_text'].includes(item.kind as string) ||
+          !isNullableBoundedString(item.content_reference, 160) ||
+          !isBoundedString(item.recommendation, 500) ||
+          ((item.kind === 'course_content') !== (item.content_reference !== null))) return null;
+      recommendations.push({
+        kind: item.kind as TutorFollowUpRecommendation['kind'],
+        contentReference: item.content_reference,
+        recommendation: item.recommendation,
+      });
+    }
+    followUp = {
+      followUpId: follow.follow_up_id,
+      version: follow.version,
+      summary: follow.summary,
+      recommendations,
+      createdAt: follow.created_at,
+      updatedAt: follow.updated_at,
+    };
+  }
+  if ((value.consent_state === 'granted') !== (brief !== null && value.access_expires_at !== null)) return null;
+  return {
+    bookingId: value.booking_id,
+    role: value.role as MarketplaceLearningContext['role'],
+    consentState: value.consent_state as MarketplaceLearningContext['consentState'],
+    accessExpiresAt: value.access_expires_at,
+    brief,
+    followUp,
   };
 }
 

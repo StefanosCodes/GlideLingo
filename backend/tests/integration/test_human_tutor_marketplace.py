@@ -23,6 +23,11 @@ from app.modules.human_tutor_marketplace.booking import (
 from app.modules.human_tutor_marketplace.calendar import PostgresCalendarRepository
 from app.modules.human_tutor_marketplace.discovery import PostgresDiscoveryRepository
 from app.modules.human_tutor_marketplace.identity import derive_marketplace_actor_ref
+from app.modules.human_tutor_marketplace.learning_bridge import (
+    FollowUpRecommendation,
+    LearningBrief,
+    PostgresLearningBridgeRepository,
+)
 from app.modules.human_tutor_marketplace.lifecycle import (
     PostgresLifecycleRepository,
     next_weekly_payout_at,
@@ -60,6 +65,9 @@ MIGRATIONS = (
     Path(__file__).resolve().parents[2]
     / "migrations"
     / "012_human_tutor_marketplace_lifecycle_money_reviews.sql",
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "013_human_tutor_marketplace_learning_bridge.sql",
 )
 SAFE_SEARCH_PATH = "pg_catalog, public, pg_temp"
 TUTOR_ACTOR = derive_marketplace_actor_ref(
@@ -349,6 +357,8 @@ def test_runtime_role_cannot_grant_capabilities_mutate_audit_or_run_ddl(
         f"VALUES ('{TUTOR_ACTOR}', 'review_tutor_applications')",
         "UPDATE marketplace_audit_event SET reason = 'tampered audit reason'",
         "DELETE FROM marketplace_audit_event",
+        "UPDATE marketplace_learning_context_audit SET event = 'revoked'",
+        "DELETE FROM marketplace_learning_context_audit",
         "ALTER TABLE marketplace_tutor_application ADD COLUMN forbidden text",
         "UPDATE marketplace_tutor_profile SET is_published = true",
     ]
@@ -2093,4 +2103,208 @@ def test_lifecycle_cutoffs_disputes_money_jobs_earnings_and_verified_reviews(
         ("transfer", 2000),
         ("reversal", 2000),
         ("refund", 2500),
+    ]
+
+
+@pytest.mark.integration
+def test_learning_context_consent_expiry_and_non_authoritative_follow_up(
+    marketplace_engine: Engine,
+) -> None:
+    _, booking, profile = create_bookable_tutor(marketplace_engine)
+    bridge = PostgresLearningBridgeRepository(engine=marketplace_engine)
+    lifecycle = PostgresLifecycleRepository(engine=marketplace_engine)
+    now = datetime.now(UTC)
+    starts_at = now + timedelta(days=2)
+    held = booking.create_hold(
+        learner_actor_ref=LEARNER_ACTOR,
+        tutor_id=profile.tutor_id,
+        starts_at=starts_at,
+        idempotency_key=uuid4(),
+        now=now,
+        hold_seconds=600,
+        environment="SANDBOX",
+        platform_account_id="acct_reviewed123",
+    )
+    assert held is not None
+    suffix = held.booking_id.hex[:12]
+    assert (
+        booking.attach_checkout(
+            booking_id=held.booking_id,
+            learner_actor_ref=LEARNER_ACTOR,
+            checkout=StripeCheckout(
+                checkout_id=f"cs_test_{suffix}",
+                url="https://checkout.stripe.com/c/pay/learning123",
+                payment_intent_id=f"pi_{suffix}",
+                status="open",
+                payment_status="unpaid",
+                livemode=False,
+                booking_id=held.booking_id,
+                platform_account_id="acct_reviewed123",
+                created_at=now,
+            ),
+        )
+        is not None
+    )
+    outcome, confirmed = booking.apply_checkout_observation(
+        checkout=StripeCheckout(
+            checkout_id=f"cs_test_{suffix}",
+            url=None,
+            payment_intent_id=f"pi_{suffix}",
+            status="complete",
+            payment_status="paid",
+            livemode=False,
+            booking_id=held.booking_id,
+            platform_account_id="acct_reviewed123",
+            created_at=now,
+        ),
+        payload_sha256=suffix.ljust(64, "d"),
+        event_id=f"evt_{suffix}",
+        event_type="checkout.session.completed",
+        source="provider_webhook",
+        environment="SANDBOX",
+        platform_account_id="acct_reviewed123",
+    )
+    assert outcome == "applied" and confirmed is not None
+
+    learner_empty = bridge.get_context(booking_id=held.booking_id, actor_ref=LEARNER_ACTOR, now=now)
+    tutor_empty = bridge.get_context(booking_id=held.booking_id, actor_ref=TUTOR_ACTOR, now=now)
+    assert learner_empty is not None and learner_empty.consent_state == "not_shared"
+    assert tutor_empty is not None and tutor_empty.brief is None
+    assert bridge.get_context(booking_id=held.booking_id, actor_ref=OUTSIDER_ACTOR, now=now) is None
+
+    no_course_brief = LearningBrief(
+        selected_goal="Speak confidently during a family introduction",
+        language_code="el",
+        course_id=None,
+        course_title=None,
+        capabilities=("Introduce myself", "Ask a follow-up question"),
+        review_focus=("Family vocabulary",),
+    )
+    assert bridge.save_context(
+        booking_id=held.booking_id,
+        learner_actor_ref=LEARNER_ACTOR,
+        brief=no_course_brief,
+        now=now,
+    )
+    tutor_shared = bridge.get_context(booking_id=held.booking_id, actor_ref=TUTOR_ACTOR, now=now)
+    assert tutor_shared is not None and tutor_shared.brief == no_course_brief
+    assert tutor_shared.access_expires_at == confirmed.ends_at + timedelta(days=7)
+
+    assert bridge.revoke_context(
+        booking_id=held.booking_id,
+        learner_actor_ref=LEARNER_ACTOR,
+        now=now + timedelta(minutes=1),
+    )
+    tutor_revoked = bridge.get_context(
+        booking_id=held.booking_id,
+        actor_ref=TUTOR_ACTOR,
+        now=now + timedelta(minutes=1),
+    )
+    assert tutor_revoked is not None
+    assert tutor_revoked.consent_state == "revoked" and tutor_revoked.brief is None
+    assert bridge.revoke_context(
+        booking_id=held.booking_id,
+        learner_actor_ref=LEARNER_ACTOR,
+        now=now + timedelta(minutes=1),
+    )
+    with marketplace_engine.connect() as connection:
+        preserved_goal = connection.execute(
+            text("SELECT selected_goal FROM marketplace_learning_context WHERE booking_id = :id"),
+            {"id": held.booking_id},
+        ).scalar_one()
+        audit_events = (
+            connection.execute(
+                text(
+                    "SELECT event FROM marketplace_learning_context_audit "
+                    "WHERE booking_id = :id ORDER BY version"
+                ),
+                {"id": held.booking_id},
+            )
+            .scalars()
+            .all()
+        )
+    assert preserved_goal == no_course_brief.selected_goal
+    assert audit_events == ["granted", "revoked"]
+
+    assert bridge.save_context(
+        booking_id=held.booking_id,
+        learner_actor_ref=LEARNER_ACTOR,
+        brief=no_course_brief,
+        now=now + timedelta(minutes=2),
+    )
+    new_start = starts_at + timedelta(days=1)
+    assert lifecycle.transition(
+        booking_id=held.booking_id,
+        actor_ref=LEARNER_ACTOR,
+        action="reschedule",
+        reason="Participants agreed to move the context-enabled booking.",
+        new_starts_at=new_start,
+        now=now,
+    )
+    after_reschedule = bridge.get_context(
+        booking_id=held.booking_id, actor_ref=TUTOR_ACTOR, now=now
+    )
+    assert after_reschedule is not None
+    assert after_reschedule.access_expires_at == new_start + timedelta(minutes=25, days=7)
+
+    completed_at = new_start + timedelta(hours=1)
+    assert lifecycle.transition(
+        booking_id=held.booking_id,
+        actor_ref=TUTOR_ACTOR,
+        action="complete",
+        reason="Tutor completed the context-enabled lesson.",
+        new_starts_at=None,
+        now=completed_at,
+    )
+    recommendation = FollowUpRecommendation(
+        kind="free_text",
+        content_reference=None,
+        recommendation="Practice the family introduction aloud twice this week.",
+    )
+    assert bridge.save_follow_up(
+        booking_id=held.booking_id,
+        tutor_actor_ref=TUTOR_ACTOR,
+        summary="The learner introduced family members and asked follow-up questions.",
+        recommendations=(recommendation,),
+        now=completed_at,
+    )
+    learner_follow_up = bridge.get_context(
+        booking_id=held.booking_id, actor_ref=LEARNER_ACTOR, now=completed_at
+    )
+    assert learner_follow_up is not None and learner_follow_up.follow_up is not None
+    assert learner_follow_up.follow_up.recommendations == (recommendation,)
+
+    expired = bridge.get_context(
+        booking_id=held.booking_id,
+        actor_ref=TUTOR_ACTOR,
+        now=new_start + timedelta(days=8),
+    )
+    assert expired is not None
+    assert expired.consent_state == "expired" and expired.brief is None
+    with pytest.raises(TutorApplicationConflictError):
+        bridge.save_follow_up(
+            booking_id=held.booking_id,
+            tutor_actor_ref=TUTOR_ACTOR,
+            summary="This update is outside the documented tutor access window.",
+            recommendations=(recommendation,),
+            now=new_start + timedelta(days=8),
+        )
+
+    with marketplace_engine.connect() as connection:
+        learning_tables = (
+            connection.execute(
+                text(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema = current_schema() "
+                    "AND table_name LIKE 'marketplace_%learning%' ORDER BY table_name"
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert learning_tables == [
+        "marketplace_learning_context",
+        "marketplace_learning_context_audit",
+        "marketplace_learning_context_capability",
+        "marketplace_learning_context_review_focus",
     ]

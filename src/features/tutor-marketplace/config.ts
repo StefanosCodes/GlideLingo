@@ -13,3 +13,7 @@ export function isHumanTutorMessagingEnabled(): boolean {
 export function isHumanTutorCommerceEnabled(): boolean {
   return process.env.EXPO_PUBLIC_HUMAN_TUTOR_COMMERCE_ENABLED === 'true';
 }
+
+export function isHumanTutorLearningBridgeEnabled(): boolean {
+  return process.env.EXPO_PUBLIC_HUMAN_TUTOR_LEARNING_BRIDGE_ENABLED === 'true';
+}

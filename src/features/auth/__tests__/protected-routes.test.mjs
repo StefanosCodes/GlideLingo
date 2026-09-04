@@ -57,6 +57,14 @@ test('marketplace message routes require sign-in plus both marketplace and messa
   }
 });
 
+test('booking learning context requires marketplace, commerce, and learning-bridge flags', () => {
+  const learningBridgeBlock = rootLayout.match(
+    /<Stack\.Protected guard=\{signedIn && isHumanTutorMarketplaceEnabled\(\) && isHumanTutorCommerceEnabled\(\) && isHumanTutorLearningBridgeEnabled\(\)\}>([\s\S]*?)<\/Stack\.Protected>/,
+  )?.[1];
+  assert.ok(learningBridgeBlock, 'learning-bridge feature-protected route group is missing');
+  assert.match(learningBridgeBlock, /name=["']booking-learning\/\[bookingId\]["']/);
+});
+
 test('previously distributed learning routes remain authenticated redirects', () => {
   assert.match(legacyPath, /<Redirect href=["']\/quests["']/);
   assert.match(legacyReview, /<Redirect href=["']\/phrases["']/);

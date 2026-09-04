@@ -17,7 +17,10 @@ jest.mock('@/components/screen-frame', () => {
   const { View } = jest.requireActual<typeof import('react-native')>('react-native');
   return { ScreenFrame: ({ children }: { children: React.ReactNode }) => <View>{children}</View> };
 });
-jest.mock('expo-router', () => ({ useLocalSearchParams: () => ({ bookingId: 'booking-1' }) }));
+jest.mock('expo-router', () => ({
+  useLocalSearchParams: () => ({ bookingId: 'booking-1' }),
+  useRouter: () => ({ push: jest.fn() }),
+}));
 jest.mock('@/hooks/use-theme', () => ({
   useTheme: () => jest.requireActual<typeof import('@/constants/theme')>('@/constants/theme').Colors.light,
 }));

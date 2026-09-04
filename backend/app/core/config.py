@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     human_tutor_message_retention_days: int | None = Field(default=None, ge=7, le=3650)
     human_tutor_approved_meeting_hosts: tuple[str, ...] = ()
     human_tutor_commerce_enabled: bool = False
+    human_tutor_learning_bridge_enabled: bool = False
     human_tutor_stripe_environment: Literal["SANDBOX", "PRODUCTION"] = "SANDBOX"
     human_tutor_stripe_secret_key: SecretStr | None = None
     human_tutor_stripe_webhook_secret: SecretStr | None = None
@@ -375,6 +376,14 @@ class Settings(BaseSettings):
                 or parsed.fragment
             ):
                 raise ValueError(f"Tutor Stripe {name} must be an exact HTTPS or loopback URL")
+        return self
+
+    @model_validator(mode="after")
+    def validate_human_tutor_learning_bridge_configuration(self) -> Self:
+        if not self.human_tutor_learning_bridge_enabled:
+            return self
+        if not self.human_tutor_marketplace_enabled or not self.human_tutor_commerce_enabled:
+            raise ValueError("Tutor learning context requires marketplace commerce")
         return self
 
     @property

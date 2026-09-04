@@ -80,6 +80,7 @@ def test_human_tutor_marketplace_is_disabled_by_default() -> None:
     assert settings.human_tutor_google_calendar_enabled is False
     assert settings.human_tutor_messaging_enabled is False
     assert settings.human_tutor_message_retention_days is None
+    assert settings.human_tutor_learning_bridge_enabled is False
 
 
 def test_enabled_human_tutor_marketplace_requires_fail_closed_configuration() -> None:
@@ -215,6 +216,11 @@ def test_tutor_commerce_requires_environment_matched_server_configuration() -> N
 
     assert settings.human_tutor_commerce_enabled is True
     assert settings.human_tutor_stripe_environment == "SANDBOX"
+
+
+def test_tutor_learning_bridge_requires_marketplace_commerce() -> None:
+    with pytest.raises(ValidationError, match="requires marketplace commerce"):
+        Settings(_env_file=None, human_tutor_learning_bridge_enabled=True)
 
 
 def test_enabled_revenuecat_requires_all_server_only_secrets() -> None:

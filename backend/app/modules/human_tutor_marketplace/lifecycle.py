@@ -171,6 +171,20 @@ class PostgresLifecycleRepository:
                         starts_at=new_starts_at,
                         ends_at=new_starts_at + duration,
                     )
+                    connection.execute(
+                        text(
+                            """
+                            UPDATE marketplace_learning_context
+                            SET access_expires_at = :access_expires_at, updated_at = :now
+                            WHERE booking_id = :id
+                            """
+                        ),
+                        {
+                            "access_expires_at": new_starts_at + duration + timedelta(days=7),
+                            "now": now,
+                            "id": booking_id,
+                        },
+                    )
                     self._audit(connection, row, "confirmed", actor_ref, "rescheduled")
                     self._system_message(connection, booking_id, "Booking time was rescheduled.")
                     return True

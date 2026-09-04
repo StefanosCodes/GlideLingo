@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, StyleSheet, TextInput, View } from 'react-native';
 
@@ -9,14 +9,16 @@ import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { Spacing } from '@/constants/theme';
 import { createMarketplaceBookingReview, getMarketplaceBooking, reconcileMarketplaceBooking, transitionMarketplaceBooking, type MarketplaceBooking } from '@/features/tutor-marketplace/api';
-import { isHumanTutorCommerceEnabled } from '@/features/tutor-marketplace/config';
+import { isHumanTutorCommerceEnabled, isHumanTutorLearningBridgeEnabled } from '@/features/tutor-marketplace/config';
 import { useTheme } from '@/hooks/use-theme';
 
 type State = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; booking: MarketplaceBooking };
 
 export function MarketplaceBookingDetailScreen() {
   const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
+  const router = useRouter();
   const enabled = isHumanTutorCommerceEnabled();
+  const learningBridgeEnabled = isHumanTutorLearningBridgeEnabled();
   const theme = useTheme();
   const sequence = useRef(0);
   const [retry, setRetry] = useState(0);
@@ -77,6 +79,7 @@ export function MarketplaceBookingDetailScreen() {
       {['payment_pending', 'payment_ambiguous'].includes(state.booking.state) ? <GlideButton disabled={working !== null} label={working === 'reconcile' ? 'Checking…' : 'Check payment status'} onPress={() => void reconcile()} variant="secondary" /> : null}
       {state.booking.meetingUrl ? <GlideButton label="Open approved meeting" onPress={() => void Linking.openURL(state.booking.meetingUrl!)} /> : null}
       {state.booking.ics ? <ThemedText type="footnote" themeColor="textSecondary">A bounded calendar event is ready for this confirmed lesson.</ThemedText> : null}
+      {learningBridgeEnabled && state.booking.role !== 'operator' && ['confirmed', 'completed', 'learner_no_show', 'disputed', 'resolved_refund', 'resolved_release'].includes(state.booking.state) ? <GlideButton label="Learning context and follow-up" onPress={() => router.push(`/booking-learning/${state.booking.bookingId}`)} variant="secondary" /> : null}
       {state.booking.state === 'confirmed' ? <>
         <TextInput accessibilityLabel="New booking start time" autoCapitalize="none" onChangeText={setNewStart} placeholder="2026-09-10T15:00:00Z" placeholderTextColor={theme.textTertiary} style={[styles.input, { borderColor: theme.border, color: theme.text }]} value={newStart} />
         <GlideButton disabled={working !== null || Number.isNaN(Date.parse(newStart))} label="Reschedule booking" onPress={() => void transition('reschedule', 'Participant requested a new lesson time.')} variant="secondary" />

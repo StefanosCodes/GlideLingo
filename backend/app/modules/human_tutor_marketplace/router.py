@@ -11,6 +11,11 @@ from app.core.errors import ErrorResponse
 from app.modules.human_tutor_marketplace.booking import BookingService
 from app.modules.human_tutor_marketplace.calendar import CalendarService
 from app.modules.human_tutor_marketplace.discovery import MarketplaceDiscoveryService
+from app.modules.human_tutor_marketplace.learning_bridge import (
+    FollowUpRecommendation,
+    LearningBridgeService,
+    LearningBrief,
+)
 from app.modules.human_tutor_marketplace.lifecycle import LifecycleService
 from app.modules.human_tutor_marketplace.messaging import MessagingService
 from app.modules.human_tutor_marketplace.schemas import (
@@ -33,6 +38,7 @@ from app.modules.human_tutor_marketplace.schemas import (
     CreateTutorApplicationRequest,
     DecideTutorApplicationRequest,
     DecideTutorCredentialRequest,
+    LearningContextResponse,
     ManualAvailabilityResponse,
     MarketplaceActionResponse,
     MarketplaceStripeWebhookResponse,
@@ -46,7 +52,9 @@ from app.modules.human_tutor_marketplace.schemas import (
     RecoverMoneyOperationRequest,
     ReplaceManualAvailabilityRequest,
     ResolveMessageReportRequest,
+    SaveLearningContextRequest,
     SaveTutorCredentialRequest,
+    SaveTutorFollowUpRequest,
     SaveTutorMeetingUrlRequest,
     SaveTutorOfferingRequest,
     SendMessageRequest,
@@ -128,6 +136,16 @@ def get_marketplace_lifecycle_service(request: Request) -> LifecycleService:
 MarketplaceLifecycleServiceDependency = Annotated[
     LifecycleService,
     Depends(get_marketplace_lifecycle_service),
+]
+
+
+def get_marketplace_learning_bridge_service(request: Request) -> LearningBridgeService:
+    return cast(LearningBridgeService, request.app.state.marketplace_learning_bridge_service)
+
+
+MarketplaceLearningBridgeServiceDependency = Annotated[
+    LearningBridgeService,
+    Depends(get_marketplace_learning_bridge_service),
 ]
 
 
@@ -309,6 +327,87 @@ async def recover_marketplace_money_operation(
         reason=request.reason,
     )
     return BookingResponse.model_validate(booking, from_attributes=True)
+
+
+@router.get(
+    "/bookings/{booking_id}/learning-context",
+    operation_id="get_marketplace_learning_context",
+    response_model=LearningContextResponse,
+)
+async def get_marketplace_learning_context(
+    booking_id: UUID,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceLearningBridgeServiceDependency,
+) -> LearningContextResponse:
+    view = await service.get_context(principal=principal, booking_id=booking_id)
+    return LearningContextResponse.model_validate(view, from_attributes=True)
+
+
+@router.post(
+    "/bookings/{booking_id}/learning-context",
+    operation_id="save_marketplace_learning_context",
+    response_model=LearningContextResponse,
+)
+async def save_marketplace_learning_context(
+    booking_id: UUID,
+    request: SaveLearningContextRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceLearningBridgeServiceDependency,
+) -> LearningContextResponse:
+    view = await service.save_context(
+        principal=principal,
+        booking_id=booking_id,
+        brief=LearningBrief(
+            selected_goal=request.selected_goal,
+            language_code=request.language_code,
+            course_id=request.course_id,
+            course_title=request.course_title,
+            capabilities=tuple(request.capabilities),
+            review_focus=tuple(request.review_focus),
+        ),
+    )
+    return LearningContextResponse.model_validate(view, from_attributes=True)
+
+
+@router.post(
+    "/bookings/{booking_id}/learning-context/revoke",
+    operation_id="revoke_marketplace_learning_context",
+    response_model=LearningContextResponse,
+)
+async def revoke_marketplace_learning_context(
+    booking_id: UUID,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceLearningBridgeServiceDependency,
+) -> LearningContextResponse:
+    view = await service.revoke_context(principal=principal, booking_id=booking_id)
+    return LearningContextResponse.model_validate(view, from_attributes=True)
+
+
+@router.post(
+    "/bookings/{booking_id}/tutor-follow-up",
+    operation_id="save_marketplace_tutor_follow_up",
+    response_model=LearningContextResponse,
+)
+async def save_marketplace_tutor_follow_up(
+    booking_id: UUID,
+    request: SaveTutorFollowUpRequest,
+    principal: CurrentClerkPrincipal,
+    service: MarketplaceLearningBridgeServiceDependency,
+) -> LearningContextResponse:
+    view = await service.save_follow_up(
+        principal=principal,
+        booking_id=booking_id,
+        summary=request.summary,
+        recommendations=tuple(
+            FollowUpRecommendation(
+                kind=item.kind,
+                content_reference=item.content_reference,
+                recommendation=item.recommendation,
+            )
+            for item in request.recommendations
+        ),
+    )
+    return LearningContextResponse.model_validate(view, from_attributes=True)
 
 
 @router.post(

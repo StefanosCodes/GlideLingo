@@ -1,6 +1,7 @@
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from datetime import date, time
 from pathlib import Path
 from threading import Barrier
 from typing import Any, cast
@@ -11,22 +12,28 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import DBAPIError
 
 from app.core.config import Settings
+from app.modules.human_tutor_marketplace.discovery import PostgresDiscoveryRepository
 from app.modules.human_tutor_marketplace.identity import derive_marketplace_actor_ref
 from app.modules.human_tutor_marketplace.repository import (
     PostgresTutorApplicationRepository,
     StoredTutorProfile,
 )
 from app.modules.human_tutor_marketplace.schemas import (
+    AvailabilityRuleInput,
     ChangeTutorStatusRequest,
     CreateTutorApplicationRequest,
+    ReplaceManualAvailabilityRequest,
     SaveTutorCredentialRequest,
     SaveTutorOfferingRequest,
     UpdateTutorApplicationDraftRequest,
     UpdateTutorProfileDraftRequest,
 )
 
-MIGRATION = (
-    Path(__file__).resolve().parents[2] / "migrations" / "006_human_tutor_marketplace_core.sql"
+MIGRATIONS = (
+    Path(__file__).resolve().parents[2] / "migrations" / "006_human_tutor_marketplace_core.sql",
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "008_human_tutor_marketplace_discovery_availability.sql",
 )
 SAFE_SEARCH_PATH = "pg_catalog, public, pg_temp"
 TUTOR_ACTOR = derive_marketplace_actor_ref(
@@ -80,11 +87,12 @@ def marketplace_engine() -> Generator[Engine]:
         try:
             cursor.execute("SET ROLE cloudsqlsuperuser")
             cursor.execute(f'SET search_path TO "{schema}", public')
-            migration_sql = MIGRATION.read_text(encoding="utf-8").replace(
-                f"SET search_path = {SAFE_SEARCH_PATH}",
-                f'SET search_path = pg_catalog, "{schema}", public, pg_temp',
-            )
-            cursor.execute(migration_sql)
+            for migration in MIGRATIONS:
+                migration_sql = migration.read_text(encoding="utf-8").replace(
+                    f"SET search_path = {SAFE_SEARCH_PATH}",
+                    f'SET search_path = pg_catalog, "{schema}", public, pg_temp',
+                )
+                cursor.execute(migration_sql)
             cursor.execute("RESET ROLE")
             cursor.execute(f'SET search_path TO "{schema}", public')
             cursor.executemany(
@@ -384,6 +392,7 @@ def test_private_supply_workspace_enforces_policy_and_publication_gates(
         ),
     )
     assert edited is not None
+
     assert (
         repository.update_draft(
             actor_ref=TUTOR_ACTOR,
@@ -548,6 +557,112 @@ def test_private_supply_workspace_enforces_policy_and_publication_gates(
     assert "offering_draft_saved" in audit_actions
     assert "application_suspended" in audit_actions
     assert "application_reinstated" in audit_actions
+
+
+@pytest.mark.integration
+def test_discovery_availability_and_favorites_use_only_eligible_public_supply(
+    marketplace_engine: Engine,
+) -> None:
+    core = PostgresTutorApplicationRepository(engine=marketplace_engine)
+    discovery = PostgresDiscoveryRepository(engine=marketplace_engine)
+    application_id, profile = create_approved_tutor(core)
+    with marketplace_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE marketplace_tutor_profile SET payout_ready = true "
+                "WHERE tutor_id = :tutor_id"
+            ),
+            {"tutor_id": profile.tutor_id},
+        )
+    offered = core.save_offering(
+        actor_ref=TUTOR_ACTOR,
+        request=SaveTutorOfferingRequest(
+            expected_version=0,
+            title="Practical Greek conversation",
+            duration_minutes=25,
+            amount_minor=2500,
+            currency="USD",
+        ),
+    )
+    assert offered is not None and offered.offering is not None
+    published = core.set_publication(
+        actor_ref=TUTOR_ACTOR,
+        expected_profile_version=offered.version,
+        expected_offering_version=offered.offering.version,
+        publish=True,
+    )
+    assert published is not None
+    schedule = discovery.replace_manual_availability(
+        actor_ref=TUTOR_ACTOR,
+        request=ReplaceManualAvailabilityRequest(
+            expected_profile_version=published.version,
+            lead_time_minutes=60,
+            buffer_before_minutes=5,
+            buffer_after_minutes=10,
+            dialects=["el-cy"],
+            rules=[
+                AvailabilityRuleInput(
+                    weekday=4,
+                    start_local=time(9),
+                    end_local=time(12),
+                    effective_from=date(2026, 1, 1),
+                )
+            ],
+            exceptions=[],
+        ),
+    )
+    learner = derive_marketplace_actor_ref(
+        key=b"marketplace-integration-pseudonym-key-32-bytes",
+        clerk_user_id="user_learner_integration",
+    )
+    tutors = discovery.list_public_tutors(
+        learner_actor_ref=learner,
+        language="el-gr",
+        dialect="el-cy",
+        specialty="conversation",
+        duration_minutes=25,
+        maximum_amount_minor=3000,
+        verified_credential=False,
+    )
+    assert schedule is not None
+    assert schedule.dialects == ("el-cy",)
+    assert [tutor.tutor_id for tutor in tutors] == [profile.tutor_id]
+    assert tutors[0].rating is None
+    assert discovery.set_favorite(
+        learner_actor_ref=learner,
+        tutor_id=profile.tutor_id,
+        favorite=True,
+    )
+    favorite = discovery.get_public_tutor(
+        learner_actor_ref=learner,
+        tutor_id=profile.tutor_id,
+    )
+    assert favorite is not None and favorite.is_favorite
+
+    application = core.get_by_id(application_id=application_id)
+    assert application is not None
+    suspended = core.change_tutor_status(
+        application_id=application_id,
+        operator_actor_ref=OPERATOR_ACTOR,
+        request=ChangeTutorStatusRequest(
+            expected_version=application.version,
+            action="suspend",
+            reason="Safety review requires the tutor to become private.",
+        ),
+    )
+    assert suspended is not None
+    assert (
+        discovery.list_public_tutors(
+            learner_actor_ref=learner,
+            language=None,
+            dialect=None,
+            specialty=None,
+            duration_minutes=None,
+            maximum_amount_minor=None,
+            verified_credential=False,
+        )
+        == []
+    )
 
 
 @pytest.mark.integration

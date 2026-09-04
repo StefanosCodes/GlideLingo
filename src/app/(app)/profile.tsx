@@ -176,11 +176,15 @@ export default function ProfileScreen() {
           <ThemedText type="eyebrow" themeColor="textSecondary">
             HUMAN TUTOR MARKETPLACE
           </ThemedText>
-          <ThemedText type="title3">Interested in teaching?</ThemedText>
+          <ThemedText type="title3">Learn with or become a human tutor.</ThemedText>
           <ThemedText type="footnote" themeColor="textSecondary">
             Create a private tutor application for the invitation-only marketplace.
           </ThemedText>
-          <GlideButton label="Apply to become a tutor" onPress={() => router.push('/tutor/apply')} variant="secondary" />
+          <View style={styles.legacyActions}>
+            <GlideButton label="Find a tutor" onPress={() => router.push('/tutors')} variant="secondary" />
+            <GlideButton label="Apply to become a tutor" onPress={() => router.push('/tutor/apply')} variant="secondary" />
+            <GlideButton label="Manage tutor availability" onPress={() => router.push('/tutor/availability')} variant="tertiary" />
+          </View>
         </GlideSurface>
       ) : null}
 

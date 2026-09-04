@@ -104,3 +104,30 @@ test('GET also attaches the current bearer without a content header', async () =
   );
   cleanup();
 });
+
+test('GET encodes structured query values without allowing a path to change origin', async () => {
+  const cleanup = setApiAccessTokenProvider(async () => 'query-user-token');
+  fetchMock.mockImplementation(async () =>
+    ({
+      headers: { get: () => null },
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true }),
+    }) as unknown as Response,
+  );
+
+  await getJson({
+    parse: (value) => value,
+    path: '/v1/tutors',
+    query: { language: 'el gr', limit: 20, verified: true, omitted: undefined },
+  });
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    'http://localhost:8123/v1/tutors?language=el+gr&limit=20&verified=true',
+    expect.any(Object),
+  );
+  await expect(
+    getJson({ parse: (value) => value, path: '//attacker.example/path' }),
+  ).rejects.toMatchObject({ kind: 'configuration' } satisfies Partial<ApiClientError>);
+  cleanup();
+});

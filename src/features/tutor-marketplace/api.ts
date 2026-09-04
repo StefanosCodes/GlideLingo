@@ -85,6 +85,46 @@ export type TutorApplicationQueue = {
   hasMore: boolean;
 };
 
+export type PublicTutor = {
+  tutorId: string;
+  headline: string;
+  biography: string;
+  timeZone: string;
+  languages: string[];
+  dialects: string[];
+  specialties: string[];
+  verifiedCredentials: string[];
+  offeringId: string;
+  offeringTitle: string;
+  durationMinutes: 25 | 50;
+  amountMinor: number;
+  currency: 'USD';
+  rating: number | null;
+  ratingCount: number;
+  isFavorite: boolean;
+};
+
+export type TutorSearchResult = { items: PublicTutor[]; nextCursor: string | null };
+
+export type ManualAvailabilityDraft = {
+  expectedProfileVersion: number;
+  leadTimeMinutes: number;
+  bufferBeforeMinutes: number;
+  bufferAfterMinutes: number;
+  dialects: string[];
+  rules: { weekday: number; startLocal: string; endLocal: string; effectiveFrom: string; effectiveUntil: string | null }[];
+  exceptions: { localDate: string; startLocal: string; endLocal: string; kind: 'available' | 'unavailable' }[];
+};
+
+export type ManualAvailability = Omit<ManualAvailabilityDraft, 'expectedProfileVersion'> & {
+  tutorId: string;
+  profileVersion: number;
+  timeZone: string;
+};
+
+export type TutorSlot = { startsAt: string; endsAt: string };
+export type TutorSlots = { tutorId: string; timeZone: string; source: 'manual'; freshness: 'current'; slots: TutorSlot[] };
+
 export class TutorMarketplaceClientError extends Error {
   readonly kind: 'not-found' | 'forbidden' | 'conflict' | 'validation' | 'unavailable';
 
@@ -255,8 +295,136 @@ export async function listTutorApplicationsForReview(
   return runMarketplaceRequest(async () => {
     const result = await getJson({
       parse: parseTutorApplicationQueue,
-      path: `/v1/marketplace-operations/tutor-applications?offset=${offset}&limit=${limit}`,
+      path: '/v1/marketplace-operations/tutor-applications',
+      query: { limit, offset },
       signal,
+    });
+    return result.data;
+  });
+}
+
+export async function listPublicTutors(
+  filters: {
+    language?: string;
+    dialect?: string;
+    specialty?: string;
+    durationMinutes?: 25 | 50;
+    maximumAmountMinor?: number;
+    verifiedCredential?: boolean;
+    favorite?: boolean;
+    availableBefore?: string;
+    cursor?: string;
+    limit?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<TutorSearchResult> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({
+      parse: parseTutorSearchResult,
+      path: '/v1/tutors',
+      query: {
+        available_before: filters.availableBefore,
+        cursor: filters.cursor,
+        dialect: filters.dialect,
+        duration_minutes: filters.durationMinutes,
+        favorite: filters.favorite,
+        language: filters.language,
+        limit: filters.limit ?? 20,
+        maximum_amount_minor: filters.maximumAmountMinor,
+        specialty: filters.specialty,
+        verified_credential: filters.verifiedCredential,
+      },
+      signal,
+    });
+    return result.data;
+  });
+}
+
+export async function getPublicTutor(tutorId: string, signal?: AbortSignal): Promise<PublicTutor> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({ parse: parsePublicTutor, path: `/v1/tutors/${tutorId}`, signal });
+    return result.data;
+  });
+}
+
+export async function setPublicTutorFavorite(tutorId: string, favorite: boolean): Promise<PublicTutor> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: { favorite },
+      parse: parsePublicTutor,
+      path: `/v1/tutors/${tutorId}/favorite`,
+    });
+    return result.data;
+  });
+}
+
+export async function listPublicTutorSlots(
+  tutorId: string,
+  startsAt: string,
+  endsAt: string,
+  signal?: AbortSignal,
+): Promise<TutorSlots> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({
+      parse: parseTutorSlots,
+      path: `/v1/tutors/${tutorId}/slots`,
+      query: { ends_at: endsAt, starts_at: startsAt },
+      signal,
+    });
+    return result.data;
+  });
+}
+
+export async function getOwnManualAvailability(signal?: AbortSignal): Promise<ManualAvailability> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({ parse: parseManualAvailability, path: '/v1/tutor-availability', signal });
+    return result.data;
+  });
+}
+
+export async function previewOwnManualSlots(
+  startsAt: string,
+  endsAt: string,
+  signal?: AbortSignal,
+): Promise<TutorSlots> {
+  return runMarketplaceRequest(async () => {
+    const result = await getJson({
+      parse: parseTutorSlots,
+      path: '/v1/tutor-availability/preview',
+      query: { ends_at: endsAt, starts_at: startsAt },
+      signal,
+    });
+    return result.data;
+  });
+}
+
+export async function replaceOwnManualAvailability(
+  draft: ManualAvailabilityDraft,
+): Promise<ManualAvailability> {
+  return runMarketplaceRequest(async () => {
+    const result = await postJson({
+      body: {
+        expected_profile_version: draft.expectedProfileVersion,
+        lead_time_minutes: draft.leadTimeMinutes,
+        buffer_before_minutes: draft.bufferBeforeMinutes,
+        buffer_after_minutes: draft.bufferAfterMinutes,
+        dialects: draft.dialects,
+        rules: draft.rules.map((rule) => ({
+          weekday: rule.weekday,
+          start_local: rule.startLocal,
+          end_local: rule.endLocal,
+          effective_from: rule.effectiveFrom,
+          effective_until: rule.effectiveUntil,
+        })),
+        exceptions: draft.exceptions.map((exception) => ({
+          local_date: exception.localDate,
+          start_local: exception.startLocal,
+          end_local: exception.endLocal,
+          kind: exception.kind,
+        })),
+      },
+      parse: parseManualAvailability,
+      path: '/v1/tutor-availability',
     });
     return result.data;
   });
@@ -380,6 +548,83 @@ export function parseTutorApplicationQueue(value: unknown): TutorApplicationQueu
     offset: value.offset as number,
     limit: value.limit as number,
     hasMore: value.has_more,
+  };
+}
+
+export function parsePublicTutor(value: unknown): PublicTutor | null {
+  if (
+    !isRecord(value) || !isUuid(value.tutor_id) || !isBoundedString(value.headline, 80) ||
+    !isBoundedString(value.biography, 1000) || !isBoundedString(value.time_zone, 64) ||
+    !isBoundedStringArrayAllowEmpty(value.languages, 8, 64) ||
+    !isBoundedStringArrayAllowEmpty(value.dialects, 8, 64) ||
+    !isBoundedStringArrayAllowEmpty(value.specialties, 12, 64) ||
+    !isBoundedStringArrayAllowEmpty(value.verified_credentials, 8, 100) ||
+    !isUuid(value.offering_id) || !isBoundedString(value.offering_title, 100) ||
+    (value.duration_minutes !== 25 && value.duration_minutes !== 50) ||
+    !Number.isSafeInteger(value.amount_minor) || (value.amount_minor as number) < 500 ||
+    value.currency !== 'USD' ||
+    !(value.rating === null || (typeof value.rating === 'number' && value.rating >= 1 && value.rating <= 5)) ||
+    !Number.isSafeInteger(value.rating_count) || (value.rating_count as number) < 0 ||
+    typeof value.is_favorite !== 'boolean'
+  ) return null;
+  return {
+    tutorId: value.tutor_id, headline: value.headline, biography: value.biography,
+    timeZone: value.time_zone, languages: [...value.languages], dialects: [...value.dialects],
+    specialties: [...value.specialties], verifiedCredentials: [...value.verified_credentials],
+    offeringId: value.offering_id, offeringTitle: value.offering_title,
+    durationMinutes: value.duration_minutes, amountMinor: value.amount_minor as number,
+    currency: value.currency, rating: value.rating as number | null,
+    ratingCount: value.rating_count as number, isFavorite: value.is_favorite,
+  };
+}
+
+export function parseTutorSearchResult(value: unknown): TutorSearchResult | null {
+  if (!isRecord(value) || !Array.isArray(value.items) ||
+      !(value.next_cursor === null || (typeof value.next_cursor === 'string' && value.next_cursor.length <= 512))) return null;
+  const items = value.items.map(parsePublicTutor);
+  if (items.some((item) => item === null)) return null;
+  return { items: items as PublicTutor[], nextCursor: value.next_cursor };
+}
+
+export function parseTutorSlots(value: unknown): TutorSlots | null {
+  if (!isRecord(value) || !isUuid(value.tutor_id) || !isBoundedString(value.time_zone, 64) ||
+      value.source !== 'manual' || value.freshness !== 'current' || !Array.isArray(value.slots) ||
+      value.slots.length > 256) return null;
+  const slots = value.slots.map((slot): TutorSlot | null => {
+    if (!isRecord(slot) || !isIsoTimestamp(slot.starts_at) || !isIsoTimestamp(slot.ends_at) ||
+        Date.parse(slot.starts_at) >= Date.parse(slot.ends_at)) return null;
+    return { startsAt: slot.starts_at, endsAt: slot.ends_at };
+  });
+  if (slots.some((slot) => slot === null)) return null;
+  return { tutorId: value.tutor_id, timeZone: value.time_zone, source: 'manual', freshness: 'current', slots: slots as TutorSlot[] };
+}
+
+export function parseManualAvailability(value: unknown): ManualAvailability | null {
+  if (!isRecord(value) || !isUuid(value.tutor_id) || !isPositiveVersion(value.profile_version) ||
+      !isBoundedString(value.time_zone, 64) || !Number.isSafeInteger(value.lead_time_minutes) ||
+      !Number.isSafeInteger(value.buffer_before_minutes) || !Number.isSafeInteger(value.buffer_after_minutes) ||
+      !isBoundedStringArrayAllowEmpty(value.dialects, 8, 64) || !Array.isArray(value.rules) ||
+      value.rules.length > 28 || !Array.isArray(value.exceptions) || value.exceptions.length > 64) return null;
+  const rules = value.rules.map((rule) => {
+    if (!isRecord(rule) || !Number.isSafeInteger(rule.weekday) || (rule.weekday as number) < 0 ||
+        (rule.weekday as number) > 6 || !isLocalTime(rule.start_local) || !isLocalTime(rule.end_local) ||
+        !isDate(rule.effective_from) || !(rule.effective_until === null || isDate(rule.effective_until))) return null;
+    return { weekday: rule.weekday as number, startLocal: rule.start_local, endLocal: rule.end_local,
+      effectiveFrom: rule.effective_from, effectiveUntil: rule.effective_until as string | null };
+  });
+  const exceptions = value.exceptions.map((exception) => {
+    if (!isRecord(exception) || !isDate(exception.local_date) || !isLocalTime(exception.start_local) ||
+        !isLocalTime(exception.end_local) || (exception.kind !== 'available' && exception.kind !== 'unavailable')) return null;
+    return { localDate: exception.local_date, startLocal: exception.start_local,
+      endLocal: exception.end_local, kind: exception.kind };
+  });
+  if (rules.some((rule) => rule === null) || exceptions.some((exception) => exception === null)) return null;
+  return {
+    tutorId: value.tutor_id, profileVersion: value.profile_version as number, timeZone: value.time_zone,
+    leadTimeMinutes: value.lead_time_minutes as number,
+    bufferBeforeMinutes: value.buffer_before_minutes as number,
+    bufferAfterMinutes: value.buffer_after_minutes as number, dialects: [...value.dialects],
+    rules: rules as ManualAvailability['rules'], exceptions: exceptions as ManualAvailability['exceptions'],
   };
 }
 
@@ -622,6 +867,18 @@ function isBoundedStringArray(value: unknown, maxItems: number, maxLength: numbe
     value.length <= maxItems &&
     value.every((item) => isBoundedString(item, maxLength))
   );
+}
+
+function isBoundedStringArrayAllowEmpty(value: unknown, maxItems: number, maxLength: number): value is string[] {
+  return Array.isArray(value) && value.length <= maxItems && value.every((item) => isBoundedString(item, maxLength));
+}
+
+function isLocalTime(value: unknown): value is string {
+  return typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value);
+}
+
+function isDate(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
 }
 
 function isNullableBoundedString(value: unknown, maxLength: number): value is string | null {

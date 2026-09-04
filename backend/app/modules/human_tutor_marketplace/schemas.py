@@ -1,6 +1,6 @@
 """Public contracts for the first human tutor marketplace vertical slice."""
 
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Annotated, Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -263,3 +263,150 @@ class TutorProfileResponse(BaseModel):
     publication_blockers: list[PublicationBlocker]
     credential: TutorCredentialResponse | None = None
     offering: TutorOfferingResponse | None = None
+
+
+class AvailabilityRuleInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    weekday: int = Field(ge=0, le=6)
+    start_local: time
+    end_local: time
+    effective_from: date
+    effective_until: date | None = None
+
+    @field_validator("end_local", mode="after")
+    @classmethod
+    def validate_interval(cls, value: time, info: object) -> time:
+        start = getattr(info, "data", {}).get("start_local")
+        if isinstance(start, time) and value <= start:
+            raise ValueError("end_local must be after start_local")
+        return value
+
+
+class AvailabilityExceptionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    local_date: date
+    start_local: time
+    end_local: time
+    kind: Literal["available", "unavailable"]
+
+    @field_validator("end_local", mode="after")
+    @classmethod
+    def validate_interval(cls, value: time, info: object) -> time:
+        start = getattr(info, "data", {}).get("start_local")
+        if isinstance(start, time) and value <= start:
+            raise ValueError("end_local must be after start_local")
+        return value
+
+
+class ReplaceManualAvailabilityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_profile_version: int = Field(ge=1)
+    lead_time_minutes: int = Field(ge=60, le=10080)
+    buffer_before_minutes: int = Field(ge=0, le=120)
+    buffer_after_minutes: int = Field(ge=0, le=120)
+    dialects: list[LanguageCode] = Field(default_factory=list, max_length=8)
+    rules: list[AvailabilityRuleInput] = Field(max_length=28)
+    exceptions: list[AvailabilityExceptionInput] = Field(default_factory=list, max_length=64)
+
+    @field_validator("dialects", mode="after")
+    @classmethod
+    def normalize_dialects(cls, values: list[str]) -> list[str]:
+        normalized = [value.lower() for value in values]
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("dialects must be unique")
+        if any("-" not in value for value in normalized):
+            raise ValueError("dialects must identify a language variety")
+        return normalized
+
+
+class AvailabilityRuleResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rule_id: UUID
+    weekday: int = Field(ge=0, le=6)
+    start_local: time
+    end_local: time
+    effective_from: date
+    effective_until: date | None
+    time_zone: str
+
+
+class AvailabilityExceptionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    exception_id: UUID
+    local_date: date
+    start_local: time
+    end_local: time
+    kind: Literal["available", "unavailable"]
+    time_zone: str
+
+
+class ManualAvailabilityResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tutor_id: UUID
+    profile_version: int = Field(ge=1)
+    time_zone: str
+    lead_time_minutes: int
+    buffer_before_minutes: int
+    buffer_after_minutes: int
+    dialects: list[str]
+    rules: list[AvailabilityRuleResponse]
+    exceptions: list[AvailabilityExceptionResponse]
+
+
+class TutorSlotResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    starts_at: datetime
+    ends_at: datetime
+
+
+class TutorSlotsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tutor_id: UUID
+    time_zone: str
+    source: Literal["manual"] = "manual"
+    freshness: Literal["current"] = "current"
+    slots: list[TutorSlotResponse]
+
+
+class PublicTutorResponse(BaseModel):
+    """Safe discovery projection with no application, actor, payout, or private-review facts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tutor_id: UUID
+    headline: str
+    biography: str
+    time_zone: str
+    languages: list[str]
+    dialects: list[str]
+    specialties: list[str]
+    verified_credentials: list[str]
+    offering_id: UUID
+    offering_title: str
+    duration_minutes: Literal[25, 50]
+    amount_minor: int
+    currency: Currency
+    rating: float | None
+    rating_count: int = Field(ge=0)
+    is_favorite: bool
+
+
+class TutorSearchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[PublicTutorResponse]
+    next_cursor: str | None
+
+
+class SetTutorFavoriteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    favorite: bool

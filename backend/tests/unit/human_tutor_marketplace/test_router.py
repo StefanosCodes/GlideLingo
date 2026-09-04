@@ -698,13 +698,15 @@ def test_openapi_marks_every_marketplace_operation_as_clerk_authenticated() -> N
     paths = {
         path: operations
         for path, operations in schema["paths"].items()
-        if path.startswith("/v1/tutor-") or path.startswith("/v1/marketplace-operations/")
+        if path.startswith("/v1/tutor-")
+        or path.startswith("/v1/tutors")
+        or path.startswith("/v1/marketplace-operations/")
     }
     assert paths
     for operations in paths.values():
         for operation in operations.values():
             assert operation["security"] == [{"ClerkSessionToken": []}]
-    assert not any(path.startswith("/v1/tutors") for path in schema["paths"])
+    assert any(path.startswith("/v1/tutors") for path in schema["paths"])
     assert not any("payout" in path for path in schema["paths"])
 
 

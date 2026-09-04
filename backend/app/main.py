@@ -47,6 +47,10 @@ from app.integrations.revenuecat.client import RevenueCatHttpClient
 from app.modules.billing.repository import PostgresEntitlementRepository
 from app.modules.billing.router import router as billing_router
 from app.modules.billing.service import BillingService
+from app.modules.human_tutor_marketplace.discovery import (
+    MarketplaceDiscoveryService,
+    PostgresDiscoveryRepository,
+)
 from app.modules.human_tutor_marketplace.repository import (
     PostgresTutorApplicationRepository,
 )
@@ -67,6 +71,7 @@ def create_app(
     lesson_tutor_service: LessonTutorService | None = None,
     billing_service: BillingService | None = None,
     human_tutor_marketplace_service: HumanTutorMarketplaceService | None = None,
+    marketplace_discovery_service: MarketplaceDiscoveryService | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings.log_level)
@@ -101,6 +106,17 @@ def create_app(
         marketplace_service = HumanTutorMarketplaceService(
             enabled=True,
             repository=PostgresTutorApplicationRepository(engine=database_engine),
+            pseudonym_key=(
+                settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
+                if settings.human_tutor_marketplace_pseudonym_key is not None
+                else None
+            ),
+            actor_allowlist=settings.human_tutor_marketplace_actor_allowlist,
+        )
+    discovery_service = marketplace_discovery_service
+    if discovery_service is None and settings.human_tutor_marketplace_enabled:
+        discovery_service = MarketplaceDiscoveryService(
+            repository=PostgresDiscoveryRepository(engine=database_engine),
             pseudonym_key=(
                 settings.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()
                 if settings.human_tutor_marketplace_pseudonym_key is not None
@@ -188,6 +204,8 @@ def create_app(
     )
     if marketplace_service is not None:
         application.state.human_tutor_marketplace_service = marketplace_service
+    if discovery_service is not None:
+        application.state.marketplace_discovery_service = discovery_service
     application.add_exception_handler(
         DependencyUnavailableError,
         dependency_unavailable_handler,

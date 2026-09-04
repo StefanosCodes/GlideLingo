@@ -37,6 +37,7 @@ test('evidence waits for asynchronous transcript and audio signals in any order'
   tracker.observeEvent({ type: 'response.output_audio_transcript.done', transcript: 'Try alpha.' });
   await tracker.complete;
   assert.equal(tracker.snapshot().learnerTranscriptFinalCount, 1);
+  assert.equal(JSON.stringify(tracker.diagnostics()).includes('άλφα'), false);
 });
 
 test('an early complete turn cannot mask a cancelled post-input turn', async () => {

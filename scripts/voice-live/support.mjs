@@ -296,7 +296,10 @@ export async function startHarnessServer({
       }
       if (request.method === 'POST' && url.pathname === '/failed') {
         const body = await readJson(request);
-        rejectCompletion(new Error(`Browser harness failed: ${String(body.message).slice(0, 500)}`));
+        const evidence = safeFailureEvidence(body.evidence);
+        rejectCompletion(new Error(
+          `Browser harness failed: ${String(body.message).slice(0, 200)}; evidence=${JSON.stringify(evidence)}`,
+        ));
         return sendJson(response, 200, { accepted: true });
       }
       sendJson(response, 404, { error: 'not found' });
@@ -369,6 +372,23 @@ function boundedCount(value, maximum = 10_000) {
 
 function boundedCountOrInvalid(value, maximum = 10_000) {
   return Number.isInteger(value) && value >= 0 ? Math.min(value, maximum) : -1;
+}
+
+export function safeFailureEvidence(value) {
+  const evidence = value && typeof value === 'object' ? value : {};
+  return {
+    connected: evidence.connected === true,
+    providerConfigurationObserved: evidence.providerConfigurationObserved === true,
+    remoteAudioTrackReceived: evidence.remoteAudioTrackReceived === true,
+    remoteAudioObserved: evidence.remoteAudioObserved === true,
+    inputFinished: evidence.inputFinished === true,
+    postInputLearnerTranscript: evidence.postInputLearnerTranscript === true,
+    postInputCoachTranscript: evidence.postInputCoachTranscript === true,
+    postInputResponseCompleted: evidence.postInputResponseCompleted === true,
+    learnerTranscriptFinalCount: boundedCount(evidence.learnerTranscriptFinalCount),
+    coachTranscriptFinalCount: boundedCount(evidence.coachTranscriptFinalCount),
+    responseCompletedCount: boundedCount(evidence.responseCompletedCount),
+  };
 }
 
 function boundedText(value, label) {

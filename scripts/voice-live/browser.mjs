@@ -102,7 +102,10 @@ try {
   await fetch('/failed', {
     method: 'POST',
     headers: harnessHeaders,
-    body: JSON.stringify({ message: error instanceof Error ? error.message : String(error) }),
+    body: JSON.stringify({
+      message: error instanceof Error ? error.message : String(error),
+      evidence: evidence.diagnostics(),
+    }),
   }).catch(() => undefined);
 } finally {
   await audioContext?.close().catch(() => undefined);

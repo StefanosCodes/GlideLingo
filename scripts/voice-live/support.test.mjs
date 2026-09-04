@@ -14,6 +14,7 @@ import {
   publicationHash,
   readLiveConfiguration,
   safeReport,
+  safeFailureEvidence,
   sanitizedChildEnvironment,
 } from './support.mjs';
 
@@ -187,6 +188,19 @@ test('safe report retains metrics but never transcript or audio content', () => 
   }, { projectId: 'proj_test', contentHash: 'sha256:test' });
   assert.equal(JSON.stringify(report).includes('private'), false);
   assert.doesNotThrow(() => assertSuccessfulReport(report));
+});
+
+test('failure evidence retains only bounded booleans and counts', () => {
+  const evidence = safeFailureEvidence({
+    connected: true,
+    inputFinished: true,
+    learnerTranscriptFinalCount: 1,
+    transcript: 'private words',
+    extra: 'private data',
+  });
+  assert.equal(evidence.connected, true);
+  assert.equal(evidence.learnerTranscriptFinalCount, 1);
+  assert.equal(JSON.stringify(evidence).includes('private'), false);
 });
 
 test('acceptance rejects missing provider evidence or retained transcript', () => {

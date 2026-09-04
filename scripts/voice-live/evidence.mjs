@@ -112,5 +112,20 @@ export function createEvidenceTracker({ model, voice }) {
         coachTranscriptFinalCount: state.coachTranscripts.length,
       };
     },
+    diagnostics() {
+      return {
+        connected: state.connected,
+        providerConfigurationObserved: state.providerConfigurationObserved,
+        remoteAudioTrackReceived: state.remoteAudioTrackReceived,
+        remoteAudioObserved: state.remoteAudioObserved,
+        inputFinished: state.inputFinished,
+        postInputLearnerTranscript: state.postInputLearnerTranscript,
+        postInputCoachTranscript: state.postInputCoachTranscript,
+        postInputResponseCompleted: state.postInputResponseCompleted,
+        learnerTranscriptFinalCount: state.learnerTranscripts.length,
+        coachTranscriptFinalCount: state.coachTranscripts.length,
+        responseCompletedCount: state.responseCompletedCount,
+      };
+    },
   };
 }

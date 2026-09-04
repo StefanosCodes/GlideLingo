@@ -20,22 +20,24 @@ def test_context_keeps_future_steps_hidden_and_preserves_answer_aliases() -> Non
     assert "Step 7" not in context.model_visible_context
     assert context.answer_attempted is False
     assert "alpha" in context.answer_disclosure_terms
+    assert "άλφα" in context.answer_disclosure_terms
 
 
 def test_context_is_adapted_from_the_canonical_course_lesson() -> None:
     context = load_lesson_context(
         content_root=CONTENT_ROOT,
         lesson_id="el-letters-1",
-        visible_step_index=6,
+        visible_step_index=7,
         selected_choice="na",
     )
 
     assert context.lesson_title == "The sound of Greek"
     assert context.module_title == "The Greek sound map"
     assert "Objective: Recognize α, ε, and ι" in context.model_visible_context
-    assert "Step 8" not in context.model_visible_context
+    assert "Step 9" not in context.model_visible_context
     assert context.canonical_answer == "na"
     assert context.answer_attempted is True
+    assert "νά" in context.answer_disclosure_terms
 
 
 def test_context_fails_closed_when_canonical_lesson_metadata_mismatches(

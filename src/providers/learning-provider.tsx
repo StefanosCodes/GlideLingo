@@ -17,12 +17,10 @@ import {
   completedModuleIdsFor,
   courseProgress,
   currentModule,
-  findLesson,
+  getAvailableLesson,
   getCourse,
   getCoursesForLanguage,
-  getLesson,
   getLanguage,
-  isLessonAvailable,
   languages,
   nextLesson,
 } from '@/constants/catalog';
@@ -126,9 +124,8 @@ function latestWriteTime(value: StoredLearningV2) {
   );
 }
 
-export function assertLessonAvailableForCompletion(lessonId: string) {
-  const lesson = findLesson(lessonId)?.lesson;
-  if (!lesson || !isLessonAvailable(lesson)) {
+export function assertLessonAvailableForCompletion(course: Course | null, lessonId: string) {
+  if (!course || !getAvailableLesson(course, lessonId)) {
     throw new Error('Cannot complete an unavailable lesson.');
   }
 }
@@ -350,8 +347,8 @@ export function LearningProvider({
 
   const openLesson = useCallback(
     (lessonId: string | null, mode: LessonMode = 'learn') => {
-      const found = lessonId && enrolledCourse ? getLesson(enrolledCourse, lessonId) : null;
-      const availableLessonId = found && isLessonAvailable(found.lesson) ? lessonId : null;
+      const found = lessonId && enrolledCourse ? getAvailableLesson(enrolledCourse, lessonId) : null;
+      const availableLessonId = found ? lessonId : null;
       setActiveLessonId(availableLessonId);
       setActiveLessonMode(availableLessonId ? mode : 'learn');
       if (availableLessonId && found) {
@@ -383,7 +380,7 @@ export function LearningProvider({
   );
 
   const completeLesson = useCallback((completion: LessonCompletionInput) => {
-    assertLessonAvailableForCompletion(completion.lessonId);
+    assertLessonAvailableForCompletion(enrolledCourse, completion.lessonId);
     const completedAt = Date.now();
     const currentLearning = learningRef.current;
     const currentPracticeDays = currentLearning.practiceDayKeys;
@@ -407,7 +404,7 @@ export function LearningProvider({
     }));
 
     return { ...practice.result, evidence: mergedEvidence };
-  }, [updateLearning]);
+  }, [enrolledCourse, updateLearning]);
 
   const setWeeklyPracticeGoal = useCallback((goal: WeeklyPracticeGoal | null) => {
     const changedAt = Date.now();

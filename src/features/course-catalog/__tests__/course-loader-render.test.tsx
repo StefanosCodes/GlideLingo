@@ -65,13 +65,25 @@ test('the authored lesson completes end to end without advancing into placeholde
   expect(screen.getByText('Which letter is the a in father?')).toBeTruthy();
   await fireEvent.press(screen.getByLabelText('1. α'));
   await fireEvent.press(screen.getByText('Continue'));
+  expect(screen.getByText('Which letter is the e in red?')).toBeTruthy();
+  await fireEvent.press(screen.getByLabelText('2. ε'));
+  await fireEvent.press(screen.getByText('Continue'));
   expect(screen.getByText('What sound does this make?')).toBeTruthy();
   await fireEvent.press(screen.getByLabelText('2. na'));
+  await fireEvent.press(screen.getByText('Continue'));
+  expect(screen.getByText('What sound does this second syllable make?')).toBeTruthy();
+  await fireEvent.press(screen.getByLabelText('2. ne'));
+  await fireEvent.press(screen.getByText('Continue'));
+  expect(screen.getByText('What sound does this new syllable make?')).toBeTruthy();
+  await fireEvent.press(screen.getByLabelText('2. ni'));
   await fireEvent.press(screen.getByText('Continue'));
 
   expect(mockCompleteLesson).toHaveBeenCalledWith(expect.objectContaining({
     lessonId: 'el-letters-1',
     checks: [
+      expect.objectContaining({ correct: true, correctOnFirstTry: true }),
+      expect.objectContaining({ correct: true, correctOnFirstTry: true }),
+      expect.objectContaining({ correct: true, correctOnFirstTry: true }),
       expect.objectContaining({ correct: true, correctOnFirstTry: true }),
       expect.objectContaining({ correct: true, correctOnFirstTry: true }),
     ],

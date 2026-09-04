@@ -20,7 +20,10 @@
       "el-i-sound-notice",
       "el-kalimera-hear",
       "el-alpha-check",
-      "el-syllable-na-check"
+      "el-epsilon-check",
+      "el-syllable-na-check",
+      "el-syllable-ne-check",
+      "el-syllable-ni-check"
     ]
   },
   "lessonOrder": ["el-letters-1"],
@@ -192,7 +195,40 @@
             { "id": "choice-epsilon", "text": "ε" },
             { "id": "choice-iota", "text": "ι" }
           ],
-          "acceptedChoiceIds": ["choice-alpha"]
+          "acceptedChoiceIds": ["choice-alpha"],
+          "answerAliases": ["άλφα"]
+        },
+        {
+          "schemaVersion": 1,
+          "id": "el-epsilon-check",
+          "version": "1.0.0",
+          "rendererType": "script_recognition",
+          "phase": "retrieve",
+          "instruction": "Choose the grapheme matching the described sound.",
+          "prompt": "Which letter is the e in red?",
+          "targetCapabilityIds": ["el-script-vowels-a-e-i"],
+          "supportingCapabilityIds": [],
+          "communicationMode": "reading",
+          "usage": "practice",
+          "assessmentEligible": false,
+          "evidenceEligibility": "practice",
+          "supportLevel": "medium",
+          "hints": [],
+          "feedbackContrasts": [
+            {
+              "when": "incorrect-choice",
+              "feedback": "ε carries the e sound in red. Compare it with α (a) and ι (ee)."
+            }
+          ],
+          "retryPolicy": { "maxAttempts": 3, "canSkip": false },
+          "accessibility": { "instruction": "Three text choices are announced in order." },
+          "assetIds": [],
+          "choices": [
+            { "id": "choice-alpha", "text": "α" },
+            { "id": "choice-epsilon", "text": "ε" },
+            { "id": "choice-iota", "text": "ι" }
+          ],
+          "acceptedChoiceIds": ["choice-epsilon"]
         },
         {
           "schemaVersion": 1,
@@ -225,7 +261,74 @@
             { "id": "choice-na", "text": "na" },
             { "id": "choice-ne", "text": "ne" }
           ],
-          "acceptedChoiceIds": ["choice-na"]
+          "acceptedChoiceIds": ["choice-na"],
+          "answerAliases": ["νά"]
+        },
+        {
+          "schemaVersion": 1,
+          "id": "el-syllable-ne-check",
+          "version": "1.0.0",
+          "rendererType": "script_recognition",
+          "phase": "perform",
+          "instruction": "Read another new syllable and choose its sound.",
+          "prompt": "What sound does this second syllable make?",
+          "targetCapabilityIds": ["el-script-vowels-a-e-i"],
+          "supportingCapabilityIds": [],
+          "communicationMode": "reading",
+          "usage": "assessment",
+          "assessmentEligible": true,
+          "evidenceEligibility": "demonstration",
+          "supportLevel": "bounded",
+          "hints": [],
+          "feedbackContrasts": [
+            {
+              "when": "incorrect-choice",
+              "feedback": "ν is n and ε is e, so νε reads ne."
+            }
+          ],
+          "retryPolicy": { "maxAttempts": 3, "canSkip": false },
+          "accessibility": { "instruction": "The Greek syllable and three text choices are announced." },
+          "assetIds": [],
+          "text": "νε",
+          "choices": [
+            { "id": "choice-na", "text": "na" },
+            { "id": "choice-ne", "text": "ne" },
+            { "id": "choice-ni", "text": "ni" }
+          ],
+          "acceptedChoiceIds": ["choice-ne"]
+        },
+        {
+          "schemaVersion": 1,
+          "id": "el-syllable-ni-check",
+          "version": "1.0.0",
+          "rendererType": "script_recognition",
+          "phase": "perform",
+          "instruction": "Read another new syllable and choose its sound.",
+          "prompt": "What sound does this new syllable make?",
+          "targetCapabilityIds": ["el-script-vowels-a-e-i"],
+          "supportingCapabilityIds": [],
+          "communicationMode": "reading",
+          "usage": "assessment",
+          "assessmentEligible": true,
+          "evidenceEligibility": "demonstration",
+          "supportLevel": "bounded",
+          "hints": [],
+          "feedbackContrasts": [
+            {
+              "when": "incorrect-choice",
+              "feedback": "ν is n and ι is ee, so νι reads ni."
+            }
+          ],
+          "retryPolicy": { "maxAttempts": 3, "canSkip": false },
+          "accessibility": { "instruction": "The Greek syllable and three text choices are announced." },
+          "assetIds": [],
+          "text": "νι",
+          "choices": [
+            { "id": "choice-na", "text": "na" },
+            { "id": "choice-ni", "text": "ni" },
+            { "id": "choice-ne", "text": "ne" }
+          ],
+          "acceptedChoiceIds": ["choice-ni"]
         },
         {
           "schemaVersion": 1,
@@ -251,7 +354,7 @@
         },
         {
           "schemaVersion": 1,
-          "id": "el-syllable-me-review",
+          "id": "el-syllable-an-review",
           "version": "1.0.0",
           "rendererType": "script_recognition",
           "phase": "revisit",
@@ -268,22 +371,55 @@
           "feedbackContrasts": [
             {
               "when": "incorrect-choice",
-              "feedback": "μ is m and ε is e, so με reads me."
+              "feedback": "α is a and ν is n, so αν reads an."
             }
           ],
           "retryPolicy": { "maxAttempts": 3, "canSkip": false },
           "accessibility": { "instruction": "The Greek syllable and three text choices are announced." },
           "assetIds": [],
-          "text": "με",
+          "text": "αν",
           "choices": [
-            { "id": "choice-ma", "text": "ma" },
-            { "id": "choice-me", "text": "me" },
-            { "id": "choice-mi", "text": "mi" }
+            { "id": "choice-an", "text": "an" },
+            { "id": "choice-na", "text": "na" },
+            { "id": "choice-en", "text": "en" }
           ],
-          "acceptedChoiceIds": ["choice-me"]
+          "acceptedChoiceIds": ["choice-an"]
+        },
+        {
+          "schemaVersion": 1,
+          "id": "el-syllable-in-review",
+          "version": "1.0.0",
+          "rendererType": "script_recognition",
+          "phase": "revisit",
+          "instruction": "Read a second changed syllable and choose its sound.",
+          "prompt": "Read this changed syllable",
+          "targetCapabilityIds": ["el-script-vowels-a-e-i"],
+          "supportingCapabilityIds": [],
+          "communicationMode": "reading",
+          "usage": "review",
+          "assessmentEligible": true,
+          "evidenceEligibility": "retention",
+          "supportLevel": "low",
+          "hints": [],
+          "feedbackContrasts": [
+            {
+              "when": "incorrect-choice",
+              "feedback": "ι is ee and ν is n, so ιν reads in."
+            }
+          ],
+          "retryPolicy": { "maxAttempts": 3, "canSkip": false },
+          "accessibility": { "instruction": "The Greek syllable and three text choices are announced." },
+          "assetIds": [],
+          "text": "ιν",
+          "choices": [
+            { "id": "choice-in", "text": "in" },
+            { "id": "choice-ni", "text": "ni" },
+            { "id": "choice-en", "text": "en" }
+          ],
+          "acceptedChoiceIds": ["choice-in"]
         }
       ],
-      "newMaterial": ["α", "ε", "ι", "να"],
+      "newMaterial": ["α", "ε", "ι", "να", "νε", "νι"],
       "recycledMaterial": [],
       "feedbackRetryBehavior": "Show the existing authored contrast and allow another attempt without consuming access.",
       "completionCondition": {
@@ -295,7 +431,10 @@
           "el-i-sound-notice",
           "el-kalimera-hear",
           "el-alpha-check",
-          "el-syllable-na-check"
+          "el-epsilon-check",
+          "el-syllable-na-check",
+          "el-syllable-ne-check",
+          "el-syllable-ni-check"
         ]
       },
       "safeResumeActivityIds": [
@@ -305,16 +444,20 @@
         "el-i-sound-notice",
         "el-kalimera-hear",
         "el-alpha-check",
+        "el-epsilon-check",
         "el-syllable-na-check",
+        "el-syllable-ne-check",
+        "el-syllable-ni-check",
         "el-review-notice",
-        "el-syllable-me-review"
+        "el-syllable-an-review",
+        "el-syllable-in-review"
       ],
       "assetIds": []
     }
   ],
   "supportFadingPlan": ["model", "constrained-choice", "cued-recall", "varied-transfer"],
-  "checkpointActivityIds": ["el-syllable-na-check"],
-  "reviewActivityIds": ["el-syllable-me-review"],
+  "checkpointActivityIds": ["el-syllable-na-check", "el-syllable-ne-check", "el-syllable-ni-check"],
+  "reviewActivityIds": ["el-syllable-an-review", "el-syllable-in-review"],
   "interruptionResume": {
     "boundary": "activity",
     "behavior": "Resume before the next incomplete activity and never inside an attempt."

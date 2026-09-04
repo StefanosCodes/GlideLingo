@@ -57,6 +57,7 @@ class CanonicalActivity(BaseModel):
     audioId: str | None = None
     choices: list[CanonicalChoice] | None = None
     acceptedChoiceIds: list[str] | None = None
+    answerAliases: list[str] | None = None
 
 
 class CanonicalLesson(BaseModel):

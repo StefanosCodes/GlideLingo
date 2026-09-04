@@ -194,6 +194,28 @@
           "accessibility": { "instruction": "Enter a short lowercase text response." },
           "assetIds": [],
           "acceptedResponses": ["sipa na"]
+        },
+        {
+          "schemaVersion": 1,
+          "id": "portable-review-variation",
+          "version": "1.0.0",
+          "rendererType": "type_response",
+          "phase": "revisit",
+          "instruction": "Retrieve the request from a changed authored cue after the delay.",
+          "prompt": "The fixture attendant is waiting. Write the request from memory.",
+          "targetCapabilityIds": ["portable-request-item"],
+          "supportingCapabilityIds": [],
+          "communicationMode": "written-production",
+          "usage": "review",
+          "assessmentEligible": true,
+          "evidenceEligibility": "retention",
+          "supportLevel": "low",
+          "hints": [],
+          "feedbackContrasts": [{ "when": "other", "feedback": "Return to the retrieval activity before retrying later." }],
+          "retryPolicy": { "maxAttempts": 1, "canSkip": true },
+          "accessibility": { "instruction": "Enter a short lowercase text response." },
+          "assetIds": [],
+          "acceptedResponses": ["sipa na"]
         }
       ],
       "newMaterial": ["sipa", "na"],
@@ -217,14 +239,15 @@
         "portable-build-request",
         "portable-roleplay",
         "portable-checkpoint",
-        "portable-review"
+        "portable-review",
+        "portable-review-variation"
       ],
       "assetIds": ["fixture-card"]
     }
   ],
   "supportFadingPlan": ["model", "constrained-choice", "cued-recall", "varied-transfer"],
   "checkpointActivityIds": ["portable-roleplay", "portable-checkpoint"],
-  "reviewActivityIds": ["portable-review"],
+  "reviewActivityIds": ["portable-review", "portable-review-variation"],
   "interruptionResume": {
     "boundary": "activity",
     "behavior": "Resume before the next incomplete activity and never inside an attempt."

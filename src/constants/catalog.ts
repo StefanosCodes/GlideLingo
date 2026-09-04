@@ -261,6 +261,11 @@ export function isLessonAvailable(lesson: Lesson) {
   return lesson.contentStatus !== 'placeholder';
 }
 
+export function getAvailableLesson(course: Course, lessonId: string) {
+  const found = getLesson(course, lessonId);
+  return found && isLessonAvailable(found.lesson) ? found : null;
+}
+
 export function availableLessonsForModule(module: CourseModule) {
   return module.lessons.filter(isLessonAvailable);
 }

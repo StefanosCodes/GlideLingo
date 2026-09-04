@@ -84,7 +84,9 @@ def _adapt_activity(activity: CanonicalActivity) -> Beat:
             prompt=activity.prompt,
             choices=[choice.text for choice in activity.choices],
             answer=answer,
-            answerAliases=_answer_aliases(answer),
+            answerAliases=list(
+                dict.fromkeys((*_answer_aliases(answer), *(activity.answerAliases or [])))
+            ),
             greek=activity.text,
         )
     raise CourseContentError("Canonical activity is unsupported by the lesson tutor adapter")

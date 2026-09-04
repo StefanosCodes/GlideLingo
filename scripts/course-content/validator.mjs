@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { access, lstat, readFile, readdir } from 'node:fs/promises';
+import { access, lstat, readFile, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -288,6 +288,11 @@ function locationsFor(loaded) {
     pointer: `/targets/${index}`,
   }));
   const publication = { record: loaded.publication.data, file: loaded.publication.file, pointer: '' };
+  const audioClips = loaded.audioManifest.data.clips.map((record, index) => ({
+    record,
+    file: loaded.audioManifest.file,
+    pointer: `/clips/${index}`,
+  }));
 
   for (const location of [
     course,
@@ -299,6 +304,7 @@ function locationsFor(loaded) {
     ...activities,
     ...scenarios,
     ...pronunciationTargets,
+    ...audioClips,
     publication,
   ]) addRecord(records, location.record, location, loaded.diagnostics);
 
@@ -313,6 +319,7 @@ function locationsFor(loaded) {
     activities,
     scenarios,
     pronunciationTargets,
+    audioClips,
     publication,
   };
 }
@@ -432,7 +439,12 @@ function checkCapabilityReachability(course, capabilities, diagnostics) {
 function checkActivityAnswerContract(activity, diagnostics) {
   const { record, file, pointer } = activity;
   if (record.acceptedChoiceIds) {
-    const choiceIds = new Set(record.choices.map((choice) => choice.id));
+    const choiceIds = new Set();
+    record.choices.forEach((choice, index) => {
+      if (choiceIds.has(choice.id)) {
+        diagnostics.push(diagnostic(file, `${pointer}/choices/${index}/id`, 'duplicate-id', `choice ID ${JSON.stringify(choice.id)} is duplicated in this activity`));
+      } else choiceIds.add(choice.id);
+    });
     record.acceptedChoiceIds.forEach((id, index) => {
       if (choiceIds.has(id)) return;
       diagnostics.push(diagnostic(file, `${pointer}/acceptedChoiceIds/${index}`, 'invalid-answer', `accepted choice ${JSON.stringify(id)} is absent from choices`));
@@ -489,6 +501,7 @@ function checkPublication(publication, course, diagnostics) {
 
 async function validateRelationships(loaded) {
   const locations = locationsFor(loaded);
+  const realPackageRoot = await realpath(loaded.packageDirectory);
   const courseId = locations.course.record.id;
   const capabilityMap = byId(locations.capabilities);
   const moduleMap = byId(locations.modules);
@@ -498,13 +511,7 @@ async function validateRelationships(loaded) {
   const scenarioMap = byId(locations.scenarios);
   const pronunciationMap = byId(locations.pronunciationTargets);
   const publicationMap = new Map([[locations.publication.record.id, locations.publication]]);
-  const clipMap = new Map(
-    loaded.audioManifest.data.clips.map((clip, index) => [clip.id, {
-      record: clip,
-      file: loaded.audioManifest.file,
-      pointer: `/clips/${index}`,
-    }]),
-  );
+  const clipMap = byId(locations.audioClips);
 
   for (const location of [
     locations.languageProfile,
@@ -604,21 +611,54 @@ async function validateRelationships(loaded) {
 
     const practiceActivities = [...missionActivities.values()].filter(({ record }) =>
       ['teaching', 'practice'].includes(record.usage));
-    const assessmentSignature = (record) => JSON.stringify({
-      rendererType: record.rendererType,
-      prompt: record.prompt,
-      acceptedChoiceIds: record.acceptedChoiceIds,
-      acceptedOrders: record.acceptedOrders,
-      acceptedResponses: record.acceptedResponses,
-      rubric: record.rubric,
-    });
+    const freshReviewExposures = [...missionActivities.values()].filter(({ record }) =>
+      record.usage !== 'review');
+    const assessmentSignature = (record) => {
+      const choices = record.choices ?? [];
+      const choiceTextById = new Map(choices.map((choice) => [choice.id, choice.text]));
+      const sortedStrings = (values) => values ? [...values].sort() : values;
+      const sortedRecords = (values) => values
+        ? [...values].sort((left, right) => {
+          const leftKey = JSON.stringify(left);
+          const rightKey = JSON.stringify(right);
+          return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+        })
+        : values;
+      return JSON.stringify({
+        rendererType: record.rendererType,
+        prompt: record.prompt,
+        text: record.text,
+        audioId: record.audioId,
+        choiceTexts: sortedStrings(choices.map((choice) => choice.text)),
+        acceptedChoiceTexts: sortedStrings(record.acceptedChoiceIds?.map((id) => choiceTextById.get(id))),
+        pairs: sortedRecords(record.pairs),
+        tokens: sortedStrings(record.tokens),
+        acceptedOrders: sortedRecords(record.acceptedOrders),
+        acceptedResponses: sortedStrings(record.acceptedResponses),
+        pronunciationTargetId: record.pronunciationTargetId,
+        scenarioId: record.scenarioId,
+        rubric: record.rubric ? {
+          criteria: sortedStrings(record.rubric.criteria),
+          minimumMet: record.rubric.minimumMet,
+        } : undefined,
+        assetIds: sortedStrings(record.assetIds),
+      });
+    };
     const practiceSignatures = new Map(practiceActivities.map((activity) => [assessmentSignature(activity.record), activity]));
+    const reviewExposureSignatures = new Map(freshReviewExposures.map((activity) => [assessmentSignature(activity.record), activity]));
     mission.record.checkpointActivityIds.forEach((id, index) => {
       const checkpointActivity = missionActivities.get(id);
       if (!checkpointActivity) return;
       const leakedFrom = practiceSignatures.get(assessmentSignature(checkpointActivity.record));
       if (!leakedFrom) return;
       loaded.diagnostics.push(diagnostic(mission.file, `/checkpointActivityIds/${index}`, 'assessment-leak', `checkpoint activity duplicates practice content from ${JSON.stringify(leakedFrom.record.id)}`));
+    });
+    mission.record.reviewActivityIds.forEach((id, index) => {
+      const reviewActivity = missionActivities.get(id);
+      if (!reviewActivity) return;
+      const leakedFrom = reviewExposureSignatures.get(assessmentSignature(reviewActivity.record));
+      if (!leakedFrom) return;
+      loaded.diagnostics.push(diagnostic(mission.file, `/reviewActivityIds/${index}`, 'assessment-leak', `review activity duplicates previously exposed content from ${JSON.stringify(leakedFrom.record.id)}`));
     });
 
     const assetMap = new Map();
@@ -631,7 +671,10 @@ async function validateRelationships(loaded) {
       let assetExists = false;
       if (absoluteAssetPath.startsWith(packagePrefix)) {
         try {
-          assetExists = (await lstat(absoluteAssetPath)).isFile();
+          const relativeAssetPath = path.relative(loaded.packageDirectory, absoluteAssetPath);
+          const expectedRealPath = path.resolve(realPackageRoot, relativeAssetPath);
+          const realAssetPath = await realpath(absoluteAssetPath);
+          assetExists = realAssetPath === expectedRealPath && (await lstat(realAssetPath)).isFile();
         } catch {
           assetExists = false;
         }
@@ -680,7 +723,12 @@ async function validateRelationships(loaded) {
     checkReference(scenario.record.moduleId, moduleMap, scenario, '/moduleId', 'module', loaded.diagnostics);
     checkReferences(scenario.record.targetCapabilityIds, capabilityMap, scenario, '/targetCapabilityIds', 'capability', loaded.diagnostics);
     checkReferences(scenario.record.supportingCapabilityIds, capabilityMap, scenario, '/supportingCapabilityIds', 'capability', loaded.diagnostics);
-    const observations = new Map(scenario.record.successObservations.map((record, index) => [record.id, { record, file: scenario.file, pointer: `/successObservations/${index}` }]));
+    const observations = new Map();
+    scenario.record.successObservations.forEach((record, index) => {
+      if (observations.has(record.id)) {
+        loaded.diagnostics.push(diagnostic(scenario.file, `/successObservations/${index}/id`, 'duplicate-id', `success observation ID ${JSON.stringify(record.id)} is duplicated in this scenario`));
+      } else observations.set(record.id, { record, file: scenario.file, pointer: `/successObservations/${index}` });
+    });
     checkReferences(scenario.record.completionRule.requiredObservationIds, observations, scenario, '/completionRule/requiredObservationIds', 'success observation', loaded.diagnostics);
     scenario.record.evidenceMapping.forEach((mapping, index) => {
       checkReference(mapping.observationId, observations, scenario, `/evidenceMapping/${index}/observationId`, 'success observation', loaded.diagnostics);
@@ -708,15 +756,23 @@ async function validateRelationships(loaded) {
   }
 
   for (const capability of locations.capabilities) {
-    const teachingCount = locations.activities.filter(({ record }) =>
-      ['teaching', 'practice'].includes(record.usage) && record.targetCapabilityIds.includes(capability.record.id)).length;
-    const assessmentCount = locations.activities.filter(({ record }) =>
-      ['assessment', 'review'].includes(record.usage) && record.targetCapabilityIds.includes(capability.record.id)).length;
-    if (teachingCount < capability.record.practiceEvidence.minimumOpportunities) {
-      loaded.diagnostics.push(diagnostic(capability.file, `${capability.pointer}/practiceEvidence/minimumOpportunities`, 'insufficient-opportunities', `declares ${capability.record.practiceEvidence.minimumOpportunities} practice opportunities but only ${teachingCount} are authored`));
-    }
-    if (assessmentCount < capability.record.demonstrationCriteria.minimumOpportunities) {
-      loaded.diagnostics.push(diagnostic(capability.file, `${capability.pointer}/demonstrationCriteria/minimumOpportunities`, 'insufficient-opportunities', `declares ${capability.record.demonstrationCriteria.minimumOpportunities} assessment opportunities but only ${assessmentCount} are authored`));
+    for (const [ruleName, eligibility, label] of [
+      ['practiceEvidence', 'practice', 'practice'],
+      ['demonstrationCriteria', 'demonstration', 'demonstration'],
+      ['retentionCriteria', 'retention', 'retention'],
+    ]) {
+      const actual = locations.activities.filter(({ record }) =>
+        record.evidenceEligibility === eligibility
+        && record.targetCapabilityIds.includes(capability.record.id)).length;
+      const minimum = capability.record[ruleName].minimumOpportunities;
+      if (actual < minimum) {
+        loaded.diagnostics.push(diagnostic(
+          capability.file,
+          `${capability.pointer}/${ruleName}/minimumOpportunities`,
+          'insufficient-opportunities',
+          `declares ${minimum} ${label} opportunities but only ${actual} are authored`,
+        ));
+      }
     }
   }
 

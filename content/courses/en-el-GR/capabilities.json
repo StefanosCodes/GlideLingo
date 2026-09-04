@@ -11,7 +11,7 @@
       "situation": "Reading a new bounded Greek syllable",
       "communicationModes": ["listening", "reading"],
       "prerequisiteCapabilityIds": [],
-      "linguisticResources": ["α", "ε", "ι", "να", "με"],
+      "linguisticResources": ["α", "ε", "ι", "να", "νε", "νι", "αν", "ιν"],
       "pragmaticCulturalResources": ["No pragmatic claim is made by this script-access capability"],
       "teachingMissionIds": ["el-letters-sound-map"],
       "practiceEvidence": {

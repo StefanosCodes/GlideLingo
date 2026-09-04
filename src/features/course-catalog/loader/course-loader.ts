@@ -16,6 +16,7 @@ import type {
   PublicationRecord,
   ScenarioRecord,
 } from '@/features/course-catalog/model/course-content';
+import { validateCoursePackageSourceSchema } from '@/features/course-catalog/loader/course-schema-validator';
 
 const SUPPORTED_SCHEMA_VERSION = 1;
 const SUPPORTED_RENDERERS = new Set([
@@ -176,14 +177,18 @@ function parseActivity(value: unknown, path: string): ActivityRecord {
   stringArray(item.supportingCapabilityIds, `${path}/supportingCapabilityIds`);
   stringArray(item.assetIds, `${path}/assetIds`);
   if (item.audioId !== undefined) string(item.audioId, `${path}/audioId`);
+  if (item.answerAliases !== undefined) stringArray(item.answerAliases, `${path}/answerAliases`);
   if (item.scenarioId !== undefined) string(item.scenarioId, `${path}/scenarioId`);
   if (item.pronunciationTargetId !== undefined) string(item.pronunciationTargetId, `${path}/pronunciationTargetId`);
   if (rendererType === 'explain' || rendererType === 'reflection') string(item.text, `${path}/text`);
   if (rendererType === 'listen_choose' || rendererType === 'script_recognition') {
     const choices = array(item.choices, `${path}/choices`);
+    const choiceIds = new Set<string>();
     choices.forEach((choice, index) => {
       const parsed = record(choice, `${path}/choices/${index}`);
-      string(parsed.id, `${path}/choices/${index}/id`);
+      const choiceId = string(parsed.id, `${path}/choices/${index}/id`);
+      if (choiceIds.has(choiceId)) fail(`${path}/choices/${index}/id`, `duplicate choice ID ${JSON.stringify(choiceId)}`);
+      choiceIds.add(choiceId);
       string(parsed.text, `${path}/choices/${index}/text`);
     });
     stringArray(item.acceptedChoiceIds, `${path}/acceptedChoiceIds`);
@@ -240,6 +245,15 @@ function parseScenarios(values: readonly unknown[]): ScenarioRecord[] {
     stringArray(item.targetCapabilityIds, `${path}/targetCapabilityIds`);
     stringArray(item.supportingCapabilityIds, `${path}/supportingCapabilityIds`);
     string(item.conversationProfileId, `${path}/conversationProfileId`);
+    const observationIds = new Set<string>();
+    array(item.successObservations, `${path}/successObservations`).forEach((observation, observationIndex) => {
+      const observationPath = `${path}/successObservations/${observationIndex}`;
+      const observationId = string(record(observation, observationPath).id, `${observationPath}/id`);
+      if (observationIds.has(observationId)) {
+        fail(`${observationPath}/id`, `duplicate success observation ID ${JSON.stringify(observationId)}`);
+      }
+      observationIds.add(observationId);
+    });
     return item as ScenarioRecord;
   });
 }
@@ -294,7 +308,6 @@ function parseAudioClips(value: unknown): AudioClipRecord[] {
 
 function buildLookups(coursePackage: CoursePackage): CoursePackageLookups {
   const globalIds = new Map<string, string>();
-  const audioIds = new Map<string, string>();
   const courses = new Map<string, CourseRecord>();
   const modules = new Map<string, ModuleRecord>();
   const missions = new Map<string, MissionRecord>();
@@ -328,7 +341,7 @@ function buildLookups(coursePackage: CoursePackage): CoursePackageLookups {
     register(pronunciationTargets, item, `pronunciation/targets.json/targets/${index}`, globalIds));
   register(new Map(), coursePackage.publication, 'publication.json', globalIds);
   coursePackage.audioClips.forEach((item, index) =>
-    register(audioClips, item, `audio-manifest.json/clips/${index}`, audioIds));
+    register(audioClips, item, `audio-manifest.json/clips/${index}`, globalIds));
 
   return { courses, modules, missions, lessons, activities, capabilities, scenarios, pronunciationTargets, audioClips, assets };
 }
@@ -427,6 +440,14 @@ export function loadCoursePackage(
   source: CoursePackageSource,
   { publicationPolicy = 'published-only' as PublicationPolicy } = {},
 ): LoadedCoursePackage | null {
+  try {
+    validateCoursePackageSourceSchema(source);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'schema validation failed';
+    const separator = message.indexOf(': ');
+    if (separator > 0) fail(message.slice(0, separator), message.slice(separator + 2));
+    throw error;
+  }
   const coursePackage: CoursePackage = {
     course: parseCourse(source.course),
     languageProfile: parseLanguageProfile(source.languageProfile),

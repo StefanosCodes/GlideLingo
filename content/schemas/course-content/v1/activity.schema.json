@@ -155,6 +155,9 @@
     "acceptedChoiceIds": {
       "$ref": "common.schema.json#/$defs/nonEmptyIdList"
     },
+    "answerAliases": {
+      "$ref": "common.schema.json#/$defs/nonEmptyStringList"
+    },
     "pairs": {
       "type": "array",
       "minItems": 2,

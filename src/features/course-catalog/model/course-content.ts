@@ -157,6 +157,7 @@ export type ActivityRecord = {
   audioId?: string;
   choices?: ActivityChoice[];
   acceptedChoiceIds?: string[];
+  answerAliases?: string[];
   pairs?: { left: string; right: string }[];
   tokens?: string[];
   acceptedOrders?: string[][];

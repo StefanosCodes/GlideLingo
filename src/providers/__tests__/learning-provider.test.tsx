@@ -7,6 +7,7 @@ import {
   LearningProvider,
   useLearning,
 } from '@/providers/learning-provider';
+import { getCourse } from '@/constants/catalog';
 import { LEGACY_IMPORT_OWNER_KEY, learningStorageKey } from '@/providers/learning-storage';
 
 const storage = new Map<string, string>();
@@ -75,6 +76,22 @@ function completion(correctOnFirstTry = true) {
   };
 }
 
+function seedGreekEnrollment(storageScope: string) {
+  storage.set(
+    learningStorageKey(storageScope),
+    JSON.stringify({
+      version: 2,
+      languageId: 'el',
+      enrolledByLanguage: { el: 'el-from-zero' },
+      completedLessonIds: [],
+      lessonEvidence: [],
+      practiceDayKeys: [],
+      weeklyGoalChanges: [],
+      fieldWrites: {},
+    }),
+  );
+}
+
 function Probe() {
   const { completeLesson, legacyProgressAvailable, rhythmSummary, setWeeklyPracticeGoal } = useLearning();
   return (
@@ -125,17 +142,22 @@ test('provider refuses to activate a placeholder lesson', async () => {
   expect(screen.getByTestId('active-lesson').props.children).toBe('none');
 });
 
-test('completion rejects placeholder and unknown lesson IDs at the provider boundary', () => {
-  expect(() => assertLessonAvailableForCompletion('el-letters-2')).toThrow(
+test('completion rejects unenrolled, placeholder, and unknown lesson IDs at the provider boundary', () => {
+  const course = getCourse('el-from-zero');
+  expect(() => assertLessonAvailableForCompletion(null, 'el-letters-1')).toThrow(
     'Cannot complete an unavailable lesson.',
   );
-  expect(() => assertLessonAvailableForCompletion('missing-lesson')).toThrow(
+  expect(() => assertLessonAvailableForCompletion(course, 'el-letters-2')).toThrow(
     'Cannot complete an unavailable lesson.',
   );
-  expect(() => assertLessonAvailableForCompletion('el-letters-1')).not.toThrow();
+  expect(() => assertLessonAvailableForCompletion(course, 'missing-lesson')).toThrow(
+    'Cannot complete an unavailable lesson.',
+  );
+  expect(() => assertLessonAvailableForCompletion(course, 'el-letters-1')).not.toThrow();
 });
 
 test('provider records at most one meaningful day per local date in the scoped V2 store', async () => {
+  seedGreekEnrollment('user-a');
   const screen = await render(
     <LearningProvider storageScope="user-a">
       <Probe />
@@ -357,6 +379,7 @@ test('a destination failure retains the owner claim, blocks other accounts, and 
 });
 
 test('completion returns the actual merged evidence after a weaker replay', async () => {
+  seedGreekEnrollment('user-a');
   let replayState = '';
   function ResultProbe() {
     const { completeLesson } = useLearning();
@@ -395,6 +418,7 @@ function TabProbe({ tab }: { tab: string }) {
 }
 
 test('a stale second provider cannot erase another tab lesson evidence or practice with a later scalar update', async () => {
+  seedGreekEnrollment('shared-user');
   const screen = await render(
     <>
       <LearningProvider storageScope="shared-user">

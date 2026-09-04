@@ -179,11 +179,19 @@ ignored `release-acceptance/desktop-v<version>/` for normal manual DMG installat
 cannot publish, install into `/Applications`, or change the website.
 
 The packaged updater is fixed to the public `StefanosCodes/GlideLingo` GitHub Releases channel.
-It runs once at launch only from a packaged, currently validly signed macOS app. Development,
-unsigned, and non-macOS builds never contact the update service. When a newer published release
-exists, GlideLingo asks before downloading and asks again before restarting to install; choosing
-**Later** leaves the installed version untouched. Draft releases are intentionally invisible to
-installed clients.
+It runs once at launch only from a packaged macOS app; development and non-macOS builds never contact
+the update service. Release-time gates remain responsible for signing and validating the application
+and updater ZIP. A newer published release downloads automatically, but never installs on quit. When
+ready, GlideLingo offers one restart prompt; choosing **Later** leaves a persistent **Restart to
+update** action for the rest of that launch. Draft releases are intentionally invisible to installed
+clients.
+
+Before the release check, the app requests the unauthenticated, database-free desktop policy from the
+configured API with a two-second timeout. An outage or malformed response fails open. A valid minimum
+above the installed numeric-SemVer version makes the update required for that launch: the app waits
+until any active lesson ends, then blocks continued use with download progress, restart, retry, the
+fixed official download page, and quit. The default minimum is `0.0.0` in local, development, and
+production configuration.
 
 For each forward release, increment `desktop/package.json`, merge the reviewed change to `main`,
 create the protected matching tag (for example `desktop-v1.0.1`), let the workflow converge the
@@ -220,9 +228,10 @@ page remains in its explicit disabled state.
 
 Before calling automatic updates release-ready, complete one real forward-update acceptance test:
 install and launch a published signed/notarized version `N`, publish separately signed/notarized
-version `N+1` through the same protected lane, relaunch `N`, accept both update prompts, and verify
+version `N+1` through the same protected lane, relaunch `N`, wait for the automatic download, restart, and verify
 that `N+1` starts with authentication state and local learning data intact. Also repeat once by
-choosing **Later** at each prompt to prove no unattended install occurs. This signed `1.0.0` to
+choosing **Later** at the ready prompt to prove no unattended install occurs and the sidebar restart
+action persists. This signed `1.0.0` to
 `1.0.1`-style forward exercise cannot be replaced by an unsigned local package test.
 
 The authentication integration preserves the corrected desktop origin and OAuth contract:
@@ -239,5 +248,5 @@ Create a new GCP Secret Manager version and update the protected environment's e
 selector when a certificate or app-specific password is revoked, expires, or may have been exposed.
 Disable the affected old version after the replacement build succeeds. Do not weaken the workflow
 to ship an unsigned or unnotarized build. A failed client release is corrected by incrementing the
-desktop version and publishing a new forward release; installed clients update only after explicit
-user confirmation.
+desktop version and publishing a new forward release; installed clients download automatically but
+restart and install only after explicit user confirmation.

@@ -1,0 +1,124 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            website/package-lock.json
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Verify client
+        run: npm run verify
+
+      - name: Verify desktop build
+        run: npm run desktop:export
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Verify API
+        run: npm run setup:backend && npm run api:verify
+
+      - name: Verify tutor service
+        run: npm run setup:tutor && npm run tutor:verify
+
+      - name: Install website dependencies
+        working-directory: website
+        run: npm ci
+
+      - name: Verify website
+        working-directory: website
+        run: npm run check && npm test && npm run build
+
+  deploy:
+    name: Deploy API
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION || 'us-west1' }}
+      GCP_REPOSITORY: glidelingo-containers
+      GCP_SERVICE: glidelingo-api-production
+      IMAGE_NAME: glidelingo-api
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Install Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+
+      - name: Configure Artifact Registry authentication
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push API image
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_REPOSITORY}/${IMAGE_NAME}:${GITHUB_SHA}"
+          docker build --file backend/Dockerfile --tag "${image}" .
+          docker push "${image}"
+          echo "uri=${image}" >> "${GITHUB_OUTPUT}"
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "${GCP_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --image="${{ steps.image.outputs.uri }}" \
+            --quiet
+
+      - name: Smoke test production
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="$(gcloud run services describe "${GCP_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --format='value(status.url)')"
+          test -n "${url}"
+          curl --fail --retry 6 --retry-all-errors --retry-delay 5 "${url}/health/live"
+          curl --fail --retry 6 --retry-all-errors --retry-delay 5 "${url}/health/ready"

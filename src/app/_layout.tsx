@@ -12,6 +12,13 @@ import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { FirstNameCompletionGate } from '@/features/auth/first-name-completion-gate';
+import {
+  isHumanTutorCommerceEnabled,
+  isHumanTutorLearningBridgeEnabled,
+  isHumanTutorMarketplaceAcquisitionEnabled,
+  isHumanTutorMarketplaceEnabled,
+  isHumanTutorMessagingEnabled,
+} from '@/features/tutor-marketplace/config';
 import { useTheme, useThemeController } from '@/hooks/use-theme';
 import { AppThemeProvider } from '@/providers/app-theme-provider';
 import { BillingProvider } from '@/providers/billing-provider';
@@ -133,6 +140,32 @@ function AppNavigation({ signedIn }: { signedIn: boolean }) {
           <Stack.Screen name="kit" />
           <Stack.Screen name="diagnostics" />
           <Stack.Screen name="subscription" />
+        </Stack.Protected>
+        <Stack.Protected guard={signedIn && isHumanTutorMarketplaceEnabled()}>
+          <Stack.Screen name="marketplace-operations/index" />
+          <Stack.Screen name="tutor/apply" />
+          <Stack.Screen name="tutor/profile" />
+          <Stack.Screen name="tutor/availability" />
+          <Stack.Screen name="marketplace-operations/tutor-applications" />
+        </Stack.Protected>
+        <Stack.Protected guard={signedIn && isHumanTutorMarketplaceEnabled() && isHumanTutorMarketplaceAcquisitionEnabled()}>
+          <Stack.Screen name="tutors/index" />
+          <Stack.Screen name="tutors/[tutorId]" />
+        </Stack.Protected>
+        <Stack.Protected guard={signedIn && isHumanTutorMarketplaceEnabled() && isHumanTutorMessagingEnabled()}>
+          <Stack.Screen name="messages/index" />
+          <Stack.Screen name="messages/[conversationId]" />
+          <Stack.Screen name="marketplace-operations/message-reports" />
+        </Stack.Protected>
+        <Stack.Protected guard={signedIn && isHumanTutorMarketplaceEnabled() && isHumanTutorCommerceEnabled()}>
+          <Stack.Screen name="bookings/index" />
+          <Stack.Screen name="bookings/[bookingId]" />
+          <Stack.Screen name="tutor/payouts" />
+          <Stack.Screen name="marketplace-operations/bookings" />
+          <Stack.Screen name="marketplace-operations/reviews" />
+        </Stack.Protected>
+        <Stack.Protected guard={signedIn && isHumanTutorMarketplaceEnabled() && isHumanTutorCommerceEnabled() && isHumanTutorLearningBridgeEnabled()}>
+          <Stack.Screen name="booking-learning/[bookingId]" />
         </Stack.Protected>
         <Stack.Screen name="sso-callback" />
       </Stack>

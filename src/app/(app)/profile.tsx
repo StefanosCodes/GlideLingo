@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ScreenFrame } from '@/components/screen-frame';
@@ -8,6 +9,8 @@ import { GlideSurface } from '@/components/ui/glide-surface';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
 import { AccountSummary } from '@/features/auth/account-summary';
+import { getMarketplaceOperatorCapabilities } from '@/features/tutor-marketplace/api';
+import { isHumanTutorCommerceEnabled, isHumanTutorMarketplaceAcquisitionEnabled, isHumanTutorMarketplaceEnabled, isHumanTutorMessagingEnabled } from '@/features/tutor-marketplace/config';
 import {
   capabilityStateForMode,
   strongestCapabilityEvidence,
@@ -55,6 +58,15 @@ export default function ProfileScreen() {
   const percent = Math.round(progress * 100);
   const capabilities = strongestCapabilityEvidence(lessonEvidence);
   const strongest = capabilities[0] ?? null;
+  const [hasMarketplaceOperations, setHasMarketplaceOperations] = useState(false);
+  useEffect(() => {
+    if (!isHumanTutorMarketplaceEnabled()) return;
+    const controller = new AbortController();
+    void getMarketplaceOperatorCapabilities(controller.signal)
+      .then((value) => { if (!controller.signal.aborted) setHasMarketplaceOperations(value.length > 0); })
+      .catch(() => { if (!controller.signal.aborted) setHasMarketplaceOperations(false); });
+    return () => controller.abort();
+  }, []);
 
   function setRhythm(goal: WeeklyPracticeGoal) {
     setWeeklyPracticeGoal(goal);
@@ -169,6 +181,27 @@ export default function ProfileScreen() {
       </GlideSurface>
 
       <AccountSummary />
+
+      {isHumanTutorMarketplaceEnabled() ? (
+        <GlideSurface padding="roomy" style={styles.block}>
+          <ThemedText type="eyebrow" themeColor="textSecondary">
+            HUMAN TUTOR MARKETPLACE
+          </ThemedText>
+          <ThemedText type="title3">Learn with or become a human tutor.</ThemedText>
+          <ThemedText type="footnote" themeColor="textSecondary">
+            Create a private tutor application for the invitation-only marketplace.
+          </ThemedText>
+          <View style={styles.legacyActions}>
+            {isHumanTutorMarketplaceAcquisitionEnabled() ? <GlideButton label="Find a tutor" onPress={() => router.push('/tutors')} variant="secondary" /> : null}
+            {isHumanTutorMessagingEnabled() ? <GlideButton label="Tutor messages" onPress={() => router.push('/messages')} variant="secondary" /> : null}
+            {isHumanTutorCommerceEnabled() ? <GlideButton label="Tutor bookings" onPress={() => router.push('/bookings')} variant="secondary" /> : null}
+            <GlideButton label="Apply to become a tutor" onPress={() => router.push('/tutor/apply')} variant="secondary" />
+            <GlideButton label="Manage tutor availability" onPress={() => router.push('/tutor/availability')} variant="tertiary" />
+            {isHumanTutorCommerceEnabled() ? <GlideButton label="Tutor payouts and meeting" onPress={() => router.push('/tutor/payouts')} variant="tertiary" /> : null}
+            {hasMarketplaceOperations ? <GlideButton label="Marketplace operations" onPress={() => router.push('/marketplace-operations')} variant="tertiary" /> : null}
+          </View>
+        </GlideSurface>
+      ) : null}
 
       <View style={styles.section}>
         <View style={styles.sectionHeading}>

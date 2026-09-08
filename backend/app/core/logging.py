@@ -22,6 +22,10 @@ class JsonFormatter(logging.Formatter):
         error_type = getattr(record, "error_type", None)
         if error_type is not None:
             payload["error_type"] = error_type
+        for safe_dimension in ("event", "outcome"):
+            value = getattr(record, safe_dimension, None)
+            if isinstance(value, str):
+                payload[safe_dimension] = value
         return json.dumps(payload, separators=(",", ":"))
 
 

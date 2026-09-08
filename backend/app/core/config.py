@@ -1,5 +1,6 @@
 """Typed application configuration loaded from the process environment."""
 
+import re
 from typing import Annotated, Literal, Self
 from urllib.parse import urlsplit
 
@@ -69,6 +70,37 @@ class Settings(BaseSettings):
     revenuecat_entitlement_freshness_seconds: int = Field(default=900, ge=60, le=3600)
     revenuecat_webhook_max_body_bytes: int = Field(default=65536, ge=1024, le=262144)
     revenuecat_webhook_signature_tolerance_seconds: int = Field(default=300, ge=30, le=600)
+    human_tutor_marketplace_enabled: bool = False
+    human_tutor_marketplace_acquisition_enabled: bool = False
+    human_tutor_marketplace_pseudonym_key: SecretStr | None = None
+    human_tutor_marketplace_actor_allowlist: tuple[str, ...] = ()
+    human_tutor_google_calendar_enabled: bool = False
+    human_tutor_google_calendar_client_id: str | None = None
+    human_tutor_google_calendar_client_secret: SecretStr | None = None
+    human_tutor_google_calendar_token_key: SecretStr | None = None
+    human_tutor_google_calendar_state_key: SecretStr | None = None
+    human_tutor_google_calendar_redirect_allowlist: tuple[str, ...] = ()
+    human_tutor_google_calendar_timeout_seconds: float = Field(default=4.0, gt=0, le=6)
+    human_tutor_messaging_enabled: bool = False
+    human_tutor_message_retention_days: int | None = Field(default=None, ge=7, le=3650)
+    human_tutor_approved_meeting_hosts: tuple[str, ...] = ()
+    human_tutor_commerce_enabled: bool = False
+    human_tutor_payout_execution_enabled: bool = False
+    human_tutor_learning_bridge_enabled: bool = False
+    human_tutor_stripe_environment: Literal["SANDBOX", "PRODUCTION"] = "SANDBOX"
+    human_tutor_stripe_secret_key: SecretStr | None = None
+    human_tutor_payment_database_url: SecretStr | None = None
+    human_tutor_stripe_webhook_secret: SecretStr | None = None
+    human_tutor_stripe_platform_account_id: str | None = None
+    human_tutor_stripe_api_version: str = "2026-02-25.clover"
+    human_tutor_stripe_timeout_seconds: float = Field(default=5.0, gt=0, le=8)
+    human_tutor_stripe_webhook_max_body_bytes: int = Field(default=65536, ge=1024, le=262144)
+    human_tutor_stripe_signature_tolerance_seconds: int = Field(default=300, ge=30, le=600)
+    human_tutor_booking_hold_seconds: int = Field(default=600, ge=300, le=900)
+    human_tutor_stripe_connect_refresh_url: str | None = None
+    human_tutor_stripe_connect_return_url: str | None = None
+    human_tutor_checkout_success_url: str | None = None
+    human_tutor_checkout_cancel_url: str | None = None
     clerk_issuer: str | None = None
     clerk_jwks_url: str | None = None
     clerk_audience: str | None = None
@@ -209,6 +241,177 @@ class Settings(BaseSettings):
                 "RevenueCat API key must be an app public SDK key for the read-only "
                 "Customer Info endpoint, not a project secret key"
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_human_tutor_marketplace_configuration(self) -> Self:
+        if not self.human_tutor_marketplace_enabled:
+            return self
+        if (
+            self.human_tutor_marketplace_pseudonym_key is None
+            or len(self.human_tutor_marketplace_pseudonym_key.get_secret_value().encode()) < 32
+        ):
+            raise ValueError(
+                "A human tutor marketplace pseudonym key of at least 32 bytes is required "
+                "when enabled"
+            )
+        if not self.human_tutor_marketplace_actor_allowlist or any(
+            not actor.strip() for actor in self.human_tutor_marketplace_actor_allowlist
+        ):
+            raise ValueError(
+                "A non-empty human tutor marketplace actor allowlist is required when enabled"
+            )
+        if self.clerk_configuration is None:
+            raise ValueError(
+                "Clerk authentication must be configured when the human tutor marketplace "
+                "is enabled"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_human_tutor_google_calendar_configuration(self) -> Self:
+        if not self.human_tutor_google_calendar_enabled:
+            return self
+        if not self.human_tutor_marketplace_enabled:
+            raise ValueError("Google Calendar requires the human tutor marketplace")
+        if (
+            self.human_tutor_google_calendar_client_id is None
+            or len(self.human_tutor_google_calendar_client_id.strip()) < 8
+        ):
+            raise ValueError("Google Calendar client ID is required when enabled")
+        for name, secret, minimum in (
+            ("Google Calendar client secret", self.human_tutor_google_calendar_client_secret, 16),
+            ("Google Calendar state key", self.human_tutor_google_calendar_state_key, 32),
+        ):
+            if secret is None or len(secret.get_secret_value().encode()) < minimum:
+                raise ValueError(f"{name} must be at least {minimum} bytes when enabled")
+        if self.human_tutor_google_calendar_token_key is None:
+            raise ValueError("Google Calendar token encryption key is required when enabled")
+        from app.modules.human_tutor_marketplace.calendar import decode_calendar_encryption_key
+
+        decode_calendar_encryption_key(
+            self.human_tutor_google_calendar_token_key.get_secret_value()
+        )
+        if not self.human_tutor_google_calendar_redirect_allowlist:
+            raise ValueError("Google Calendar redirect allowlist is required when enabled")
+        for redirect in self.human_tutor_google_calendar_redirect_allowlist:
+            parsed = urlsplit(redirect)
+            loopback = parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"}
+            native = (
+                parsed.scheme == "glidelingo"
+                and not parsed.netloc
+                and parsed.path == "/tutor/availability"
+            )
+            if (
+                (parsed.scheme != "https" and not loopback and not native)
+                or (not native and not parsed.netloc)
+                or parsed.username is not None
+                or parsed.password is not None
+                or not parsed.path.startswith("/")
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError(
+                    "Google Calendar redirects must be exact HTTPS, loopback HTTP, "
+                    "or the reviewed native URL"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def validate_human_tutor_marketplace_acquisition_configuration(self) -> Self:
+        if (
+            self.human_tutor_marketplace_acquisition_enabled
+            and not self.human_tutor_marketplace_enabled
+        ):
+            raise ValueError("Tutor acquisition requires the human tutor marketplace")
+        return self
+
+    @model_validator(mode="after")
+    def validate_human_tutor_messaging_configuration(self) -> Self:
+        if not self.human_tutor_messaging_enabled:
+            return self
+        if not self.human_tutor_marketplace_enabled:
+            raise ValueError("Tutor messaging requires the human tutor marketplace")
+        if self.human_tutor_message_retention_days is None:
+            raise ValueError("Tutor messaging requires an approved message retention period")
+        if not self.human_tutor_approved_meeting_hosts:
+            raise ValueError("Tutor messaging requires at least one approved meeting host")
+        host_pattern = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$")
+        if any(
+            host != host.lower() or "*" in host or host_pattern.fullmatch(host) is None
+            for host in self.human_tutor_approved_meeting_hosts
+        ):
+            raise ValueError("Approved meeting hosts must be exact lowercase DNS names")
+        return self
+
+    @model_validator(mode="after")
+    def validate_human_tutor_commerce_configuration(self) -> Self:
+        if not self.human_tutor_commerce_enabled:
+            if self.human_tutor_payout_execution_enabled:
+                raise ValueError("Tutor payout execution requires tutor commerce")
+            return self
+        if not self.human_tutor_marketplace_enabled:
+            raise ValueError("Tutor commerce requires the human tutor marketplace")
+        if (
+            self.human_tutor_payment_database_url is None
+            or self.human_tutor_payment_database_url.get_secret_value()
+            == self.database_url.get_secret_value()
+        ):
+            raise ValueError(
+                "Tutor commerce requires a distinct payment-authority database principal"
+            )
+        if not self.human_tutor_approved_meeting_hosts:
+            raise ValueError("Tutor commerce requires an approved meeting-host allowlist")
+        expected_prefix = (
+            "sk_live_" if self.human_tutor_stripe_environment == "PRODUCTION" else "sk_test_"
+        )
+        if (
+            self.human_tutor_stripe_secret_key is None
+            or not self.human_tutor_stripe_secret_key.get_secret_value().startswith(expected_prefix)
+        ):
+            raise ValueError("Tutor Stripe secret key must match the configured environment")
+        if (
+            self.human_tutor_stripe_webhook_secret is None
+            or not self.human_tutor_stripe_webhook_secret.get_secret_value().startswith("whsec_")
+            or len(self.human_tutor_stripe_webhook_secret.get_secret_value()) < 24
+        ):
+            raise ValueError("Tutor Stripe webhook secret is required when commerce is enabled")
+        if (
+            self.human_tutor_stripe_platform_account_id is None
+            or re.fullmatch(r"acct_[A-Za-z0-9]{8,}", self.human_tutor_stripe_platform_account_id)
+            is None
+        ):
+            raise ValueError(
+                "Tutor Stripe platform account ID is required when commerce is enabled"
+            )
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}\.[a-z]+", self.human_tutor_stripe_api_version) is None:
+            raise ValueError("Tutor Stripe API version must be explicitly date-pinned")
+        for name, value in (
+            ("Connect refresh URL", self.human_tutor_stripe_connect_refresh_url),
+            ("Connect return URL", self.human_tutor_stripe_connect_return_url),
+            ("checkout success URL", self.human_tutor_checkout_success_url),
+            ("checkout cancel URL", self.human_tutor_checkout_cancel_url),
+        ):
+            if value is None:
+                raise ValueError(f"Tutor Stripe {name} is required when commerce is enabled")
+            parsed = urlsplit(value)
+            loopback = parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"}
+            if (
+                not (parsed.scheme == "https" or loopback)
+                or not parsed.netloc
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.fragment
+            ):
+                raise ValueError(f"Tutor Stripe {name} must be an exact HTTPS or loopback URL")
+        return self
+
+    @model_validator(mode="after")
+    def validate_human_tutor_learning_bridge_configuration(self) -> Self:
+        if not self.human_tutor_learning_bridge_enabled:
+            return self
+        if not self.human_tutor_marketplace_enabled or not self.human_tutor_commerce_enabled:
+            raise ValueError("Tutor learning context requires marketplace commerce")
         return self
 
     @property

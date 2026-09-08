@@ -1,4 +1,6 @@
+import base64
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -67,6 +69,167 @@ def test_revenuecat_server_authorization_is_disabled_by_default() -> None:
     assert settings.revenuecat_environment == "SANDBOX"
     assert settings.revenuecat_api_key is None
     assert settings.revenuecat_entitlement_freshness_seconds == 900
+
+
+def test_human_tutor_marketplace_is_disabled_by_default() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.human_tutor_marketplace_enabled is False
+    assert settings.human_tutor_marketplace_acquisition_enabled is False
+    assert settings.human_tutor_marketplace_pseudonym_key is None
+    assert settings.human_tutor_marketplace_actor_allowlist == ()
+    assert settings.human_tutor_google_calendar_enabled is False
+    assert settings.human_tutor_messaging_enabled is False
+    assert settings.human_tutor_message_retention_days is None
+    assert settings.human_tutor_learning_bridge_enabled is False
+
+
+def test_enabled_human_tutor_marketplace_requires_fail_closed_configuration() -> None:
+    with pytest.raises(ValidationError, match="pseudonym key"):
+        Settings(_env_file=None, human_tutor_marketplace_enabled=True)
+
+    with pytest.raises(ValidationError, match="acquisition requires"):
+        Settings(_env_file=None, human_tutor_marketplace_acquisition_enabled=True)
+
+
+def test_enabled_human_tutor_marketplace_accepts_clerk_and_allowlist() -> None:
+    settings = Settings(
+        _env_file=None,
+        human_tutor_marketplace_enabled=True,
+        human_tutor_marketplace_pseudonym_key="m" * 32,
+        human_tutor_marketplace_actor_allowlist=("user_tutor_123",),
+        clerk_issuer="https://clerk.glidelingo.test",
+        clerk_jwks_url="https://clerk.glidelingo.test/.well-known/jwks.json",
+    )
+
+    assert settings.human_tutor_marketplace_enabled is True
+
+
+def test_enabled_google_calendar_requires_complete_minimal_scope_configuration() -> None:
+    base: dict[str, Any] = {
+        "_env_file": None,
+        "human_tutor_marketplace_enabled": True,
+        "human_tutor_marketplace_pseudonym_key": "m" * 32,
+        "human_tutor_marketplace_actor_allowlist": ("user_tutor_123",),
+        "clerk_issuer": "https://clerk.glidelingo.test",
+        "clerk_jwks_url": "https://clerk.glidelingo.test/.well-known/jwks.json",
+        "human_tutor_google_calendar_enabled": True,
+    }
+    with pytest.raises(ValidationError, match="client ID"):
+        Settings(**base)
+
+    settings = Settings(
+        **base,
+        human_tutor_google_calendar_client_id="google-calendar-client-id",
+        human_tutor_google_calendar_client_secret="s" * 32,
+        human_tutor_google_calendar_token_key=base64.urlsafe_b64encode(b"k" * 32).decode(),
+        human_tutor_google_calendar_state_key="c" * 32,
+        human_tutor_google_calendar_redirect_allowlist=(
+            "https://app.glidelingo.test/oauth/google-calendar",
+            "http://localhost:8081/oauth/google-calendar",
+        ),
+    )
+
+    assert settings.human_tutor_google_calendar_enabled is True
+
+
+def test_google_calendar_rejects_unsafe_redirects_and_bad_token_keys() -> None:
+    common: dict[str, Any] = {
+        "_env_file": None,
+        "human_tutor_marketplace_enabled": True,
+        "human_tutor_marketplace_pseudonym_key": "m" * 32,
+        "human_tutor_marketplace_actor_allowlist": ("user_tutor_123",),
+        "clerk_issuer": "https://clerk.glidelingo.test",
+        "clerk_jwks_url": "https://clerk.glidelingo.test/.well-known/jwks.json",
+        "human_tutor_google_calendar_enabled": True,
+        "human_tutor_google_calendar_client_id": "google-calendar-client-id",
+        "human_tutor_google_calendar_client_secret": "s" * 32,
+        "human_tutor_google_calendar_state_key": "c" * 32,
+    }
+    with pytest.raises(ValidationError, match="exactly 32 bytes"):
+        Settings(
+            **common,
+            human_tutor_google_calendar_token_key=base64.urlsafe_b64encode(b"too-short").decode(),
+            human_tutor_google_calendar_redirect_allowlist=(
+                "https://app.glidelingo.test/oauth/google-calendar",
+            ),
+        )
+    with pytest.raises(ValidationError, match="exact HTTPS"):
+        Settings(
+            **common,
+            human_tutor_google_calendar_token_key=base64.urlsafe_b64encode(b"k" * 32).decode(),
+            human_tutor_google_calendar_redirect_allowlist=(
+                "https://user:password@app.glidelingo.test/oauth/google-calendar",
+            ),
+        )
+
+
+def test_tutor_messaging_requires_retention_and_exact_meeting_hosts() -> None:
+    common: dict[str, Any] = {
+        "_env_file": None,
+        "human_tutor_marketplace_enabled": True,
+        "human_tutor_marketplace_pseudonym_key": "m" * 32,
+        "human_tutor_marketplace_actor_allowlist": ("user_tutor_123",),
+        "clerk_issuer": "https://clerk.glidelingo.test",
+        "clerk_jwks_url": "https://clerk.glidelingo.test/.well-known/jwks.json",
+        "human_tutor_messaging_enabled": True,
+    }
+    with pytest.raises(ValidationError, match="retention"):
+        Settings(**common)
+    with pytest.raises(ValidationError, match="lowercase DNS"):
+        Settings(
+            **common,
+            human_tutor_message_retention_days=90,
+            human_tutor_approved_meeting_hosts=("*.Example.com",),
+        )
+
+    settings = Settings(
+        **common,
+        human_tutor_message_retention_days=90,
+        human_tutor_approved_meeting_hosts=("meet.example.com",),
+    )
+    assert settings.human_tutor_messaging_enabled is True
+
+
+def test_tutor_commerce_requires_environment_matched_server_configuration() -> None:
+    with pytest.raises(ValidationError, match="payout execution requires tutor commerce"):
+        Settings(_env_file=None, human_tutor_payout_execution_enabled=True)
+    common: dict[str, Any] = {
+        "_env_file": None,
+        "human_tutor_marketplace_enabled": True,
+        "human_tutor_marketplace_pseudonym_key": "m" * 32,
+        "human_tutor_marketplace_actor_allowlist": ("user_tutor_123",),
+        "clerk_issuer": "https://clerk.glidelingo.test",
+        "clerk_jwks_url": "https://clerk.glidelingo.test/.well-known/jwks.json",
+        "human_tutor_approved_meeting_hosts": ("meet.example.com",),
+        "human_tutor_commerce_enabled": True,
+        "human_tutor_payment_database_url": (
+            "postgresql+psycopg://marketplace_payment@127.0.0.1:55433/glidelingo"
+        ),
+    }
+    with pytest.raises(ValidationError, match="secret key"):
+        Settings(**common)
+    with pytest.raises(ValidationError, match="match the configured environment"):
+        Settings(**common, human_tutor_stripe_secret_key="sk_live_wrong_environment")
+
+    settings = Settings(
+        **common,
+        human_tutor_stripe_secret_key="sk_test_reviewed_sandbox_key",
+        human_tutor_stripe_webhook_secret="whsec_reviewed_test_secret",
+        human_tutor_stripe_platform_account_id="acct_reviewed123",
+        human_tutor_stripe_connect_refresh_url="https://app.glidelingo.test/tutor/payouts",
+        human_tutor_stripe_connect_return_url="https://app.glidelingo.test/tutor/payouts",
+        human_tutor_checkout_success_url=("https://app.glidelingo.test/bookings?checkout=success"),
+        human_tutor_checkout_cancel_url=("https://app.glidelingo.test/bookings?checkout=cancelled"),
+    )
+
+    assert settings.human_tutor_commerce_enabled is True
+    assert settings.human_tutor_stripe_environment == "SANDBOX"
+
+
+def test_tutor_learning_bridge_requires_marketplace_commerce() -> None:
+    with pytest.raises(ValidationError, match="requires marketplace commerce"):
+        Settings(_env_file=None, human_tutor_learning_bridge_enabled=True)
 
 
 def test_desktop_minimum_supported_version_defaults_to_zero() -> None:

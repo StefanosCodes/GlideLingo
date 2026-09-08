@@ -99,3 +99,71 @@ Keep `GLIDELINGO_REVENUECAT_ENABLED=false` and `GLIDELINGO_LESSON_TUTOR_ENABLED=
 least-privileged app public SDK key used by the server's read-only Customer Info request, environment
 filter, and live sandbox evidence are all in place. The development Terraform contract must pin all
 four RevenueCat Secret Manager version numbers before the flag can be enabled.
+
+## Human tutor marketplace application core
+
+`006_human_tutor_marketplace_core.sql` is the first additive human-tutor marketplace migration.
+Numbers `004` and `005` are reserved by the in-flight affiliate and durable billing-event stack; do
+not renumber or apply `006` until the integration train has reconciled and applied those predecessors.
+The migration creates only the tutor application, normalized language/specialty, unpublished private
+profile, one optional credential, one USD offering draft, immutable commission/cancellation policy
+versions, operator-capability, and append-only audit facts required by Milestone 1. It deliberately
+creates no learner discovery, booking, payment, transfer, calendar, or messaging tables.
+
+Apply it with the DDL-capable operator after `SET ROLE cloudsqlsuperuser`. The API runtime receives no
+ability to grant operator capabilities, alter immutable policy versions, set payout readiness,
+directly activate an offering, create an approved or published record, update or delete audit events,
+or run DDL. Database triggers preserve application transitions, profile/application ownership,
+policy types, the single-currency rule, and active-offering publication eligibility even if a caller
+bypasses the service. Publication and suspension take locks in application/profile/offering order so
+their concurrent result is always suspended and private; first credential/offering creation locks the
+owning profile so equivalent retries converge instead of surfacing a uniqueness failure.
+Seed the required `review_tutor_applications`, `manage_tutor_status`, and
+`verify_tutor_credentials` capabilities through an approved operator procedure using the exact
+`mktusr_v1_` pseudonym derived with the environment's marketplace pseudonym key; never store the raw
+Clerk user ID in these tables.
+
+Keep `GLIDELINGO_HUMAN_TUTOR_MARKETPLACE_ENABLED=false` until the migration and grants are verified,
+the server-only pseudonym key is pinned, Clerk is configured, and an explicit test-actor allowlist is
+present. This migration does not enable discovery, messaging, calendar access, payments, or payouts.
+
+## Human tutor marketplace addenda
+
+After the live migration queue includes separately owned `004`, `005`, and `007`, apply the human
+tutor marketplace addenda in numeric order:
+
+- `008_human_tutor_marketplace_discovery_availability.sql` adds public-safe discovery inputs,
+  recurring manual availability/exceptions, dialects, and actor-scoped favorites.
+- `009_human_tutor_marketplace_google_calendar.sql` adds one-time signed OAuth state, encrypted token
+  storage, and bounded busy intervals without calendar event content.
+- `010_human_tutor_marketplace_messaging.sql` adds participant conversations, literal text messages,
+  blocks, reports/access audit, bounded rate events, preferences, and durable notification jobs.
+- `011_human_tutor_marketplace_booking_checkout.sql` adds Connect status, protected meeting config,
+  booking holds and immutable authority/price/policy snapshots, database overlap prevention, signed
+  Stripe event deduplication, and reconciliation jobs.
+- `012_human_tutor_marketplace_lifecycle_money_reviews.sql` extends booking states, records schedule
+  revisions, durable refund/transfer/reversal and reminder jobs, append-only conservation ledgers, and
+  verified-booking reviews. Its constraint replacement is intentional and occurs inside one
+  transaction; it does not delete booking facts.
+- `013_human_tutor_marketplace_learning_bridge.sql` adds explicit booking-scoped learner consent,
+  append-only consent audit, bounded learning selections, and tutor follow-up that has no foreign key
+  or write path to official learning evidence.
+- `014_human_tutor_marketplace_hardening.sql` adds bounded multi-credential and multi-offering
+  ownership, exact atomic publication, participant action rate evidence, transition/review audit
+  records, strict review timing, money-operation immutability, bounded server-clock retention, and a
+  separate NOLOGIN payment-authority role. The DDL operator needs temporary `ADMIN OPTION` on
+  `glidelingo_app` so `014` can make the payment role inherit ordinary data-plane rights; runtime
+  LOGIN principals are provisioned separately as documented in the runbook.
+
+Use the same DDL-capable operator and transactional `psql --set ON_ERROR_STOP=1` posture as `006`.
+Never run these migrations from API startup. Revoke inherited Cloud SQL roles from
+`glidelingo_app`, then verify each file's exact grants while authenticated as that runtime login.
+Audit, transition, webhook, consent, schedule-revision, and money-ledger facts must not be updated or
+deleted by the runtime. The runtime must not own tables/functions, create schema objects, grant
+capabilities, bypass publication/payout checks, or disable overlap, transition, eligibility, or
+conservation triggers.
+
+All matching server/client flags, including the independent marketplace acquisition switch, remain
+false through migration, worker/maintenance deployment, provider provenance, real sandbox journeys,
+support/legal approval, and controlled-pilot authorization. Operational activation and rollback are
+defined in `docs/infra/HUMAN-TUTOR-MARKETPLACE-RUNBOOK.md`.

@@ -13,20 +13,24 @@ The repository currently contains:
 - Shared TypeScript UI, routes, design tokens, and platform-specific component files.
 - Canonical npm commands, environment diagnostics, and Electron verification.
 - A public FastAPI service with liveness/readiness, verified Clerk sessions, and a dormant
-  authenticated lesson-tutor gateway.
+  authenticated lesson-tutor gateway, desktop update policy, and server-owned billing boundaries.
 - An IAM-private lesson-tutor FastAPI service that alone owns authored context and the OpenAI SDK.
 - A loopback-only local PostgreSQL service managed by Docker Compose.
 - A centralized client API boundary and internal system-diagnostics feature.
-- An operator-run PostgreSQL tutor guard migration for idempotency and bounded turn admission.
-- Pull-request verification for both the client and backend boundaries.
+- Versioned PostgreSQL migrations for tutor admission, RevenueCat entitlement state, webhook
+  deduplication, and bounded webhook retention.
+- Production Cloud Run, Cloud SQL, Secret Manager, Artifact Registry, and GitHub OIDC deployment.
+- One required pull-request verification gate plus automatic API deployment after verified `main`
+  changes.
+- A signed/notarized universal macOS release and GitHub Releases updater channel.
 
 The repository does **not** currently contain:
 
 - General product tables or persisted learner progress on the server.
-- Server-owned RevenueCat entitlement authorization or its webhook state.
 - A generated API client.
 - Background workers, Redis, or object storage.
-- A separate production GCP project and enabled tutor rollout.
+- General server-owned learner progress or course-attempt tables.
+- An enabled tutor rollout.
 
 All tutor flags default off. The guard migration is not run by application startup, and the tutor
 must remain disabled until the activation gates in `infra/gcp/README.md` are complete.
@@ -55,12 +59,13 @@ The repository remains one monorepo, while mobile, desktop, API, workers, and mi
 
 ## Read this documentation in order
 
-1. [System architecture](./SYSTEM-ARCHITECTURE.md) explains the major components, boundaries, and state ownership.
-2. [Folder structure](./FOLDER-STRUCTURE.md) explains where current and future code belongs.
-3. [Feature development](./FEATURE-DEVELOPMENT.md) shows the repeatable end-to-end design pattern.
-4. [Local development and operations](./LOCAL-DEVELOPMENT.md) defines commands, environments, debugging, and observability.
-5. [Deployment](./DEPLOYMENT.md) separates iOS, Android, macOS, web, API, database, and worker release lanes.
-6. [Implementation roadmap](./IMPLEMENTATION-ROADMAP.md) defines the order in which the architecture should become real.
+1. [Desktop-first development runway](./DEVELOPMENT-RUNWAY.md) is the current operator path from local signup through deployment and installed-user updates.
+2. [System architecture](./SYSTEM-ARCHITECTURE.md) explains the major components, boundaries, and state ownership.
+3. [Folder structure](./FOLDER-STRUCTURE.md) explains where current and future code belongs.
+4. [Feature development](./FEATURE-DEVELOPMENT.md) shows the repeatable end-to-end design pattern.
+5. [Local development and operations](./LOCAL-DEVELOPMENT.md) defines commands, environments, debugging, and observability.
+6. [Deployment](./DEPLOYMENT.md) separates iOS, Android, macOS, web, API, database, and worker release lanes.
+7. [Implementation roadmap](./IMPLEMENTATION-ROADMAP.md) defines the order in which the architecture should become real.
 
 ## Architecture principles
 

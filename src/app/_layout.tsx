@@ -120,7 +120,9 @@ function SignedInNavigation() {
     );
   }
 
-  return <AppNavigation onboardingComplete={state.completed || Boolean(enrolledCourse)} signedIn />;
+  // LearningProvider does not yet persist native enrollment. Requiring the course
+  // prevents a durable onboarding flag from opening an empty app after restart.
+  return <AppNavigation onboardingComplete={Boolean(enrolledCourse)} signedIn />;
 }
 
 function AppNavigation({ signedIn, onboardingComplete }: { signedIn: boolean; onboardingComplete: boolean }) {

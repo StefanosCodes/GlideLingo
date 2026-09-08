@@ -15,8 +15,10 @@ import {
   type OnboardingGoal,
   type OnboardingRhythm,
 } from '@/features/onboarding/onboarding-state';
-import { PronunciationControl } from '@/features/learning-session/pronunciation-control';
-import { usePronunciationPlayer } from '@/features/learning-session/audio/use-pronunciation-player';
+import {
+  type PronunciationStatus,
+  usePronunciationPlayer,
+} from '@/features/learning-session/audio/use-pronunciation-player';
 import { useTheme } from '@/hooks/use-theme';
 import { useBilling } from '@/providers/billing-provider';
 import { useLearning } from '@/providers/learning-provider';
@@ -69,6 +71,7 @@ export function OnboardingScreen() {
   const [sampleChecked, setSampleChecked] = useState(false);
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
   const [completionError, setCompletionError] = useState<string | null>(null);
+  const [completionPending, setCompletionPending] = useState(false);
   const pronunciation = usePronunciationPlayer();
   const audioState = pronunciation.stateFor('el-letter-alpha');
   const previousStep = previousOnboardingStep(state.step);
@@ -77,8 +80,10 @@ export function OnboardingScreen() {
 
   async function finishOnboarding(access: 'free' | 'pro') {
     setCompletionError(null);
+    setCompletionPending(true);
     if (!startCourse('el-from-zero')) {
       setCompletionError('The Greek course could not be started. Please try again.');
+      setCompletionPending(false);
       return;
     }
     await completeOnboarding(access);
@@ -218,8 +223,18 @@ export function OnboardingScreen() {
       <OnboardingFrame
         {...sharedFrameProps}
         actions={
-          sampleChecked ? (
+          sampleChecked && correct ? (
             <GlideButton fullWidth label="Continue" onPress={completeSample} testID="onboarding-sample-continue" />
+          ) : sampleChecked ? (
+            <GlideButton
+              fullWidth
+              label="Try again"
+              onPress={() => {
+                setSampleChoice(null);
+                setSampleChecked(false);
+              }}
+              testID="onboarding-sample-retry"
+            />
           ) : (
             <GlideButton
               disabled={!sampleChoice}
@@ -242,7 +257,7 @@ export function OnboardingScreen() {
           <ThemedText type="body" themeColor="textSecondary">
             like the a in father
           </ThemedText>
-          <PronunciationControl
+          <SampleAudioControl
             audioId="el-letter-alpha"
             error={audioState.error}
             onPlay={pronunciation.play}
@@ -309,23 +324,24 @@ export function OnboardingScreen() {
         <View style={styles.paywallActions}>
           {billing.isPro ? (
             <GlideButton
+              disabled={completionPending}
               fullWidth
               label="Continue with Pro"
               onPress={() => void finishOnboarding('pro')}
               testID="onboarding-pro-continue"
             />
-          ) : (
+          ) : billing.mode === 'mock' ? (
             <GlideButton
-              disabled={!selectedPackage || billing.status === 'loading'}
+              disabled={!selectedPackage || billing.status === 'loading' || completionPending}
               fullWidth
-              label={billing.mode === 'mock' ? 'Unlock Pro preview' : 'Continue with selected plan'}
+              label="Unlock Pro preview"
               onPress={() => selectedPackage && void billing.purchase(selectedPackage.identifier)}
               testID="onboarding-purchase"
             />
-          )}
+          ) : null}
           {!billing.isPro ? (
             <GlideButton
-              disabled={billing.status === 'loading'}
+              disabled={completionPending}
               fullWidth
               label="Continue with the free first mission"
               onPress={() => void finishOnboarding('free')}
@@ -336,19 +352,21 @@ export function OnboardingScreen() {
         </View>
       }>
       <ScreenIntro
-        eyebrow={`GLIDELINGO PRO${billing.mode === 'mock' ? ' · PREVIEW' : ''}`}
-        title={billing.isPro ? 'Your complete path is open.' : 'Keep your Greek moving.'}
+        eyebrow={`GLIDELINGO PRO${billing.mode === 'mock' ? ' · DESIGN PREVIEW' : ' · NOT YET FOR SALE'}`}
+        title={billing.isPro ? 'Your Pro access is active.' : 'Keep your Greek moving.'}
         copy={
           billing.isPro
             ? 'Pro access is active for this account. Your first full lesson is ready.'
-            : 'Choose Pro for the complete published path, or begin with the free first mission.'
+            : billing.mode === 'mock'
+              ? 'Preview the Pro decision in development, or begin with the free first mission.'
+              : 'Paid onboarding stays disabled until the Pro course boundary and complete renewal terms are ready. Begin with the free first mission.'
         }
       />
 
       <View style={styles.benefits}>
-        <BenefitRow>Complete published Greek course</BenefitRow>
+        <BenefitRow>One complete authored mission free</BenefitRow>
         <BenefitRow>Guided listening and practice</BenefitRow>
-        <BenefitRow>Pro access linked to your account</BenefitRow>
+        <BenefitRow>Account-linked progress and access</BenefitRow>
       </View>
 
       {billing.status === 'loading' ? (
@@ -360,7 +378,7 @@ export function OnboardingScreen() {
         </View>
       ) : null}
 
-      {!billing.isPro && billing.status !== 'loading' ? (
+      {!billing.isPro && billing.mode === 'mock' && billing.status !== 'loading' ? (
         <View style={styles.choiceList}>
           {billing.packages.map((item) => (
             <ChoiceRow
@@ -373,7 +391,7 @@ export function OnboardingScreen() {
               testID={`onboarding-package-${item.identifier}`}
             />
           ))}
-          {billing.packages.length === 0 ? (
+          {billing.packages.length === 0 && billing.status !== 'error' ? (
             <GlideSurface padding="roomy" style={styles.emptyPlan}>
               <ThemedText type="title3">Plans are temporarily unavailable.</ThemedText>
               <ThemedText type="footnote" themeColor="textSecondary">
@@ -397,6 +415,15 @@ export function OnboardingScreen() {
         </GlideSurface>
       ) : null}
 
+      {!billing.isPro && billing.mode !== 'mock' ? (
+        <GlideSurface padding="roomy" style={styles.emptyPlan} variant="tinted">
+          <ThemedText type="title3">Start with the free first mission.</ThemedText>
+          <ThemedText type="footnote" themeColor="textSecondary">
+            This onboarding screen will not start a real purchase until the paid course boundary and complete package terms ship together.
+          </ThemedText>
+        </GlideSurface>
+      ) : null}
+
       {completionError ? (
         <ThemedText accessibilityRole="alert" type="footnote" style={{ color: theme.danger }}>
           {completionError}
@@ -411,7 +438,9 @@ export function OnboardingScreen() {
           variant="tertiary"
         />
         <ThemedText type="caption" themeColor="textTertiary" style={styles.termsCopy}>
-          Store pricing and renewal details are shown before purchase. Subscriptions renew until cancelled.
+          {billing.mode === 'mock'
+            ? 'Development preview only. No store charge is created.'
+            : 'No onboarding purchase will be started from this screen.'}
         </ThemedText>
       </View>
     </OnboardingFrame>
@@ -438,7 +467,7 @@ function OnboardingFrame({
     <View style={styles.screen} testID="onboarding-screen">
       <View style={[styles.header, { paddingTop: top }]}>
         <View style={styles.headerRow}>
-          {onBack ? <GlideButton label="Back" onPress={onBack} size="regular" variant="tertiary" /> : <View />}
+          {onBack ? <GlideButton label="Back" onPress={onBack} variant="tertiary" /> : <View />}
           {progress !== undefined ? (
             <ThemedText type="caption" themeColor="textTertiary">
               {Math.round(progress * 100)}%
@@ -612,6 +641,42 @@ function BenefitRow({ children }: PropsWithChildren) {
   );
 }
 
+function SampleAudioControl({
+  audioId,
+  phrase,
+  status,
+  error,
+  onPlay,
+}: {
+  audioId: string;
+  phrase: string;
+  status: PronunciationStatus;
+  error: string | null;
+  onPlay: (audioId: string) => void;
+}) {
+  const label =
+    status === 'loading' ? 'Loading pronunciation…' : status === 'playing' ? 'Playing pronunciation' : error ? 'Retry audio' : 'Play sound';
+
+  return (
+    <View style={styles.audioControl}>
+      <GlideButton
+        disabled={status === 'loading'}
+        label={label}
+        onPress={() => onPlay(audioId)}
+        variant="secondary"
+      />
+      {error ? (
+        <ThemedText accessibilityRole="alert" type="footnote" themeColor="textSecondary">
+          {error}
+        </ThemedText>
+      ) : null}
+      <ThemedText type="caption" themeColor="textTertiary">
+        {phrase}
+      </ThemedText>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   actionBar: {
     alignSelf: 'center',
@@ -622,6 +687,7 @@ const styles = StyleSheet.create({
     maxWidth: 560,
   },
   alpha: { fontSize: 82, lineHeight: 90 },
+  audioControl: { alignItems: 'center', gap: Spacing.one },
   benefitRow: { alignItems: 'center', flexDirection: 'row', gap: Spacing.two },
   benefits: { gap: Spacing.two },
   brandMark: { height: 40, width: 40 },

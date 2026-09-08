@@ -67,3 +67,6 @@ example
 # generated native folders
 /ios
 /android
+
+# repository-local Git worktrees
+/.worktrees/

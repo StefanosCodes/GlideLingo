@@ -34,7 +34,7 @@ export default function DesignKitScreen() {
     setPrompt('');
   }
 
-  function goToToday() {
+  function goToHome() {
     if (router.canGoBack()) {
       router.back();
       return;
@@ -45,12 +45,12 @@ export default function DesignKitScreen() {
   return (
     <ScreenFrame includeTabInset={false} chrome={false} contentStyle={styles.content}>
       <Pressable
-        accessibilityLabel="Back to Today"
+        accessibilityLabel="Back to Home"
         accessibilityRole="button"
-        onPress={goToToday}
+        onPress={goToHome}
         style={({ pressed }) => [styles.back, pressed && styles.pressed]}>
         <ThemedText type="footnote" themeColor="textSecondary">
-          Back to Today
+          Back to Home
         </ThemedText>
       </Pressable>
 
@@ -71,7 +71,7 @@ export default function DesignKitScreen() {
             Speak with confidence.
           </TypeSample>
           <TypeSample label="SECTION · INTER SEMIBOLD" type="title2">
-            Today’s practice
+            Home practice
           </TypeSample>
           <TypeSample label="BODY · INTER REGULAR" type="body">
             Useful language, remembered for real life.
@@ -82,11 +82,12 @@ export default function DesignKitScreen() {
         </GlideSurface>
       </Section>
 
-      <Section title="Color roles" detail="Cool Zinc neutrals create hierarchy; color only communicates state.">
+      <Section title="Color roles" detail="Cool Zinc neutrals create hierarchy. Light blue marks the next action. Green confirms progress.">
         <GlideSurface padding="none">
           <ColorRole color={theme.text} label="Foreground" value="Primary content and actions" />
           <ColorRole color={theme.surfaceSecondary} label="Fill" value="Grouped content" />
           <ColorRole color={theme.border} label="Line" value="Separation and structure" />
+          <ColorRole color={theme.accent} label="Accent" value="Next useful action" />
           <ColorRole color={theme.success} label="Ready" value="Confirmed progress" last />
         </GlideSurface>
       </Section>
@@ -164,7 +165,7 @@ export default function DesignKitScreen() {
               72%
             </ThemedText>
           </View>
-          <ProgressBar value={0.72} />
+          <ProgressBar color={theme.accentStrong} value={0.72} />
         </GlideSurface>
       </Section>
     </ScreenFrame>

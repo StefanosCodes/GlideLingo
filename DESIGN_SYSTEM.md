@@ -16,7 +16,7 @@ The official Prompt Kit registry is built for React DOM with shadcn/ui, Tailwind
 
 1. **Content creates hierarchy.** Typography, spacing, and sequence come before containers.
 2. **One primary action.** A section may offer several paths, but only one should look dominant.
-3. **Color communicates state.** Neutral foreground handles actions. Green means ready or complete; gold means attention or streak; red means failure or destructive action.
+3. **Color communicates state.** Neutral foreground handles actions. Light blue marks the next useful action. Green means ready or complete; gold means attention or streak; red means failure or destructive action.
 4. **Borders before shadows.** Use hairlines and fill changes first. Cards and floating controls may use the Hackathon system’s restrained `0 1px 2px` shadow.
 5. **One type family.** Inter is used throughout. Weight, size, spacing, and hierarchy replace the previous serif/sans split.
 6. **Native behavior wins.** Keep platform-native accessibility, input, tab, keyboard, and switch behavior where it improves the experience.
@@ -28,7 +28,7 @@ Visual restraint does not mean emotional flatness. Use `.agents/skills/learning-
 ## Foundation
 
 - Colors are semantic roles in `src/constants/theme.ts`; screens do not introduce raw color values.
-- Colors translate the Hackathon OKLCH variables into cross-platform Zinc hex values: `#FCFCFC`/`#18181B` in light mode and `#09090B`/`#FAFAFA` in dark mode, with muted and border roles from Zinc 100–800.
+- Colors translate the Hackathon OKLCH variables into cross-platform Zinc hex values: `#FCFCFC`/`#18181B` in light mode and `#09090B`/`#FAFAFA` in dark mode, with muted and border roles from Zinc 100–800. Light-blue accent roles (`accent`, `accentStrong`, `accentSoft`, `accentMid`) mark the next useful action.
 - Spacing follows a 4-point grid with 20pt available for natural mobile rhythm.
 - Controls use 6–8pt radii, content surfaces use 12pt, and large input containers use 20pt.
 - Touch targets are at least 40pt, with 44–48pt preferred for primary mobile actions.
@@ -54,7 +54,8 @@ Visual restraint does not mean emotional flatness. Use `.agents/skills/learning-
 
 ## Usage rules
 
-- Do not add gradients, decorative glass, ambient color blobs, or heavy card stacks.
+- Do not add decorative glass, ambient color blobs, or heavy card stacks.
+- A quiet two-stop light-blue wash is allowed only on the next-action surface (`GlideSurface` variant `hero`) and lesson-closure / first-demonstrated cards. Everywhere else stays a flat fill.
 - Avoid a card around every section; a divider or whitespace is usually enough.
 - Use uppercase eyebrow labels sparingly and keep them descriptive.
 - All copy uses Inter; assistant output remains visually distinct through spacing, size, and surface treatment.

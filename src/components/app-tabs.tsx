@@ -17,34 +17,42 @@ export default function AppTabs() {
       }}
       tintColor={colors.text}>
       <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Label>Today</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           md={{ default: 'home', selected: 'home' }}
           sf={{ default: 'house', selected: 'house.fill' }}
         />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="path">
-        <NativeTabs.Trigger.Label>Path</NativeTabs.Trigger.Label>
+      <NativeTabs.Trigger name="quests">
+        <NativeTabs.Trigger.Label>Quests</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           md={{ default: 'map', selected: 'map' }}
           sf={{ default: 'map', selected: 'map.fill' }}
         />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="review">
-        <NativeTabs.Trigger.Label>Review</NativeTabs.Trigger.Label>
+      <NativeTabs.Trigger name="letters">
+        <NativeTabs.Trigger.Label>Letters</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
-          md={{ default: 'replay', selected: 'replay' }}
-          sf={{ default: 'arrow.clockwise', selected: 'arrow.clockwise' }}
+          md={{ default: 'abc', selected: 'abc' }}
+          sf={{ default: 'textformat.abc', selected: 'textformat.abc' }}
         />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="progress">
-        <NativeTabs.Trigger.Label>Progress</NativeTabs.Trigger.Label>
+      <NativeTabs.Trigger name="phrases">
+        <NativeTabs.Trigger.Label>Phrases</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
-          md={{ default: 'bar_chart', selected: 'bar_chart' }}
-          sf={{ default: 'chart.bar', selected: 'chart.bar.fill' }}
+          md={{ default: 'chat_bubble', selected: 'chat_bubble' }}
+          sf={{ default: 'text.bubble', selected: 'text.bubble.fill' }}
+        />
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="profile">
+        <NativeTabs.Trigger.Label>Profile</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          md={{ default: 'account_circle', selected: 'account_circle' }}
+          sf={{ default: 'person.circle', selected: 'person.circle.fill' }}
         />
       </NativeTabs.Trigger>
     </NativeTabs>

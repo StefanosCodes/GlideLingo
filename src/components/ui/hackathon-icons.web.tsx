@@ -114,6 +114,38 @@ export function MapIcon({ size = 16, color }: { size?: number; color: string }) 
   );
 }
 
+export function LettersIcon({ size = 16, color }: { size?: number; color: string }) {
+  return (
+    <Svg size={size}>
+      <Rect x="3.5" y="4" width="17" height="16" rx="2" stroke={color} strokeWidth="1.4" />
+      <Path d="M8 16 12 8l4 8M9.5 13h5" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+export function PhrasesIcon({ size = 16, color }: { size?: number; color: string }) {
+  return (
+    <Svg size={size}>
+      <Path
+        d="M5.5 5h13A2.5 2.5 0 0 1 21 7.5v7a2.5 2.5 0 0 1-2.5 2.5H11l-4.5 3v-3h-1A2.5 2.5 0 0 1 3 14.5v-7A2.5 2.5 0 0 1 5.5 5Z"
+        stroke={color}
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <Path d="M7.5 9.25h9M7.5 12.75h6" stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+export function ProfileIcon({ size = 16, color }: { size?: number; color: string }) {
+  return (
+    <Svg size={size}>
+      <Path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke={color} strokeWidth="1.4" />
+      <Path d="M4.5 20a7.5 5.5 0 0 1 15 0" stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 export function ReviewIcon({ size = 16, color }: { size?: number; color: string }) {
   return (
     <Svg size={size}>

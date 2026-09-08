@@ -42,6 +42,45 @@ already-applied checksum is a no-op and a checksum mismatch fails closed. The re
 reconciled idempotently after schema migrations. The script verifies the expected tables and deletes
 the operator on exit. Inspect and remove the named operator manually if cleanup reports a warning.
 
+## Reset application data
+
+For a reviewed clean-slate production test, clear the rows owned by the GlideLingo API with:
+
+```bash
+npm run db:reset:production -- --confirm glidelingo-prod-50843312405
+```
+
+The command accepts only the exact production project and instance. It refuses to run unless
+automated backups and point-in-time recovery are enabled and a successful backup exists. It creates
+a uniquely named short-lived `cloudsqlsuperuser`, locks the three reviewed application tables,
+prints before/after counts, deletes their rows in one transaction, proves the migration ledger is
+unchanged, and deletes the temporary operator on exit. If the Cloud SQL Auth Proxy is not installed,
+the command downloads the pinned official binary into a temporary directory and verifies its
+SHA-256 before use.
+
+The reset intentionally preserves the Cloud SQL instance, schema, migration ledger, roles, backups,
+and retention schedule. It does not delete Clerk identities or client-local learning state. Update
+the reviewed table contract in the script whenever a migration introduces another application-data
+table; until then the script fails closed rather than guessing whether a new table is safe to clear.
+
+For the complete clean desktop acceptance journey, invoke `$wipe-production-e2e` or run the guarded
+preparation command directly:
+
+```bash
+npm run e2e:production:prepare -- --confirm glidelingo-prod-50843312405
+```
+
+Preparation performs the same reset and resolves the one public DMG advertised by
+`https://glidelingo.com/`. The skill then drives the visible website download and native install.
+After the browser download, verify the exact file against the live site and published checksum:
+
+```bash
+npm run e2e:production:verify-download -- /absolute/path/to/GlideLingo-X.Y.Z-universal.dmg
+```
+
+Account credentials and verification codes are never command-line inputs; the skill accepts them
+only at the visible GlideLingo/Clerk form.
+
 ## GitHub environments
 
 Create `production-staging` and `production`. Configure both with these non-secret environment

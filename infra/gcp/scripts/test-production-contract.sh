@@ -110,6 +110,34 @@ if grep -Fq -- '--password="${operator_password}"' "${migration_script}" \
   echo "Production migration must keep temporary database credentials out of process arguments." >&2
   exit 1
 fi
+reset_script="${root}/infra/gcp/scripts/reset-production-application-data.sh"
+grep -Fq 'expected_project="glidelingo-prod-50843312405"' "${reset_script}"
+grep -Fq '"${1:-}" != "--confirm"' "${reset_script}"
+grep -Fq 'backups_enabled' "${reset_script}"
+grep -Fq 'pitr_enabled' "${reset_script}"
+grep -Fq "status=SUCCESSFUL" "${reset_script}"
+grep -Fq 'DELETE FROM public.lesson_tutor_turn_guard;' "${reset_script}"
+grep -Fq 'DELETE FROM public.revenuecat_entitlement_state;' "${reset_script}"
+grep -Fq 'DELETE FROM public.revenuecat_webhook_event;' "${reset_script}"
+grep -Fq 'ledger_after' "${reset_script}"
+grep -Fq 'proxy_sha256="d5233967a8b5141bd1e95edcad2fb9930357d3ffbd9f433b82fc4a538d3fd68b"' "${reset_script}"
+if grep -Eq '(^|[[:space:]])(DROP|TRUNCATE)[[:space:]]' "${reset_script}" \
+  || grep -Eq 'DELETE FROM public\.glidelingo_schema_migration' "${reset_script}"; then
+  echo "Production reset must never drop/truncate objects or delete the migration ledger." >&2
+  exit 1
+fi
+reset_cleanup_line="$(grep -n -m1 '^operator_created=true$' "${reset_script}" | cut -d: -f1)"
+reset_request_line="$(grep -n -m1 '^curl --config ' "${reset_script}" | cut -d: -f1)"
+test "${reset_cleanup_line}" -lt "${reset_request_line}"
+if grep -Fq -- '--password="${operator_password}"' "${reset_script}" \
+  || grep -Fq 'sql users set-password' "${reset_script}"; then
+  echo "Production reset must keep temporary database credentials out of process arguments." >&2
+  exit 1
+fi
+journey_script="${root}/scripts/e2e/prepare-production-desktop-journey.sh"
+grep -Fq 'expected_project="glidelingo-prod-50843312405"' "${journey_script}"
+grep -Fq '"${root}/infra/gcp/scripts/reset-production-application-data.sh" "$@"' "${journey_script}"
+grep -Fq 'public-desktop-release.mjs" resolve' "${journey_script}"
 for secret_id in \
   glidelingo-desktop-macos-certificate-base64 \
   glidelingo-desktop-macos-certificate-password \

@@ -56,6 +56,7 @@ Run commands from this directory—the one containing `package.json`:
 | Install the locked backend environment | `npm run setup:backend` |
 | Install the locked private tutor environment | `npm run setup:tutor` |
 | Start PostgreSQL | `npm run db:up` |
+| Reset local app tables, preserving schema/volume | `npm run db:reset:local -- --confirm glidelingo-local` |
 | Start FastAPI | `npm run api` |
 | Start database, API, and interactive Expo | `npm run dev` |
 | Start database, API, and Electron | `npm run dev:desktop` |
@@ -67,6 +68,7 @@ Run commands from this directory—the one containing `package.json`:
 | Run lint, types, and tests | `npm run verify` |
 | Run all Expo and desktop checks | `npm run verify:full` |
 | Run the database integration gate | `npm run verify:full-stack` |
+| Prepare a clean local desktop E2E | `npm run e2e:local:prepare -- --confirm glidelingo-local` |
 | Clear mobile Metro state | `npm run start:clear` |
 | Clear desktop Metro state | `npm run desktop:clear` |
 | Build a local macOS `.app` | `npm run desktop:package` |

@@ -107,7 +107,7 @@ function AuthLoadingScreen() {
 function SignedInNavigation() {
   const colors = useTheme();
   const { enrolledCourse } = useLearning();
-  const { ready, state } = useOnboarding();
+  const { ready } = useOnboarding();
 
   if (!ready) {
     return (

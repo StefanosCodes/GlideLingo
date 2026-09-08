@@ -2,6 +2,26 @@
 
 GlideLingo is an Expo SDK 57 app using TypeScript and Expo Router. The same source project targets Android, iOS, web, and an Electron desktop shell.
 
+## Development cycle
+
+Install the locked environments once per checkout:
+
+```bash
+npm ci
+npm run setup:backend
+npm run setup:tutor
+```
+
+The normal product loop is intentionally short:
+
+1. Create one focused branch from current `main`.
+2. Run `npm run dev` for Expo/mobile/web, or `npm run dev:desktop` for Electron.
+3. Before pushing, run `npm run verify`. Use `npm run verify:full` when Expo configuration, dependencies, desktop packaging, backend, tutor, or database wiring changed.
+4. Open a PR. The single required `Verify` check covers the app, desktop export, API, tutor service, and website.
+5. Merge when `Verify` is green. `main` is verified again and the API deploys automatically; desktop distribution remains a separate intentional release.
+
+Use `npm run diagnose` only when the local stack does not start cleanly. Cache-clearing commands are recovery tools, not routine setup.
+
 ## Full-stack foundation
 
 The repository now contains a deliberately small full-stack walking skeleton:

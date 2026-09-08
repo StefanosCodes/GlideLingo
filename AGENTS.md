@@ -37,6 +37,10 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
   - Drives meaningful outcomes through visible controls in Expo web and the real Electron BrowserWindow with correlated runtime evidence.
   - Separates walkthrough, diagnosis, repair, harness establishment, and expected-red qualification; missing capability cannot become a false green.
   - Preserves Electron production security, isolated state, deterministic teardown, and explicit handling for OS-owned UI.
+- **Repository Skill (`.agents/skills/wipe-production-e2e/SKILL.md`)**:
+  - Executes guarded local-development or production application-data resets and the matching macOS signup journey.
+  - Binds local source Electron or the live website/published DMG to Clerk verification, onboarding, and relaunch in one evidence graph.
+  - Keeps Cloud SQL rows, Clerk identities, client-local state, and credentials as separate authorization boundaries.
 - **Portable Engineering Workflows (`~/.agents/skills/`)**:
   - `$dev-build-feature`: Implement or extend features using the inspect, decide, act, observe, verify loop.
   - `$dev-debug-issue`: Diagnose and fix runtime bugs with evidence, reproducible traces, and root-cause proof.

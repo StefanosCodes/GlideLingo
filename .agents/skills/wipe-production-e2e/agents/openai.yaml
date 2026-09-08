@@ -1,0 +1,7 @@
+interface:
+  display_name: "Clean Desktop E2E"
+  short_description: "Reset local or prod and prove desktop signup"
+  default_prompt: "Use $wipe-production-e2e in the local or production environment I specify, then prove the clean macOS signup journey."
+
+policy:
+  allow_implicit_invocation: true

@@ -28,6 +28,11 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
   - Evidence-backed emotional behavior design for learning journeys, gamification, retention, and lifecycle messaging.
   - Separates learning outcomes, target behavior, emotional transitions, and business outcomes.
   - Maintains GlideLingo's calm-momentum principles, ethical guardrails, research ledger, and behavior brief format.
+- **Repository Skill (`.agents/skills/operational-ui-e2e/SKILL.md`)**:
+  - Binds functional acceptance to the exact PR head, owning worktree, immutable SHA, and supported target OS.
+  - Autonomously drives the same meaningful outcome through visible controls in Expo web and the real Electron BrowserWindow with correlated renderer, main-process, Expo, and service evidence.
+  - Separates walkthrough, diagnosis, repair, and harness-establishment modes; missing capability is blocked rather than converted into an API, export, screenshot, or process-start false green.
+  - Preserves Electron production security, isolated state, deterministic teardown, and explicit residual handling for OS-owned UI that standard automation cannot control.
 - **Portable Engineering Workflows (`~/.agents/skills/`)**:
   - `$dev-build-feature`: Implement or extend features using the inspect, decide, act, observe, verify loop.
   - `$dev-debug-issue`: Diagnose and fix runtime bugs with evidence, reproducible traces, and root-cause proof.

@@ -11,54 +11,57 @@ function readWorkflow(name) {
   return readFileSync(path.join(workflowRoot, name), 'utf8');
 }
 
-test('the operator-facing Actions surface contains exactly four workflows', () => {
+test('the operator-facing Actions surface contains only CI/CD and desktop release', () => {
   const workflows = readdirSync(workflowRoot)
     .filter((name) => /\.ya?ml$/.test(name))
     .sort();
 
-  assert.deepEqual(workflows, [
-    'deploy-development-api.yml',
-    'deploy-production-api.yml',
-    'desktop-release.yml',
-    'verify.yml',
-  ]);
+  assert.deepEqual(workflows, ['ci.yml', 'desktop-release.yml']);
 });
 
-test('CI keeps every protected check and user-facing verification in one workflow', () => {
-  const workflow = readWorkflow('verify.yml');
+test('CI/CD uses the same verification path for PRs and main, then deploys only after verification', () => {
+  const workflow = readWorkflow('ci.yml');
 
-  assert.match(workflow, /^name: CI$/m);
-  assert.match(workflow, /^\s+name: Expo and Electron$/m);
-  assert.match(workflow, /^\s+name: FastAPI and PostgreSQL$/m);
-  assert.match(workflow, /^\s+name: Terraform$/m);
-  assert.match(workflow, /^\s+name: Website production states$/m);
-  assert.match(workflow, /^\s+name: Expo web and Electron functional$/m);
-  assert.match(workflow, /^\s+client_gate:$/m);
-  assert.match(workflow, /^\s+needs: \[client, website, functional\]$/m);
-  assert.match(workflow, /test "\$\{WEBSITE_RESULT\}" = "success"/);
-  assert.match(workflow, /test "\$\{FUNCTIONAL_RESULT\}" = "success"/);
+  assert.match(workflow, /^name: CI\/CD$/m);
   assert.match(workflow, /^\s+pull_request:$/m);
   assert.match(workflow, /^\s+push:$/m);
+  assert.match(workflow, /^\s+branches: \[main\]$/m);
+  assert.match(workflow, /^\s+verify:$/m);
+  assert.match(workflow, /^\s+name: Verify$/m);
+  assert.match(workflow, /run: npm run verify/);
+  assert.match(workflow, /run: npm run desktop:export/);
+  assert.match(workflow, /run: npm run setup:backend && npm run api:verify/);
+  assert.match(workflow, /run: npm run setup:tutor && npm run tutor:verify/);
+  assert.match(workflow, /run: npm run check && npm test && npm run build/);
+  assert.match(workflow, /^\s+deploy:$/m);
+  assert.match(workflow, /^\s+name: Deploy API$/m);
+  assert.match(workflow, /^\s+needs: verify$/m);
+  assert.match(
+    workflow,
+    /if: \$\{\{ github\.event_name != 'pull_request' && github\.ref == 'refs\/heads\/main' \}\}/,
+  );
 });
 
-test('development deploy defaults to the API and keeps the tutor manual and disabled', () => {
-  const workflow = readWorkflow('deploy-development-api.yml');
+test('production deploy keeps the essential cloud security and recovery primitives', () => {
+  const workflow = readWorkflow('ci.yml');
 
-  assert.match(workflow, /^name: Deploy Development$/m);
-  assert.match(workflow, /^\s+default: api$/m);
-  assert.match(workflow, /^\s+- tutor$/m);
-  assert.match(workflow, /github\.event_name == 'workflow_dispatch'.*inputs\.component == 'tutor'/);
-  assert.match(workflow, /test "\$\{enabled\}" = "false"/);
-  assert.doesNotMatch(workflow, /^\s+branches: \[main\][\s\S]*services\/lesson-tutor\/\*\*/m);
+  assert.match(workflow, /^\s+environment: production$/m);
+  assert.match(workflow, /^\s+id-token: write$/m);
+  assert.match(workflow, /google-github-actions\/auth@/);
+  assert.match(workflow, /workload_identity_provider:/);
+  assert.match(workflow, /service_account:/);
+  assert.match(workflow, /:\$\{GITHUB_SHA\}/);
+  assert.match(workflow, /gcloud run deploy/);
+  assert.match(workflow, /\/health\/live/);
+  assert.match(workflow, /\/health\/ready/);
 });
 
-test('production API and desktop publication remain intentional release actions', () => {
-  const api = readWorkflow('deploy-production-api.yml');
+test('desktop publication remains an explicit signed release path', () => {
   const desktop = readWorkflow('desktop-release.yml');
 
-  assert.match(api, /^\s+workflow_dispatch:$/m);
-  assert.doesNotMatch(api, /^\s+push:$/m);
+  assert.match(desktop, /^name: Desktop Release$/m);
   assert.match(desktop, /^\s+workflow_dispatch:$/m);
   assert.match(desktop, /^\s+tags:$/m);
   assert.match(desktop, /^\s+- desktop-v\*$/m);
+  assert.match(desktop, /Sign, notarize, and stage macOS draft/);
 });

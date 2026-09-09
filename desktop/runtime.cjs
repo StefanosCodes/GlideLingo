@@ -78,6 +78,20 @@ function buildContentSecurityPolicy({
   ].join('; ');
 }
 
+function applyContentSecurityPolicy(response, policy) {
+  if (typeof policy !== 'string' || !policy || /[\r\n]/.test(policy)) {
+    throw new Error('Content Security Policy must be a non-empty single-line value.');
+  }
+
+  const headers = new Headers(response.headers);
+  headers.set('Content-Security-Policy', policy);
+  return new Response(response.body, {
+    headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
+}
+
 function validateProductionApiOrigin(value) {
   if (typeof value !== 'string' || value !== value.trim()) {
     throw new Error('The packaged API origin must be a trimmed HTTPS origin.');
@@ -426,6 +440,7 @@ module.exports = {
   PRODUCTION_CLERK_ORIGIN,
   REVENUECAT_BRANDING_ORIGIN,
   REVENUECAT_WEB_SDK_ORIGIN,
+  applyContentSecurityPolicy,
   buildContentSecurityPolicy,
   findAuthCallbackUrl,
   isAllowedAuthPopupNavigation,

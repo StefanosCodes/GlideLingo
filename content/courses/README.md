@@ -1,4 +1,16 @@
-# Course audio authoring
+# Course content and audio authoring
+
+Course packages are versioned JSON records validated locally without provider credentials. Run:
+
+```bash
+npm run course:validate
+```
+
+Only reviewed packages with valid publication metadata may be treated as published. The current
+Greek package is a draft compatibility migration of one lesson; the remaining roadmap entries are
+unavailable placeholders.
+
+## Saved audio
 
 Static pronunciation audio is generated during authoring and bundled with GlideLingo. The app only knows stable `audioId` values; it never calls Google Cloud at runtime.
 

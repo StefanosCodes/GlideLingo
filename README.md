@@ -2,29 +2,55 @@
 
 GlideLingo is an Expo SDK 57 app using TypeScript and Expo Router. The same source project targets Android, iOS, web, and an Electron desktop shell.
 
+## Development cycle
+
+Install the locked environments once per checkout:
+
+```bash
+npm ci
+npm run setup:backend
+npm run setup:tutor
+```
+
+The normal product loop is intentionally short:
+
+1. Create one focused branch from current `main`.
+2. Run `npm run dev` for Expo/mobile/web, or `npm run dev:desktop` for Electron.
+3. Before pushing, run `npm run verify`. Use `npm run verify:full` when Expo configuration, dependencies, desktop packaging, backend, tutor, or database wiring changed.
+4. Open a PR. The single required `Verify` check covers the app, desktop export, API, tutor service, and website.
+5. Merge when `Verify` is green. `main` is verified again and the API deploys automatically; desktop distribution remains a separate intentional release.
+
+Use `npm run diagnose` only when the local stack does not start cleanly. Cache-clearing commands are recovery tools, not routine setup.
+
+For the complete register/sign-in, testing, API-deploy, desktop-release, and installed-user update
+path, use the [desktop-first development runway](docs/infra/DEVELOPMENT-RUNWAY.md).
+
 ## Full-stack foundation
 
-The repository now contains a deliberately small full-stack walking skeleton:
+The repository now contains the desktop-first full-stack foundation:
 
 - Expo SDK 57 serves Android, iOS, and web from one TypeScript application.
 - Electron packages the Expo web target as the macOS desktop application.
-- FastAPI exposes liveness and PostgreSQL readiness on port `8123`.
+- FastAPI exposes health, verified Clerk session, desktop update-policy, RevenueCat entitlement, and
+  dormant lesson-tutor boundaries on port `8123`.
 - Docker Compose runs a project-owned PostgreSQL instance on `55433`.
 - The internal `/diagnostics` route proves the client-to-database wiring.
 
 The long-term direction, folder ownership, feature-development pattern, local operations, deployment
-lanes, and implementation roadmap live in [`docs/infra/README.md`](docs/infra/README.md). Clerk
-authentication and the dormant tutor guard migration now exist. Broader product persistence,
-server-owned entitlement authorization, workers, and a separate production environment remain
-intentionally unimplemented.
-
-This slice proves development connectivity. A packaged Electron release still needs an exact production HTTPS API origin and matching restrictive Content Security Policy before it can call the deployed API; that belongs to the release-foundation slice.
+lanes, and implementation roadmap live in [`docs/infra/README.md`](docs/infra/README.md). Production
+Cloud Run and Cloud SQL, Clerk authentication, server-owned entitlement authorization, database
+migrations, and the signed desktop release/update channel now exist. General server-side learner
+progress, background workers, and tutor activation remain intentionally deferred.
 
 ## Learning system reference
 
-The language-independent course standard, reusable course outline, progress and gamification rules, and learning-system execution plan live in [`docs/learning/README.md`](docs/learning/README.md).
+The language-independent course standard, versioned content contract, reusable course outline,
+progress rules, and learning-system execution plan live in
+[`docs/learning/README.md`](docs/learning/README.md).
 
-These documents define the intended curriculum and learner-evidence contract. Greek is the first implementation case, not a universal course template, and the documents do not claim that the future mastery, review, or authoring systems already exist.
+Course schemas, deterministic validation, the static runtime loader, and one draft migrated Greek
+lesson exist today. Greek remains the first implementation case rather than a universal template;
+the full mastery, publication, server-persistence, and authoring systems remain future work.
 
 ## Command center
 
@@ -36,6 +62,7 @@ Run commands from this directory—the one containing `package.json`:
 | Install the locked backend environment | `npm run setup:backend` |
 | Install the locked private tutor environment | `npm run setup:tutor` |
 | Start PostgreSQL | `npm run db:up` |
+| Reset local app tables, preserving schema/volume | `npm run db:reset:local -- --confirm glidelingo-local` |
 | Start FastAPI | `npm run api` |
 | Start database, API, and interactive Expo | `npm run dev` |
 | Start database, API, and Electron | `npm run dev:desktop` |
@@ -43,10 +70,13 @@ Run commands from this directory—the one containing `package.json`:
 | Open Android directly | `npm run android` |
 | Open iOS directly | `npm run ios` |
 | Open the Electron desktop app | `npm run desktop` |
+| Validate local development configuration | `npm run env:check` |
 | Check the local environment | `npm run diagnose` |
+| Validate versioned course packages | `npm run course:validate` |
 | Run lint, types, and tests | `npm run verify` |
 | Run all Expo and desktop checks | `npm run verify:full` |
 | Run the database integration gate | `npm run verify:full-stack` |
+| Prepare a clean local desktop E2E | `npm run e2e:local:prepare -- --confirm glidelingo-local` |
 | Clear mobile Metro state | `npm run start:clear` |
 | Clear desktop Metro state | `npm run desktop:clear` |
 | Build a local macOS `.app` | `npm run desktop:package` |
@@ -112,7 +142,11 @@ npm run setup:backend
 npm run dev
 ```
 
-The committed local defaults work without an environment file. Copy `.env.example` to `.env` only when you need to override the database port/password, CORS origins, or a device-reachable client URL; keep the paired database URL and Compose values consistent.
+The database and unauthenticated API health checks can use committed local defaults. The complete
+desktop auth/billing journey requires the ignored root `.env` synchronized from the pinned
+`glidelingo-development` Secret Manager versions. Follow the
+[desktop MVP runbook](docs/infra/DESKTOP-MVP-RUNBOOK.md); use `.env.example` only as the public name
+and safe-default reference.
 
 `npm run dev` starts PostgreSQL, FastAPI, and interactive Expo. Press `a` or `i` in Expo for a native client. For the macOS desktop window instead, run `npm run dev:desktop`.
 
@@ -144,13 +178,11 @@ Normal verification uses fake/no-network adapters and requires no provider key. 
 it executes the stable cases in `services/lesson-tutor/evals/lesson_tutor/cases.json`. Never put the
 provider key or pseudonym key in an `EXPO_PUBLIC_` variable.
 
-Shared-environment activation is intentionally gated. Before enabling either server flag, apply
-`backend/migrations/001_lesson_tutor_guard.sql`, establish the documented retention job with its
-separate maintenance role, mount immutable development Secret Manager versions, verify Clerk and
-private Cloud Run IAM end to end, add server-owned RevenueCat entitlement authorization, and define
-a real provider spend-control policy. Enable the private flag first, the public gateway second, and
-the client flag last. See [`infra/gcp/README.md`](infra/gcp/README.md) for the rollout and environment
-boundaries.
+Shared-environment activation is intentionally gated. Before enabling either server flag, confirm
+the tutor guard migration and retention job, immutable Secret Manager versions, Clerk verification,
+private Cloud Run IAM, active server-owned RevenueCat authorization, and a real provider
+spend-control policy. Enable the private flag first, the public gateway second, and the client flag
+last. See [`infra/gcp/README.md`](infra/gcp/README.md) for the rollout and environment boundaries.
 
 Stop the project database without deleting its named volume:
 
@@ -233,6 +265,7 @@ GlideLingo is configured for both Codex and Cursor coding agents:
 
 - **Durable Instructions (`AGENTS.md`)**: Automatically loaded by Codex/Cursor with repository rules, platform boundaries, and verification gates.
 - **Repository Skill (`.agents/skills/expo-electron/SKILL.md`)**: Specialized guide for Expo SDK 57, React Native 0.86, Expo Router, and Electron architecture, commands, and platform file conventions.
+- **Deslopify Skill (`.agents/skills/deslopify/SKILL.md`)**: Evidence-first cleanup of stale PRs, documentation drift, duplicate sources of truth, dead paths, and accidental complexity without weakening intentional safeguards.
 - **Learning Behavior Skill (`.agents/skills/learning-behavior-design/SKILL.md`)**: Research-backed guidance for emotional UX, ethical gamification, retention mechanics, celebrations, streaks, notifications, and behavior experiments without confusing engagement with learning.
 - **Design System (`DESIGN_SYSTEM.md`)**: Complete token guidance (`src/constants/theme.ts`) and component kit usage (`ThemedText`, `GlideSurface`, `GlideButton`, `GlideSymbol`, `GlideSwitch`, `ProgressBar`).
 - **Codex Actions (`.codex/environments/environment.toml`)**: Exposes one-click app actions in the Codex desktop app (`Run Expo`, `Run iOS`, `Run Android`, `Run Web`, `Run Desktop`, `Verify`, `Diagnose`, `Expo Doctor`).

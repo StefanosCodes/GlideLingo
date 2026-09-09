@@ -32,6 +32,19 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
   - Reconstructs the live PR, branch, and worktree queue instead of relying on stale chat context.
   - Builds dependency-safe merge waves, coordinates bounded parallel reviews, and rehearses integration in an isolated worktree.
   - Separates code, integration, deployment, and feature-enablement readiness and keeps remote merges approval-gated.
+- **Repository Skill (`.agents/skills/operational-ui-e2e/SKILL.md`)**:
+  - Binds functional acceptance and skill qualification to the exact PR head, owning worktree, immutable SHA, and supported target OS.
+  - Drives meaningful outcomes through visible controls in Expo web and the real Electron BrowserWindow with correlated runtime evidence.
+  - Separates walkthrough, diagnosis, repair, harness establishment, and expected-red qualification; missing capability cannot become a false green.
+  - Preserves Electron production security, isolated state, deterministic teardown, and explicit handling for OS-owned UI.
+- **Repository Skill (`.agents/skills/wipe-production-e2e/SKILL.md`)**:
+  - Executes guarded local-development or production application-data resets and the matching macOS signup journey.
+  - Binds local source Electron or the live website/published DMG to Clerk verification, onboarding, and relaunch in one evidence graph.
+  - Keeps Cloud SQL rows, Clerk identities, client-local state, and credentials as separate authorization boundaries.
+- **Repository Skill (`.agents/skills/deslopify/SKILL.md`)**:
+  - Audits PRs, code, configuration, commands, and documentation for proven drift, duplication, dead paths, or accidental complexity.
+  - Preserves intentional security, migration, compatibility, testing, and dormant-feature machinery.
+  - Keeps foundation cleanup separate from product feature integration.
 - **Portable Engineering Workflows (`~/.agents/skills/`)**:
   - `$dev-build-feature`: Implement or extend features using the inspect, decide, act, observe, verify loop.
   - `$dev-debug-issue`: Diagnose and fix runtime bugs with evidence, reproducible traces, and root-cause proof.
@@ -104,5 +117,5 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
 - The repository contains the clients, a public FastAPI/Cloud SQL API, verified Clerk session authentication, internal diagnostics, and a dormant authenticated lesson-tutor gateway.
 - `services/lesson-tutor` owns the IAM-private OpenAI runtime. Both server flags and the client flag default off; do not enable them until the activation gates in `infra/gcp/README.md` pass.
 - `backend/migrations/001_lesson_tutor_guard.sql` is a reviewed operator-run guard migration. It is not executed at application startup, and the public runtime must never receive DDL or retention `DELETE` privileges.
-- Server-owned RevenueCat entitlement authorization is implemented but disabled until its migration, version-pinned secrets, signed webhooks, and sandbox acceptance gates pass. Recurring tutor retention, graded agent-evaluation thresholds, workers, and a separate production GCP environment are not implemented yet.
+- Server-owned RevenueCat entitlement authorization and webhook persistence exist but remain activation-gated. Production Cloud Run, Cloud SQL, Workload Identity Federation, and the signed desktop release lane exist; tutor enablement, graded agent-evaluation thresholds, general product persistence, and workers remain intentionally deferred.
 - Use API port `8123` and loopback-bound PostgreSQL port `55433` unless an explicit local override is documented. Check port ownership before stopping any process.

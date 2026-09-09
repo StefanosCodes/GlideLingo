@@ -10,8 +10,15 @@ const legacyQuests = readFileSync(new URL('../../../app/quests.tsx', import.meta
 const legacyReview = readFileSync(new URL('../../../app/review.tsx', import.meta.url), 'utf8');
 
 test('signed-out direct navigation cannot enter any learning, profile, billing, or diagnostics route', () => {
-  const protectedBlock = rootLayout.match(/<Stack\.Protected guard=\{signedIn\}>([\s\S]*?)<\/Stack\.Protected>/)?.[1];
-  assert.ok(protectedBlock, 'signed-in protected route group is missing');
+  const onboardingBlock = rootLayout.match(
+    /<Stack\.Protected guard=\{signedIn && !onboardingComplete\}>([\s\S]*?)<\/Stack\.Protected>/,
+  )?.[1];
+  const protectedBlock = rootLayout.match(
+    /<Stack\.Protected guard=\{signedIn && onboardingComplete\}>([\s\S]*?)<\/Stack\.Protected>/,
+  )?.[1];
+  assert.ok(onboardingBlock, 'signed-in onboarding route group is missing');
+  assert.match(onboardingBlock, /name=["']onboarding["']/);
+  assert.ok(protectedBlock, 'signed-in completed-onboarding route group is missing');
 
   for (const route of [
     '(app)',

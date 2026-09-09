@@ -4,7 +4,10 @@ This folder defines how every GlideLingo language course should be designed, aut
 
 The learning system is language-independent. Greek is the first implementation and validation case; it is not the template from which every language is mechanically copied.
 
-These documents describe the intended product contract. They do **not** claim that mastery, attempt evidence, scheduled review, adaptive sequencing, authoring skills, or the complete content pipeline already exist.
+These documents describe the intended product contract. The repository currently implements the
+versioned Course v1 schemas, deterministic validation, a static runtime loader, one draft migrated
+Greek lesson, and early local evidence/review behavior. It does **not** claim that the complete
+mastery, adaptive sequencing, authoring, publication, or server-persistence systems exist.
 
 ## Read this documentation in order
 

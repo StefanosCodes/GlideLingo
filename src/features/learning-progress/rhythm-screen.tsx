@@ -16,7 +16,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useLearning } from '@/providers/learning-provider';
 
 const weekdays = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const;
-const goals = [2, 3, 5] as const;
+const goals = [2, 3, 5, 7] as const;
 
 type PressState = { pressed: boolean; hovered?: boolean };
 

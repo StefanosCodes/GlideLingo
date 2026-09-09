@@ -57,6 +57,18 @@ describe('learning storage', () => {
     expect(value.weeklyGoalChanges).toEqual([{ effectiveWeekKey: '2026-08-31', goal: 2 }]);
   });
 
+  it('restores a seven-day weekly target selected during onboarding', () => {
+    const value = parseStoredLearning(
+      JSON.stringify({
+        ...emptyStoredLearning(),
+        weeklyGoalChanges: [{ effectiveWeekKey: '2026-08-31', goal: 7 }],
+      }),
+      now,
+    );
+
+    expect(value.weeklyGoalChanges).toEqual([{ effectiveWeekKey: '2026-08-31', goal: 7 }]);
+  });
+
   it('distinguishes missing, corrupt, and failed reads', () => {
     const missing = readStoredLearning('scoped', {
       getItem: jest.fn(() => null),

@@ -7,6 +7,7 @@ const {
   PRODUCTION_API_ORIGIN,
   PRODUCTION_CLERK_ORIGIN,
   PACKAGED_RENDERER_ORIGIN,
+  applyContentSecurityPolicy,
   buildContentSecurityPolicy,
   findAuthCallbackUrl,
   isAllowedAuthPopupNavigation,
@@ -106,6 +107,29 @@ test('packaged CSP includes exact API and Clerk origins plus web checkout provid
   assert.match(policy, /https:\/\/js\.stripe\.com/);
   assert.match(policy, /https:\/\/cdn\.paddle\.com/);
   assert.doesNotMatch(policy, /\*\.clerk\.accounts\.dev/);
+});
+
+test('packaged protocol responses carry the exact CSP without losing response metadata', async () => {
+  const policy = buildContentSecurityPolicy();
+  const response = applyContentSecurityPolicy(
+    new Response('<!doctype html><title>GlideLingo</title>', {
+      headers: { 'Content-Type': 'text/html', 'X-GlideLingo-Test': 'preserved' },
+      status: 200,
+      statusText: 'OK',
+    }),
+    policy,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.statusText, 'OK');
+  assert.equal(response.headers.get('content-type'), 'text/html');
+  assert.equal(response.headers.get('x-glidelingo-test'), 'preserved');
+  assert.equal(response.headers.get('content-security-policy'), policy);
+  assert.equal(await response.text(), '<!doctype html><title>GlideLingo</title>');
+  assert.throws(
+    () => applyContentSecurityPolicy(new Response('unsafe'), "default-src 'self'\r\nX-Injected: yes"),
+    /non-empty single-line/,
+  );
 });
 
 test('packaged CSP permits the pinned RevenueCat Web runtime resources by exact origin', () => {

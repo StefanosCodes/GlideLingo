@@ -34,6 +34,9 @@ expo-env.d.ts
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+playwright-report/
+test-results/
+playwright/.auth/
 
 # macOS
 .DS_Store
@@ -64,3 +67,6 @@ example
 # generated native folders
 /ios
 /android
+
+# repository-local Git worktrees
+/.worktrees/

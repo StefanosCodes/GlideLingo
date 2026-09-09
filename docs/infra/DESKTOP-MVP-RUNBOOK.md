@@ -1,8 +1,8 @@
 # Desktop MVP runbook
 
-This is the lean operating path for the desktop MVP. There is no permanent staging environment yet.
-A zero-traffic Cloud Run candidate provides the pre-production gate inside the isolated production
-project.
+This is the lean operating path for the desktop MVP. There is no permanent staging environment yet:
+the pull-request `Verify` job is the pre-merge gate for server changes, while exact signed desktop
+drafts provide the pre-publication client gate.
 
 ## Environment boundaries
 
@@ -10,7 +10,7 @@ project.
 | --- | --- | --- | --- | --- |
 | Local | Clerk development | RevenueCat sandbox | Ignored root `.env`, synchronized from pinned development Secret Manager versions | Daily coding and local acceptance |
 | Pull request | Test fixtures only | Test fixtures only | Committed examples and CI configuration | Review, tests, and contract validation |
-| Production candidate | Clerk production | Explicit sandbox or production mode | Pinned production Secret Manager versions through WIF | Zero-traffic API and draft desktop acceptance |
+| Signed desktop candidate | Clerk production | Explicit sandbox or production mode | Pinned production Secret Manager versions through WIF | Draft artifact acceptance before publication |
 | Production | Clerk production | RevenueCat production | The same reviewed production versions | Live API and published desktop updates |
 
 Never put production credentials in the local `.env`, and never put long-lived credentials in
@@ -24,6 +24,7 @@ Run from the Git root containing `package.json`:
 ```bash
 npm ci
 npm run setup:backend
+npm run setup:tutor
 gcloud config set project glidelingo-development
 npm run env:sync:development
 npm run env:check
@@ -47,36 +48,45 @@ configured Authorization value and HMAC signature. Google and Apple sign-in do n
 
 ## Daily development loop
 
+GitHub exposes two operator-facing workflows. **CI/CD** runs the same single `Verify` job for pull
+requests and `main`; only the pull-request result is the required merge gate. After verified `main`
+changes, that workflow automatically builds and deploys the production FastAPI service and checks
+liveness/readiness. **Desktop Release** remains the separate signed/notarized client release path.
+
 ```bash
 git switch -c feat/<small-change>
 npm run env:check
 npm run dev:desktop
 ```
 
-Before opening a pull request:
+Before opening a normal pull request:
 
 ```bash
-npm run verify:full-stack
+npm run verify
 git push -u origin feat/<small-change>
 ```
 
-Open a pull request into `main`. CI repeats the deterministic checks. Keep changes on a feature
-branch; `main` is the reviewed source of truth.
+Use `npm run verify:full` when Expo configuration/dependencies, desktop packaging, API, tutor, or
+database wiring changed, and `npm run verify:full-stack` when the real local PostgreSQL integration
+is affected. Open a pull request into `main`, wait for the required `Verify` check, and merge only
+the focused change. Keep `main` as the reviewed source of truth.
 
 ## Production API release
 
-Merging to `main` does not automatically deploy production. Start the **Deploy production API**
-GitHub Action with the exact reviewed 40-character `main` commit. It:
+Merging to `main` automatically starts the production API lane after verification. It:
 
-1. verifies and builds an immutable container digest;
-2. deploys a zero-traffic candidate;
-3. checks liveness, readiness, authentication rejection, and unchanged billing mode;
-4. pauses for approval on the protected `production` environment;
-5. promotes the exact candidate and rolls back if canonical smoke tests fail.
+1. reruns the repository `Verify` job;
+2. authenticates to Google Cloud through short-lived Workload Identity Federation;
+3. builds and pushes a commit-addressed API image;
+4. deploys that image to production Cloud Run;
+5. checks `/health/live` and `/health/ready`.
+
+Database migrations are not coupled to ordinary app startup or this automatic deploy. Apply a
+reviewed migration separately through the guarded operator procedure before or after the compatible
+API version as that migration's expand-and-contract plan requires.
 
 A separate permanent staging project is intentionally deferred. Add one only when simultaneous
-release testing, team access, or production-like data workflows make the zero-traffic gate
-insufficient.
+release testing, team access, or production-like data workflows justify its operating cost.
 
 ## Desktop release and updates
 
@@ -103,7 +113,7 @@ acceptance downloads and verifies the exact signed artifacts. Neither replaces t
 published `N → N+1` updater acceptance test. Drafts are invisible to installed apps; the release
 pipeline remains responsible for signing and validating every distributed application and updater payload.
 
-Do not publish the draft until installed-app credential authentication, onboarding, sandbox or live
+Do not publish a customer release until installed-app credential authentication, onboarding, live
 checkout, entitlement reconciliation, launch, and applicable update acceptance have passed. Publishing
 the approved GitHub release makes it visible to already-installed apps and the website's fallback
 GitHub Releases page. Activating the website's direct DMG link is a separate approved deployment.
@@ -118,5 +128,7 @@ as required, which removes Later while preserving retry, official-download, and 
   RevenueCat versions.
 - Desktop signing cannot start until the committed production identity manifest contains the reviewed
   numeric GCP project number.
-- Sandbox desktop builds remain internal draft prereleases.
-- The website download stays disabled until a signed production-mode draft passes clean-Mac acceptance.
+- The current published `desktop-v1.0.8` channel uses sandbox billing and is prelaunch distribution,
+  not proof of live-commerce readiness.
+- Customer activation requires a signed production-billing forward release that passes clean-Mac
+  installation, auth, billing, and updater acceptance.

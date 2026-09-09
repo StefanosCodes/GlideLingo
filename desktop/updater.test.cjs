@@ -8,6 +8,7 @@ const {
   UPDATE_CHANNELS,
   compareNumericSemVer,
   configureUpdaterPrivacy,
+  createDisabledDesktopUpdateCoordinator,
   createMacUpdateCoordinator,
   fetchMinimumSupportedVersion,
   isAllowedUpdateSender,
@@ -108,6 +109,25 @@ test('closing a required-update window requests a real app quit', () => {
   assert.equal(shouldQuitForRequiredUpdate({ getSnapshot: () => ({ required: true }) }), true);
   assert.equal(shouldQuitForRequiredUpdate({ getSnapshot: () => ({ required: false }) }), false);
   assert.equal(shouldQuitForRequiredUpdate(null), false);
+});
+
+test('disabled updater preserves the production renderer IPC contract without update effects', async () => {
+  const coordinator = createDisabledDesktopUpdateCoordinator('1.2.3');
+  const firstSnapshot = coordinator.getSnapshot();
+
+  assert.deepEqual(firstSnapshot, {
+    phase: 'idle',
+    required: false,
+    currentVersion: '1.2.3',
+    targetVersion: null,
+    percent: 0,
+  });
+  firstSnapshot.phase = 'error';
+  assert.equal(coordinator.getSnapshot().phase, 'idle');
+  assert.equal(await coordinator.retry(), false);
+  assert.equal(coordinator.restartAndInstall(), false);
+  assert.equal(typeof coordinator.subscribe(() => assert.fail('disabled updater must not publish')), 'function');
+  assert.throws(() => createDisabledDesktopUpdateCoordinator('1.2'), /numeric SemVer/);
 });
 
 test('policy fetch uses the strict public contract and a two-second timeout', async () => {

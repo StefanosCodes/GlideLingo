@@ -1,6 +1,6 @@
 # Course Skeleton and Content Platform
 
-Status: implementation contract for the reusable course skeleton
+Status: schemas and loader bridge implemented (Slices 0–1); later slices remain an implementation contract
 Scope: course flow, content package boundaries, authored-versus-live behavior, Greek population handoff, validation, and future authoring automation
 First implementation case: English instruction -> Standard Modern Greek (`en-el-GR`)
 
@@ -813,15 +813,17 @@ Greek Foundations is complete only when every required stage, mission, lesson, a
 
 The production system is complete when reviewed course batches can be generated with AI assistance, deterministically validated, independently approved, versioned, published, rolled back, and loaded without changing application code.
 
-## 17. Explicit non-goals of this documentation slice
+## 17. Remaining non-goals
 
-This specification does not:
+The current implementation does not:
 
-- implement schemas, loaders, routes, backend persistence, or UI;
 - generate or approve the remaining Greek course content;
 - create the authoring skill;
 - approve a pronunciation evaluator;
 - add another language;
-- merge any pull request.
+- add server-side course progress or attempt persistence;
+- claim that the draft compatibility package is published course content.
 
-It gives the next implementation agent an exact skeleton contract and a safe sequence for turning that skeleton into a complete Greek course.
+The schemas, deterministic validator, static runtime loader, compatibility adapter, and first migrated
+lesson are implemented. The remaining slices above are the safe sequence for turning that boundary
+into a complete reviewed Greek course.

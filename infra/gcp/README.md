@@ -132,7 +132,7 @@ machine with the same tools and permissions produces the same result.
 4. Read the `workload_identity_provider` and `deploy_service_account` Terraform outputs.
 5. Add those values and `GCP_REGION` as GitHub repository variables using the names above.
 6. Merge the deployment workflow into `main`.
-7. Run `Deploy development API` once with `workflow_dispatch`, or merge a backend change into
+7. Run `Deploy Development` with the default `api` selector once, or merge a backend change into
    `main`. The workflow verifies, builds, pushes, deploys, and smoke-tests the API.
 8. Configure development clients with the `api_url` Terraform output.
 
@@ -394,7 +394,7 @@ than create a second copy.
 
 ## Deploy the API
 
-Run the `Deploy development API` workflow manually for the first deployment. Later, merges to
+Run the `Deploy Development` workflow with the default `api` selector for the first deployment. Later, merges to
 `main` that touch `backend/` or the workflow deploy automatically.
 
 The workflow:

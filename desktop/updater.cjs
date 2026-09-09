@@ -48,6 +48,27 @@ function shouldQuitForRequiredUpdate(coordinator) {
   return coordinator?.getSnapshot()?.required === true;
 }
 
+function createDisabledDesktopUpdateCoordinator(currentVersion) {
+  if (!parseNumericSemVer(currentVersion)) {
+    throw new Error('The packaged desktop version must use numeric SemVer.');
+  }
+
+  const snapshot = Object.freeze({
+    phase: 'idle',
+    required: false,
+    currentVersion,
+    targetVersion: null,
+    percent: 0,
+  });
+
+  return {
+    getSnapshot: () => ({ ...snapshot }),
+    restartAndInstall: () => false,
+    retry: () => Promise.resolve(false),
+    subscribe: () => () => {},
+  };
+}
+
 function configureUpdaterPrivacy(updater, updaterVersion) {
   if (updaterVersion !== SUPPORTED_ELECTRON_UPDATER_VERSION) {
     throw new Error('Unsupported electron-updater version.');
@@ -375,6 +396,7 @@ module.exports = {
   UPDATE_CHANNELS,
   compareNumericSemVer,
   configureUpdaterPrivacy,
+  createDisabledDesktopUpdateCoordinator,
   createMacUpdateCoordinator,
   fetchMinimumSupportedVersion,
   isAllowedUpdateSender,

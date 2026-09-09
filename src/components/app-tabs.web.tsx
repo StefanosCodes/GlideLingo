@@ -121,7 +121,6 @@ function ExpandedContent({ children, style }: PropsWithChildren<{ style?: ViewSt
   return (
     <View
       accessibilityElementsHidden={collapsed}
-      pointerEvents={collapsed ? 'none' : 'auto'}
       style={[
         styles.expandedContent,
         style,
@@ -129,6 +128,7 @@ function ExpandedContent({ children, style }: PropsWithChildren<{ style?: ViewSt
         {
           maxWidth: collapsed ? 0 : 240,
           opacity: collapsed ? 0 : 1,
+          pointerEvents: collapsed ? 'none' : 'auto',
           transform: [{ translateX: collapsed ? -4 : 0 }],
         },
       ]}>
@@ -302,7 +302,9 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   brandCollapsed: {
-    flex: 0,
+    flexBasis: 44,
+    flexGrow: 0,
+    flexShrink: 0,
     justifyContent: 'center',
     minHeight: 36,
     paddingHorizontal: 0,

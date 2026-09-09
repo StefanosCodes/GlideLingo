@@ -1,36 +1,36 @@
-import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { StyleSheet, View } from 'react-native';
 
-import { LessonLectureView } from '@/features/learning-session/lesson-lecture-view';
-import { ListRow } from '@/components/list-row';
 import { ScreenFrame } from '@/components/screen-frame';
 import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
 import { ProgressBar } from '@/components/ui/progress-bar';
-import { featuredLetterGlyph } from '@/constants/reference-content';
-import { Radii, Spacing } from '@/constants/theme';
+import { availableLessonsForModule } from '@/constants/catalog';
+import { Spacing } from '@/constants/theme';
 import { strongestCapabilityEvidence } from '@/features/learning-progress/evidence-policy';
-import { useTheme } from '@/hooks/use-theme';
+import { LessonLectureView } from '@/features/learning-session/lesson-lecture-view';
+import { mostRecentEvidence, selectHomeNextAction } from '@/features/product-shell/home-next-action';
+import { LearningStateNotice } from '@/features/product-shell/learning-state-notice';
 import { useLearning } from '@/providers/learning-provider';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const theme = useTheme();
   const {
-    language,
-    enrolledCourse,
-    currentModule,
-    nextLesson,
     activeLessonId,
     activeLessonMode,
     completedLessonIds,
-    lessonEvidence,
-    reviewItems,
-    progress,
     courses,
+    currentModule,
+    enrolledCourse,
+    language,
+    lessonEvidence,
+    nextLesson,
     openLesson,
+    persistenceStatus,
     practiceDaysThisWeek,
+    progress,
+    reviewItems,
     weeklyPracticeGoal,
   } = useLearning();
   const catalogCourse = enrolledCourse ?? courses[0] ?? null;
@@ -44,14 +44,19 @@ export default function HomeScreen() {
           </ThemedText>
           <ThemedText type="display">This course is still being prepared.</ThemedText>
           <ThemedText type="body" themeColor="textSecondary" style={styles.introCopy}>
-            Available courses stay in the course switcher. Your completed work will still be here when more languages open.
+            Available courses stay in the course menu. Your completed work will still be here when more languages open.
           </ThemedText>
         </View>
+        <LearningStateNotice status={persistenceStatus} />
       </ScreenFrame>
     );
   }
 
   if (!enrolledCourse) {
+    const authoredLessonCount = catalogCourse.modules.reduce(
+      (count, module) => count + availableLessonsForModule(module).length,
+      0,
+    );
     return (
       <ScreenFrame>
         <View style={styles.intro}>
@@ -60,12 +65,13 @@ export default function HomeScreen() {
           </ThemedText>
           <ThemedText type="display">Build your first Greek foundations.</ThemedText>
           <ThemedText type="body" themeColor="textSecondary" style={styles.introCopy}>
-            Begin with the sound map, then use Greek in short, practical quests.
+            Begin with the sound map, then use Greek in short, practical units.
           </ThemedText>
         </View>
-        <GlideSurface padding="roomy" style={styles.primaryCard}>
+        <LearningStateNotice status={persistenceStatus} />
+        <GlideSurface padding="roomy" style={styles.primaryCard} variant="hero">
           <ThemedText type="eyebrow" themeColor="textSecondary">
-            {catalogCourse.levelLabel} · {catalogCourse.modules.length} QUESTS
+            {catalogCourse.levelLabel} · {authoredLessonCount} AUTHORED {authoredLessonCount === 1 ? 'LESSON' : 'LESSONS'}
           </ThemedText>
           <ThemedText type="title">{catalogCourse.title}</ThemedText>
           <ThemedText type="callout" themeColor="textSecondary">
@@ -94,16 +100,34 @@ export default function HomeScreen() {
   }
 
   const lesson = nextLesson?.lesson ?? null;
-  const quest = currentModule ?? nextLesson?.module ?? null;
+  const unit = currentModule ?? nextLesson?.module ?? null;
   const dueReview = reviewItems.find((item) => item.due) ?? null;
-  const strongest = strongestCapabilityEvidence(lessonEvidence)[0] ?? null;
+  const recentCapability = mostRecentEvidence(strongestCapabilityEvidence(lessonEvidence));
   const coursePercent = Math.round(progress * 100);
-  const questCompleted = quest
-    ? quest.lessons.filter((item) => completedLessonIds.includes(item.id)).length
+  const unitLessons = unit ? availableLessonsForModule(unit) : [];
+  const unitCompleted = unit
+    ? unitLessons.filter((item) => completedLessonIds.includes(item.id)).length
     : 0;
-  const questProgress = quest ? questCompleted / quest.lessons.length : 1;
-  const nextActionCard = dueReview || lesson;
-  const glyph = !dueReview && lesson ? featuredLetterGlyph(lesson.id) : null;
+  const unitProgress = unitLessons.length > 0 ? unitCompleted / unitLessons.length : 1;
+  const nextAction = selectHomeNextAction({
+    courseProgress: progress,
+    dueReview,
+    lesson,
+    unitOutcome: unit?.canDo ?? null,
+    unitProgress,
+  });
+
+  function takeNextAction() {
+    if (nextAction.kind === 'review' && nextAction.lessonId) {
+      openLesson(nextAction.lessonId, 'review');
+      return;
+    }
+    if (nextAction.kind === 'lesson' && nextAction.lessonId) {
+      openLesson(nextAction.lessonId);
+      return;
+    }
+    router.push('/progress');
+  }
 
   return (
     <ScreenFrame>
@@ -112,124 +136,110 @@ export default function HomeScreen() {
           HOME · {language.name.toUpperCase()} · {enrolledCourse.levelLabel}
         </ThemedText>
         <ThemedText type="display">
-          {dueReview
-            ? 'Strengthen a pattern that is ready to return.'
-            : lesson
-              ? 'Continue your Greek quest.'
-              : 'Your foundations are complete.'}
+          {nextAction.kind === 'review'
+            ? 'Bring one useful pattern back.'
+            : nextAction.kind === 'lesson'
+              ? 'Keep your course moving.'
+              : 'You completed every lesson currently available.'}
         </ThemedText>
         <ThemedText type="body" themeColor="textSecondary" style={styles.introCopy}>
-          {dueReview
-            ? 'A short varied check comes before new material, while your completed work remains intact.'
-            : lesson
-              ? `${lesson.durationMin} focused minutes. One clear next step.`
-              : 'Your course path and demonstrated abilities remain available in Quests and Profile.'}
+          One next action, chosen from your current course and review evidence.
         </ThemedText>
       </View>
 
-      <GlideSurface padding="roomy" style={styles.primaryCard} variant={nextActionCard ? 'hero' : 'card'}>
+      <LearningStateNotice status={persistenceStatus} />
+
+      <GlideSurface padding="roomy" style={styles.primaryCard} variant="hero">
         <View style={styles.metaRow}>
           <ThemedText type="eyebrow" themeColor="textSecondary">
-            {dueReview ? 'READY TO STRENGTHEN' : quest ? 'CURRENT QUEST' : 'COURSE COMPLETE'}
+            {nextAction.eyebrow}
           </ThemedText>
           <ThemedText type="caption" themeColor="textTertiary">
-            {dueReview ? 'VARIED CHECK' : lesson ? `${lesson.durationMin} MIN` : `${coursePercent}%`}
+            {nextAction.durationLabel}
           </ThemedText>
         </View>
-        {glyph ? (
-          <View
-            accessibilityElementsHidden
-            importantForAccessibility="no"
-            style={[styles.glyphWell, { backgroundColor: theme.accentSoft }]}>
-            <ThemedText type="display" style={styles.glyph}>
-              {glyph}
-            </ThemedText>
-          </View>
-        ) : null}
         <View style={styles.cardCopy}>
-          <ThemedText type="title">
-            {dueReview?.capability.canDo ?? lesson?.title ?? 'See what you can now do'}
-          </ThemedText>
+          <ThemedText type="title">{nextAction.title}</ThemedText>
           <ThemedText type="callout" themeColor="textSecondary">
-            {dueReview?.reason ?? quest?.canDo ?? 'A capability profile built from your attempts.'}
+            {nextAction.outcome}
           </ThemedText>
         </View>
-        {dueReview ? (
-          <GlideButton
-            fullWidth
-            label="Start strengthening check"
-            onPress={() => openLesson(dueReview.lessonId, 'review')}
-            testID="start-review"
-          />
-        ) : lesson ? (
-          <GlideButton fullWidth label="Continue quest" onPress={() => openLesson(lesson.id)} testID="start-lesson" />
-        ) : (
-          <GlideButton fullWidth label="Open your profile" onPress={() => router.push('/profile')} />
-        )}
+        <ProgressBar
+          accessibilityLabel={`${Math.round(nextAction.progress * 100)}% progress for this action`}
+          value={nextAction.progress}
+        />
+        <GlideButton
+          fullWidth
+          label={nextAction.cta}
+          onPress={takeNextAction}
+          testID={
+            nextAction.kind === 'review'
+              ? 'start-review'
+              : nextAction.kind === 'lesson'
+                ? 'start-lesson'
+                : 'view-progress'
+          }
+        />
       </GlideSurface>
-
-      {quest ? (
-        <View style={styles.section}>
-          <View style={styles.sectionHeading}>
-            <ThemedText type="eyebrow" themeColor="textSecondary">
-              QUEST PROGRESS
-            </ThemedText>
-            <ThemedText type="title2">{quest.title}</ThemedText>
-          </View>
-          <GlideSurface padding="roomy" style={styles.progressCard}>
-            <View style={styles.progressLabels}>
-              <ThemedText type="footnote">
-                {questCompleted} of {quest.lessons.length} lessons
-              </ThemedText>
-              <ThemedText type="footnote" themeColor="textSecondary">
-                {Math.round(questProgress * 100)}%
-              </ThemedText>
-            </View>
-            <ProgressBar color={theme.accentStrong} value={questProgress} />
-            <GlideButton label="See all quests" variant="secondary" onPress={() => router.push('/quests')} />
-          </GlideSurface>
-        </View>
-      ) : null}
 
       <View style={styles.section}>
         <View style={styles.sectionHeading}>
           <ThemedText type="eyebrow" themeColor="textSecondary">
-            EXPLORE GREEK
+            TODAY
           </ThemedText>
-          <ThemedText type="title2">Learn beyond the next lesson</ThemedText>
+          <ThemedText type="title2">A finishable plan</ThemedText>
         </View>
-        <GlideSurface padding="none">
-          <ListRow
-            detail="Alphabet, sounds, and example words"
-            icon={{ ios: 'textformat.abc', android: 'abc', web: 'abc' }}
-            label="Letters"
-            onPress={() => router.push('/letters')}
-          />
-          <ListRow
-            detail="Useful words and phrases from your quests"
-            icon={{ ios: 'text.bubble', android: 'chat_bubble', web: 'chat_bubble' }}
-            label="Phrases"
-            last
-            onPress={() => router.push('/phrases')}
-          />
+        <GlideSurface padding="roomy" style={styles.planRow}>
+          <ThemedText type="headline">1. {nextAction.cta}</ThemedText>
+          <ThemedText type="footnote" themeColor="textSecondary">
+            {nextAction.title} · {nextAction.durationLabel.toLowerCase()}
+          </ThemedText>
         </GlideSurface>
       </View>
 
-      <GlideSurface padding="roomy" style={styles.profileSummary}>
-        <ThemedText type="eyebrow" themeColor="textSecondary">
-          YOUR PROFILE
-        </ThemedText>
-        <ThemedText type="title2">
-          {strongest?.capability.canDo ?? 'Your first demonstrated ability will appear here.'}
-        </ThemedText>
-        <ThemedText type="footnote" themeColor="textSecondary">
-          {weeklyPracticeGoal
-            ? `${practiceDaysThisWeek} of ${weeklyPracticeGoal} planned practice days this week.`
-            : 'Choose a weekly rhythm that fits your life.'}
-        </ThemedText>
-        <GlideButton label="View profile" variant="tertiary" onPress={() => router.push('/profile')} />
-      </GlideSurface>
+      <View style={styles.section}>
+        <View style={styles.sectionHeading}>
+          <ThemedText type="eyebrow" themeColor="textSecondary">
+            QUICK ACTIONS
+          </ThemedText>
+          <ThemedText type="title2">Choose another useful path</ThemedText>
+        </View>
+        <View style={styles.quickActions}>
+          <GlideButton label="Practice speaking" onPress={() => router.push('/speak')} variant="secondary" />
+          <GlideButton label="Open Practice" onPress={() => router.push('/practice')} variant="secondary" />
+        </View>
+      </View>
+
+      <View style={styles.metrics}>
+        <Metric
+          label="WEEKLY RHYTHM"
+          value={weeklyPracticeGoal ? `${practiceDaysThisWeek}/${weeklyPracticeGoal}` : 'Not set'}
+        />
+        <Metric label="XP" value="Not tracked" />
+        <Metric label="COURSE" value={`${coursePercent}%`} />
+      </View>
+
+      {recentCapability ? (
+        <GlideSurface padding="roomy" style={styles.milestone} variant="success">
+          <ThemedText type="eyebrow" themeColor="textSecondary">
+            RECENT CAPABILITY · {recentCapability.state.toUpperCase()}
+          </ThemedText>
+          <ThemedText type="title2">{recentCapability.capability.canDo}</ThemedText>
+          <GlideButton label="View evidence" onPress={() => router.push('/progress')} variant="tertiary" />
+        </GlideSurface>
+      ) : null}
     </ScreenFrame>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <GlideSurface padding="roomy" style={styles.metric}>
+      <ThemedText type="eyebrow" themeColor="textSecondary">
+        {label}
+      </ThemedText>
+      <ThemedText type="title3">{value}</ThemedText>
+    </GlideSurface>
   );
 }
 
@@ -237,19 +247,13 @@ const styles = StyleSheet.create({
   intro: { gap: Spacing.two, paddingBottom: Spacing.one },
   introCopy: { maxWidth: 520 },
   primaryCard: { gap: Spacing.threeHalf },
-  glyphWell: {
-    alignItems: 'center',
-    borderRadius: Radii.large,
-    height: 72,
-    justifyContent: 'center',
-    width: 72,
-  },
-  glyph: { fontSize: 40, letterSpacing: -1.2, lineHeight: 48 },
   metaRow: { alignItems: 'center', flexDirection: 'row', gap: Spacing.two, justifyContent: 'space-between' },
   cardCopy: { gap: Spacing.two, maxWidth: 560 },
   section: { gap: Spacing.three },
   sectionHeading: { gap: Spacing.one },
-  progressCard: { gap: Spacing.twoHalf },
-  progressLabels: { flexDirection: 'row', justifyContent: 'space-between' },
-  profileSummary: { gap: Spacing.two },
+  planRow: { gap: Spacing.one },
+  quickActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  metrics: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  metric: { flexBasis: 148, flexGrow: 1, gap: Spacing.one },
+  milestone: { gap: Spacing.two },
 });

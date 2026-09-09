@@ -17,6 +17,8 @@ The repository currently contains:
 - An IAM-private lesson-tutor FastAPI service that alone owns authored context and the OpenAI SDK.
 - A loopback-only local PostgreSQL service managed by Docker Compose.
 - A centralized client API boundary and internal system-diagnostics feature.
+- A versioned, deterministically validated course-package boundary with one draft Greek lesson
+  loaded through a compatibility adapter; placeholder roadmap lessons cannot be launched.
 - Versioned PostgreSQL migrations for tutor admission, RevenueCat entitlement state, webhook
   deduplication, and bounded webhook retention.
 - Production Cloud Run, Cloud SQL, Secret Manager, Artifact Registry, and GitHub OIDC deployment.

@@ -11,7 +11,7 @@ import { usePronunciationPlayer } from '@/features/learning-session/audio/use-pr
 import { useTheme } from '@/hooks/use-theme';
 import { useLearning } from '@/providers/learning-provider';
 
-export default function LettersScreen() {
+export function LettersPracticeScreen() {
   const router = useRouter();
   const theme = useTheme();
   const pronunciation = usePronunciationPlayer();
@@ -55,7 +55,7 @@ export default function LettersScreen() {
 
       <GlideSurface padding="roomy" style={styles.currentSet} variant="tinted">
         <ThemedText type="eyebrow" themeColor="textSecondary">
-          {firstSetPracticed ? 'PRACTICED IN YOUR FIRST QUEST' : 'YOUR FIRST LETTER SET'}
+          {firstSetPracticed ? 'PRACTICED IN YOUR FIRST UNIT' : 'YOUR FIRST LETTER SET'}
         </ThemedText>
         <View style={styles.featuredLetters}>
           {firstSet.map((letter) => (
@@ -69,7 +69,7 @@ export default function LettersScreen() {
         </View>
         {enrolledCourse ? (
           <GlideButton
-            label={firstSetPracticed ? 'Practice this quest again' : 'Learn these letters'}
+            label={firstSetPracticed ? 'Practice this lesson again' : 'Learn these letters'}
             onPress={openFirstLettersLesson}
           />
         ) : (
@@ -122,7 +122,7 @@ function LetterCard({
 }) {
   return (
     <Pressable
-      accessibilityLabel={`${letter.name}, ${letter.upper} ${letter.lower}, ${letter.sound}. ${practiced ? 'Practiced in a quest.' : letter.audioId ? 'Available in the first quest.' : 'Reference.'}${letter.audioId ? ' Play pronunciation.' : ''}`}
+      accessibilityLabel={`${letter.name}, ${letter.upper} ${letter.lower}, ${letter.sound}. ${practiced ? 'Practiced in a lesson.' : letter.audioId ? 'Available in the first unit.' : 'Reference.'}${letter.audioId ? ' Play pronunciation.' : ''}`}
       accessibilityRole={letter.audioId ? 'button' : 'text'}
       disabled={!onPlay}
       onPress={onPlay}

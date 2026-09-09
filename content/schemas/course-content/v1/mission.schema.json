@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glidelingo.app/schemas/course-content/v1/mission.schema.json",
+  "title": "GlideLingo mission package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "version",
+    "courseId",
+    "moduleId",
+    "title",
+    "realWorldJob",
+    "learnerRole",
+    "otherRoles",
+    "targetCapabilityIds",
+    "supportingCapabilityIds",
+    "prerequisiteCapabilityIds",
+    "completionCondition",
+    "lessonOrder",
+    "lessons",
+    "supportFadingPlan",
+    "checkpointActivityIds",
+    "reviewActivityIds",
+    "interruptionResume",
+    "offline",
+    "accessibilityAlternatives",
+    "assets",
+    "reviewerRefs",
+    "sourceRefs"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "version": {
+      "$ref": "common.schema.json#/$defs/version"
+    },
+    "courseId": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "moduleId": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "title": {
+      "$ref": "common.schema.json#/$defs/nonEmptyString"
+    },
+    "realWorldJob": {
+      "$ref": "common.schema.json#/$defs/nonEmptyString"
+    },
+    "learnerRole": {
+      "$ref": "common.schema.json#/$defs/nonEmptyString"
+    },
+    "otherRoles": {
+      "$ref": "common.schema.json#/$defs/nonEmptyStringList"
+    },
+    "targetCapabilityIds": {
+      "$ref": "common.schema.json#/$defs/nonEmptyIdList"
+    },
+    "supportingCapabilityIds": {
+      "$ref": "common.schema.json#/$defs/idList"
+    },
+    "prerequisiteCapabilityIds": {
+      "$ref": "common.schema.json#/$defs/idList"
+    },
+    "completionCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "requiredActivityIds"],
+      "properties": {
+        "type": {
+          "const": "all-required-activities"
+        },
+        "requiredActivityIds": {
+          "$ref": "common.schema.json#/$defs/nonEmptyIdList"
+        }
+      }
+    },
+    "lessonOrder": {
+      "$ref": "common.schema.json#/$defs/nonEmptyIdList"
+    },
+    "lessons": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "lesson.schema.json"
+      }
+    },
+    "supportFadingPlan": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "enum": ["model", "constrained-choice", "cued-recall", "free-response", "varied-transfer"]
+      },
+      "uniqueItems": true
+    },
+    "checkpointActivityIds": {
+      "$ref": "common.schema.json#/$defs/nonEmptyIdList"
+    },
+    "reviewActivityIds": {
+      "$ref": "common.schema.json#/$defs/nonEmptyIdList"
+    },
+    "interruptionResume": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boundary", "behavior"],
+      "properties": {
+        "boundary": {
+          "const": "activity"
+        },
+        "behavior": {
+          "$ref": "common.schema.json#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "offline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supported", "unavailableActivityIds"],
+      "properties": {
+        "supported": {
+          "type": "boolean"
+        },
+        "unavailableActivityIds": {
+          "$ref": "common.schema.json#/$defs/idList"
+        }
+      }
+    },
+    "accessibilityAlternatives": {
+      "$ref": "common.schema.json#/$defs/nonEmptyStringList"
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "path", "description"],
+        "properties": {
+          "id": {
+            "$ref": "common.schema.json#/$defs/id"
+          },
+          "type": {
+            "enum": ["image", "document", "interaction"]
+          },
+          "path": {
+            "$ref": "common.schema.json#/$defs/localAssetPath"
+          },
+          "description": {
+            "$ref": "common.schema.json#/$defs/nonEmptyString"
+          }
+        }
+      }
+    },
+    "reviewerRefs": {
+      "$ref": "common.schema.json#/$defs/nonEmptyStringList"
+    },
+    "sourceRefs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "common.schema.json#/$defs/uri"
+      },
+      "uniqueItems": true
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "el-from-zero",
+  "version": "1.0.0",
+  "instructionLocale": "en-US",
+  "targetLocale": "el-GR",
+  "targetVariety": "Standard Modern Greek",
+  "targetRegister": "Neutral everyday Greek",
+  "learnerSegment": "English-speaking adults beginning Standard Modern Greek",
+  "entryAssumptions": ["No prior Greek reading or listening experience is required"],
+  "intendedProficiencyRange": {
+    "entry": "A0",
+    "exit": "A1"
+  },
+  "productPromise": "Build a clear path from the Greek sound system to first practical interactions.",
+  "exitCapabilityIds": ["el-script-vowels-a-e-i"],
+  "stageOrder": ["access"],
+  "moduleOrder": ["el-letters"],
+  "placementPolicy": {
+    "mode": "fixed-entry",
+    "entryCapabilityIds": []
+  },
+  "transliterationPolicy": {
+    "mode": "fades",
+    "learnerControl": true
+  },
+  "keyboardInputPolicy": {
+    "required": false,
+    "alternatives": ["Select an authored response"]
+  },
+  "supportedProductCapabilities": [
+    "authored-lessons",
+    "deterministic-practice",
+    "offline-learning",
+    "pronunciation-self-comparison"
+  ],
+  "publicationRef": "el-foundations-publication"
+}

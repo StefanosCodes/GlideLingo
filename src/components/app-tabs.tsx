@@ -1,6 +1,7 @@
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 
 import { Fonts } from '@/constants/theme';
+import { primaryDestinations } from '@/features/product-shell/navigation';
 import { useTheme } from '@/hooks/use-theme';
 
 export default function AppTabs() {
@@ -16,45 +17,15 @@ export default function AppTabs() {
         selected: { color: colors.text, fontFamily: Fonts.sansMedium, fontSize: 11 },
       }}
       tintColor={colors.text}>
-      <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          md={{ default: 'home', selected: 'home' }}
-          sf={{ default: 'house', selected: 'house.fill' }}
-        />
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger name="quests">
-        <NativeTabs.Trigger.Label>Quests</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          md={{ default: 'map', selected: 'map' }}
-          sf={{ default: 'map', selected: 'map.fill' }}
-        />
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger name="letters">
-        <NativeTabs.Trigger.Label>Letters</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          md={{ default: 'abc', selected: 'abc' }}
-          sf={{ default: 'textformat.abc', selected: 'textformat.abc' }}
-        />
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger name="phrases">
-        <NativeTabs.Trigger.Label>Phrases</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          md={{ default: 'chat_bubble', selected: 'chat_bubble' }}
-          sf={{ default: 'text.bubble', selected: 'text.bubble.fill' }}
-        />
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger name="profile">
-        <NativeTabs.Trigger.Label>Profile</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          md={{ default: 'account_circle', selected: 'account_circle' }}
-          sf={{ default: 'person.circle', selected: 'person.circle.fill' }}
-        />
-      </NativeTabs.Trigger>
+      {primaryDestinations.map((destination) => (
+        <NativeTabs.Trigger key={destination.id} name={destination.route}>
+          <NativeTabs.Trigger.Label>{destination.label}</NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Icon
+            md={{ default: destination.nativeIcon.android, selected: destination.nativeIcon.android }}
+            sf={destination.nativeIcon.ios}
+          />
+        </NativeTabs.Trigger>
+      ))}
     </NativeTabs>
   );
 }

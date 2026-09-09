@@ -44,9 +44,13 @@ progress, background workers, and tutor activation remain intentionally deferred
 
 ## Learning system reference
 
-The language-independent course standard, reusable course outline, progress and gamification rules, and learning-system execution plan live in [`docs/learning/README.md`](docs/learning/README.md).
+The language-independent course standard, versioned content contract, reusable course outline,
+progress rules, and learning-system execution plan live in
+[`docs/learning/README.md`](docs/learning/README.md).
 
-These documents define the intended curriculum and learner-evidence contract. Greek is the first implementation case, not a universal course template, and the documents do not claim that the future mastery, review, or authoring systems already exist.
+Course schemas, deterministic validation, the static runtime loader, and one draft migrated Greek
+lesson exist today. Greek remains the first implementation case rather than a universal template;
+the full mastery, publication, server-persistence, and authoring systems remain future work.
 
 ## Command center
 
@@ -68,6 +72,7 @@ Run commands from this directory—the one containing `package.json`:
 | Open the Electron desktop app | `npm run desktop` |
 | Validate local development configuration | `npm run env:check` |
 | Check the local environment | `npm run diagnose` |
+| Validate versioned course packages | `npm run course:validate` |
 | Run lint, types, and tests | `npm run verify` |
 | Run all Expo and desktop checks | `npm run verify:full` |
 | Run the database integration gate | `npm run verify:full-stack` |

@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glidelingo.app/schemas/course-content/v1/pronunciation-targets.schema.json",
+  "title": "GlideLingo pronunciation targets document",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "targets"],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/target" }
+    }
+  },
+  "$defs": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "id",
+        "version",
+        "courseId",
+        "text",
+        "locale",
+        "targetVariety",
+        "syllables",
+        "stressTarget",
+        "targetAudioIds",
+        "acceptableVariants",
+        "commonLearnerErrors",
+        "feedbackTemplates",
+        "assessmentEligibility",
+        "review"
+      ],
+      "properties": {
+        "schemaVersion": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+        "id": { "$ref": "common.schema.json#/$defs/id" },
+        "version": { "$ref": "common.schema.json#/$defs/version" },
+        "courseId": { "$ref": "common.schema.json#/$defs/id" },
+        "text": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "locale": { "$ref": "common.schema.json#/$defs/locale" },
+        "targetVariety": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "syllables": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+        "stressTarget": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "phoneticRepresentation": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "targetAudioIds": { "$ref": "common.schema.json#/$defs/idList" },
+        "acceptableVariants": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+        "commonLearnerErrors": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+        "feedbackTemplates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "template"],
+            "properties": {
+              "code": { "$ref": "common.schema.json#/$defs/id" },
+              "template": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+            }
+          }
+        },
+        "assessmentEligibility": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["eligible"],
+          "properties": {
+            "eligible": { "type": "boolean" },
+            "evaluatorVersion": { "$ref": "common.schema.json#/$defs/version" },
+            "confidenceThreshold": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "if": {
+            "properties": { "eligible": { "const": true } }
+          },
+          "then": {
+            "required": ["evaluatorVersion", "confidenceThreshold"]
+          }
+        },
+        "review": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reviewer", "status", "reviewedAt"],
+          "properties": {
+            "reviewer": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+            "status": { "$ref": "common.schema.json#/$defs/reviewStatus" },
+            "reviewedAt": { "type": ["string", "null"], "format": "date-time" }
+          }
+        }
+      }
+    }
+  }
+}

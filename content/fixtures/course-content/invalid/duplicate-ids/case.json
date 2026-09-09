@@ -1,0 +1,14 @@
+{
+  "description": "A second logical record reuses an existing stable ID and version.",
+  "operations": [
+    {
+      "op": "copy",
+      "file": "capabilities.json",
+      "from": "/capabilities/0",
+      "path": "/capabilities/-"
+    }
+  ],
+  "expectedCode": "duplicate-id",
+  "expectedFile": "capabilities.json",
+  "expectedPointer": "/capabilities/1/id"
+}

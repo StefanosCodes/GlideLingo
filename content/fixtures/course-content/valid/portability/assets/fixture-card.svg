@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="48" viewBox="0 0 64 48" role="img" aria-labelledby="title">
+  <title id="title">Neutral portability fixture card</title>
+  <rect x="1" y="1" width="62" height="46" rx="6" fill="#e8edf7" stroke="#41506b" stroke-width="2" />
+  <circle cx="32" cy="24" r="9" fill="#7284a8" />
+</svg>

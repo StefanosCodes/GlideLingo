@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glidelingo.app/schemas/course-content/v1/language-profile.schema.json",
+  "title": "GlideLingo language profile record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "version",
+    "courseId",
+    "writingSystem",
+    "pronunciationPriorities",
+    "transliterationPolicy",
+    "scriptSupportPolicy",
+    "morphologySyntaxProgressionNotes",
+    "lexicalSelectionPolicy",
+    "formulaicLanguagePolicy",
+    "pragmaticNorms",
+    "regionalVariation",
+    "culturalRepresentationRules",
+    "speechConstraints",
+    "ttsConstraints",
+    "asrConstraints",
+    "accessibilityInputConstraints",
+    "externalReferences",
+    "requiredReviewerQualifications",
+    "knownLimitations"
+  ],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "id": { "$ref": "common.schema.json#/$defs/id" },
+    "version": { "$ref": "common.schema.json#/$defs/version" },
+    "courseId": { "$ref": "common.schema.json#/$defs/id" },
+    "writingSystem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "direction", "segmentation"],
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "direction": { "enum": ["ltr", "rtl", "vertical", "mixed"] },
+        "segmentation": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+      }
+    },
+    "pronunciationPriorities": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+    "transliterationPolicy": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "scriptSupportPolicy": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "morphologySyntaxProgressionNotes": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+    "lexicalSelectionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principles", "sources"],
+      "properties": {
+        "principles": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "common.schema.json#/$defs/uri" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "formulaicLanguagePolicy": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "pragmaticNorms": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+    "regionalVariation": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+    "culturalRepresentationRules": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+    "speechConstraints": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+    "ttsConstraints": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+    "asrConstraints": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+    "accessibilityInputConstraints": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+    "externalReferences": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "common.schema.json#/$defs/uri" },
+      "uniqueItems": true
+    },
+    "requiredReviewerQualifications": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+    "knownLimitations": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glidelingo.app/schemas/course-content/v1/capabilities.schema.json",
+  "title": "GlideLingo capabilities document",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "capabilities"],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/capability" }
+    }
+  },
+  "$defs": {
+    "opportunityRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimumOpportunities", "criteria"],
+      "properties": {
+        "minimumOpportunities": { "type": "integer", "minimum": 2 },
+        "criteria": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+        "minimumDelayHours": { "type": "integer", "minimum": 1 },
+        "permittedSupport": { "$ref": "common.schema.json#/$defs/stringList" }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "id",
+        "version",
+        "courseId",
+        "canDo",
+        "domain",
+        "situation",
+        "communicationModes",
+        "prerequisiteCapabilityIds",
+        "linguisticResources",
+        "pragmaticCulturalResources",
+        "teachingMissionIds",
+        "practiceEvidence",
+        "demonstrationCriteria",
+        "retentionCriteria",
+        "permittedSupport",
+        "sourceRefs"
+      ],
+      "properties": {
+        "schemaVersion": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+        "id": { "$ref": "common.schema.json#/$defs/id" },
+        "version": { "$ref": "common.schema.json#/$defs/version" },
+        "courseId": { "$ref": "common.schema.json#/$defs/id" },
+        "canDo": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "domain": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "situation": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "communicationModes": { "$ref": "common.schema.json#/$defs/communicationModes" },
+        "prerequisiteCapabilityIds": { "$ref": "common.schema.json#/$defs/idList" },
+        "linguisticResources": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+        "pragmaticCulturalResources": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+        "teachingMissionIds": { "$ref": "common.schema.json#/$defs/nonEmptyIdList" },
+        "practiceEvidence": { "$ref": "#/$defs/opportunityRule" },
+        "demonstrationCriteria": { "$ref": "#/$defs/opportunityRule" },
+        "retentionCriteria": { "$ref": "#/$defs/opportunityRule" },
+        "permittedSupport": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+        "sourceRefs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "common.schema.json#/$defs/uri" },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

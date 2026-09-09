@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glidelingo.app/schemas/course-content/v1/publication.schema.json",
+  "title": "GlideLingo publication record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "version",
+    "courseId",
+    "courseVersion",
+    "status",
+    "sourceRevision",
+    "schemaVersions",
+    "contentHash",
+    "provenance",
+    "validatorReport",
+    "reviews",
+    "knownLimitations",
+    "migrationCompatibility",
+    "publishedAt",
+    "retiredAt"
+  ],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "id": { "$ref": "common.schema.json#/$defs/id" },
+    "version": { "$ref": "common.schema.json#/$defs/version" },
+    "courseId": { "$ref": "common.schema.json#/$defs/id" },
+    "courseVersion": { "$ref": "common.schema.json#/$defs/version" },
+    "status": { "enum": ["draft", "published", "retired"] },
+    "sourceRevision": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "schemaVersions": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "contentHash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "provenance": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "description"],
+        "properties": {
+          "kind": { "enum": ["authored", "generated", "adapted"] },
+          "description": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+        }
+      }
+    },
+    "validatorReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "status", "validatedAt"],
+      "properties": {
+        "command": { "const": "npm run course:validate" },
+        "status": { "enum": ["pending", "passed", "failed"] },
+        "validatedAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "reviews": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "curriculum",
+        "instructionalDesign",
+        "languagePragmatics",
+        "independentAssessment",
+        "audioPlatformQa",
+        "accessibility",
+        "learnerPilot"
+      ],
+      "properties": {
+        "curriculum": { "$ref": "common.schema.json#/$defs/reviewRecord" },
+        "instructionalDesign": { "$ref": "common.schema.json#/$defs/reviewRecord" },
+        "languagePragmatics": { "$ref": "common.schema.json#/$defs/reviewRecord" },
+        "independentAssessment": { "$ref": "common.schema.json#/$defs/reviewRecord" },
+        "audioPlatformQa": { "$ref": "common.schema.json#/$defs/reviewRecord" },
+        "accessibility": { "$ref": "common.schema.json#/$defs/reviewRecord" },
+        "learnerPilot": { "$ref": "common.schema.json#/$defs/reviewRecord" }
+      }
+    },
+    "knownLimitations": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+    "migrationCompatibility": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "publishedAt": { "type": ["string", "null"], "format": "date-time" },
+    "retiredAt": { "type": ["string", "null"], "format": "date-time" }
+  }
+}

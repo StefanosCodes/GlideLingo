@@ -17,6 +17,7 @@ import {
   completedModuleIdsFor,
   courseProgress,
   currentModule,
+  getAvailableLesson,
   getCourse,
   getCoursesForLanguage,
   getLanguage,
@@ -121,6 +122,12 @@ function latestWriteTime(value: StoredLearningV2) {
     ...Object.values(value.fieldWrites.enrolledByLanguage ?? {}).map((stamp) => stamp?.at ?? 0),
     ...Object.values(value.fieldWrites.weeklyGoalChanges ?? {}).map((stamp) => stamp.at),
   );
+}
+
+export function assertLessonAvailableForCompletion(course: Course | null, lessonId: string) {
+  if (!course || !getAvailableLesson(course, lessonId)) {
+    throw new Error('Cannot complete an unavailable lesson.');
+  }
 }
 
 function persistenceStatus(kind: 'found' | 'missing' | 'corrupt' | 'read-error'): LearningPersistenceStatus {
@@ -340,11 +347,12 @@ export function LearningProvider({
 
   const openLesson = useCallback(
     (lessonId: string | null, mode: LessonMode = 'learn') => {
-      setActiveLessonId(lessonId);
-      setActiveLessonMode(lessonId ? mode : 'learn');
-      if (lessonId && enrolledCourse) {
-        const found = enrolledCourse.modules.find((module) => module.lessons.some((lesson) => lesson.id === lessonId));
-        if (found) setFocusedModuleId(found.id);
+      const found = lessonId && enrolledCourse ? getAvailableLesson(enrolledCourse, lessonId) : null;
+      const availableLessonId = found ? lessonId : null;
+      setActiveLessonId(availableLessonId);
+      setActiveLessonMode(availableLessonId ? mode : 'learn');
+      if (availableLessonId && found) {
+        setFocusedModuleId(found.module.id);
       }
     },
     [enrolledCourse],
@@ -372,6 +380,7 @@ export function LearningProvider({
   );
 
   const completeLesson = useCallback((completion: LessonCompletionInput) => {
+    assertLessonAvailableForCompletion(enrolledCourse, completion.lessonId);
     const completedAt = Date.now();
     const currentLearning = learningRef.current;
     const currentPracticeDays = currentLearning.practiceDayKeys;
@@ -395,7 +404,7 @@ export function LearningProvider({
     }));
 
     return { ...practice.result, evidence: mergedEvidence };
-  }, [updateLearning]);
+  }, [enrolledCourse, updateLearning]);
 
   const setWeeklyPracticeGoal = useCallback((goal: WeeklyPracticeGoal | null) => {
     const changedAt = Date.now();

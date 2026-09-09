@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "el-standard-modern-profile",
+  "version": "1.0.0",
+  "courseId": "el-from-zero",
+  "writingSystem": {
+    "name": "Modern Greek alphabet",
+    "direction": "ltr",
+    "segmentation": "Words are separated by spaces; grapheme-to-sound instruction requires reviewed Modern Greek rules"
+  },
+  "pronunciationPriorities": ["Begin with the reviewed sounds already present in el-letters-1"],
+  "transliterationPolicy": "Use only as optional temporary support and fade it as Greek-script recognition develops.",
+  "scriptSupportPolicy": "Introduce Greek graphemes through saved audio and bounded recognition tasks.",
+  "morphologySyntaxProgressionNotes": ["Not defined by this migration slice; qualified review is required before expansion"],
+  "lexicalSelectionPolicy": {
+    "principles": ["Retain only the existing authored examples while this package remains a draft"],
+    "sources": ["https://www.greek-language.gr/"]
+  },
+  "formulaicLanguagePolicy": "No new formulaic language is approved by this migration slice.",
+  "pragmaticNorms": ["Neutral everyday register is the provisional target; qualified review remains pending"],
+  "regionalVariation": ["Regional variants are outside the current prototype and require explicit review"],
+  "culturalRepresentationRules": ["Do not infer cultural claims from a script-and-sound lesson"],
+  "speechConstraints": ["Saved audio supports listening and self-comparison only"],
+  "ttsConstraints": ["Use the existing reviewed static TTS profile and committed MP3 assets"],
+  "asrConstraints": ["No speech-recognition or pronunciation score is enabled"],
+  "accessibilityInputConstraints": ["Every required check has a non-audio selectable response"],
+  "externalReferences": ["https://www.coe.int/en/web/common-european-framework-reference-languages/"],
+  "requiredReviewerQualifications": ["Standard Modern Greek language and pedagogy reviewer"],
+  "knownLimitations": ["Draft migration profile covering only the existing el-letters-1 prototype"]
+}

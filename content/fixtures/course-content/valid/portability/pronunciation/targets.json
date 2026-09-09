@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "targets": [
+    {
+      "schemaVersion": 1,
+      "id": "portable-sipa-pronunciation",
+      "version": "1.0.0",
+      "courseId": "en-x-glide-portability",
+      "text": "sipa",
+      "locale": "x-glide",
+      "targetVariety": "Fictional portability fixture",
+      "syllables": ["si", "pa"],
+      "stressTarget": "No assessed stress target; segmentation exists only to prove schema portability.",
+      "targetAudioIds": [],
+      "acceptableVariants": ["No pronunciation variant is assessed."],
+      "commonLearnerErrors": ["No learner-error claim is made for a fictional language."],
+      "feedbackTemplates": [
+        {
+          "code": "self-compare-only",
+          "template": "Compare your attempt with reviewed audio when a future fixture supplies it."
+        }
+      ],
+      "assessmentEligibility": {
+        "eligible": false
+      },
+      "review": {
+        "reviewer": "fixture-schema-review",
+        "status": "pending",
+        "reviewedAt": null
+      }
+    }
+  ]
+}

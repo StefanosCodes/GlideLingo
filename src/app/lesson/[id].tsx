@@ -2,13 +2,15 @@ import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 
+import { getAvailableLesson } from '@/constants/catalog';
 import { LessonLectureView } from '@/features/learning-session/lesson-lecture-view';
 import { useLearning } from '@/providers/learning-provider';
 
 export default function LessonScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { openLesson } = useLearning();
+  const { enrolledCourse, openLesson } = useLearning();
+  const availableLesson = id && enrolledCourse ? getAvailableLesson(enrolledCourse, id) : null;
 
   useEffect(() => {
     if (id && Platform.OS === 'web') {
@@ -16,7 +18,7 @@ export default function LessonScreen() {
     }
   }, [id, openLesson]);
 
-  if (Platform.OS === 'web') {
+  if (Platform.OS === 'web' || !availableLesson) {
     return <Redirect href="/" />;
   }
 
@@ -28,5 +30,5 @@ export default function LessonScreen() {
     router.replace('/');
   }
 
-  return <LessonLectureView key={id} lessonId={id ?? ''} onClose={goBack} />;
+  return <LessonLectureView key={id} lessonId={id} onClose={goBack} />;
 }

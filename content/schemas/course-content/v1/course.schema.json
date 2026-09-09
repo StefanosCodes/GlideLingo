@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glidelingo.app/schemas/course-content/v1/course.schema.json",
+  "title": "GlideLingo course record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "version",
+    "instructionLocale",
+    "targetLocale",
+    "targetVariety",
+    "targetRegister",
+    "learnerSegment",
+    "entryAssumptions",
+    "intendedProficiencyRange",
+    "productPromise",
+    "exitCapabilityIds",
+    "stageOrder",
+    "moduleOrder",
+    "placementPolicy",
+    "transliterationPolicy",
+    "keyboardInputPolicy",
+    "supportedProductCapabilities",
+    "publicationRef"
+  ],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/schemaVersion" },
+    "id": { "$ref": "common.schema.json#/$defs/id" },
+    "version": { "$ref": "common.schema.json#/$defs/version" },
+    "instructionLocale": { "$ref": "common.schema.json#/$defs/locale" },
+    "targetLocale": { "$ref": "common.schema.json#/$defs/locale" },
+    "targetVariety": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "targetRegister": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "learnerSegment": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "entryAssumptions": { "$ref": "common.schema.json#/$defs/nonEmptyStringList" },
+    "intendedProficiencyRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry", "exit"],
+      "properties": {
+        "entry": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "exit": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+      }
+    },
+    "productPromise": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "exitCapabilityIds": { "$ref": "common.schema.json#/$defs/nonEmptyIdList" },
+    "stageOrder": { "$ref": "common.schema.json#/$defs/nonEmptyIdList" },
+    "moduleOrder": { "$ref": "common.schema.json#/$defs/nonEmptyIdList" },
+    "placementPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "entryCapabilityIds"],
+      "properties": {
+        "mode": { "enum": ["fixed-entry", "authored-check"] },
+        "entryCapabilityIds": { "$ref": "common.schema.json#/$defs/idList" }
+      }
+    },
+    "transliterationPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "learnerControl"],
+      "properties": {
+        "mode": { "enum": ["never", "optional", "fades", "required"] },
+        "learnerControl": { "type": "boolean" }
+      }
+    },
+    "keyboardInputPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "alternatives"],
+      "properties": {
+        "required": { "type": "boolean" },
+        "alternatives": { "$ref": "common.schema.json#/$defs/stringList" }
+      }
+    },
+    "supportedProductCapabilities": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "authored-lessons",
+          "deterministic-practice",
+          "guided-conversation",
+          "offline-learning",
+          "pronunciation-self-comparison",
+          "pronunciation-assessment"
+        ]
+      }
+    },
+    "publicationRef": { "$ref": "common.schema.json#/$defs/id" }
+  }
+}

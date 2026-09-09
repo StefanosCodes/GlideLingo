@@ -2,13 +2,18 @@ import { beforeEach, expect, jest, test } from '@jest/globals';
 import { fireEvent, render } from '@testing-library/react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import ProfileScreen from '@/app/(app)/profile';
+import ProfileScreen from '@/app/profile';
 
 const mockDismissLegacyProgress = jest.fn();
 const mockImportLegacyProgress = jest.fn();
 const mockPush = jest.fn();
+const mockBack = jest.fn();
+const mockCanGoBack = jest.fn(() => false);
+const mockReplace = jest.fn();
 
-jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush, replace: jest.fn() }) }));
+jest.mock('expo-router', () => ({
+  useRouter: () => ({ back: mockBack, canGoBack: mockCanGoBack, push: mockPush, replace: mockReplace }),
+}));
 jest.mock('@/features/auth/account-summary', () => {
   const React = jest.requireActual<typeof import('react')>('react');
   const { Text } = jest.requireActual<typeof import('react-native')>('react-native');
@@ -52,6 +57,10 @@ beforeEach(() => {
   mockDismissLegacyProgress.mockClear();
   mockImportLegacyProgress.mockClear();
   mockPush.mockClear();
+  mockBack.mockClear();
+  mockCanGoBack.mockClear();
+  mockCanGoBack.mockReturnValue(false);
+  mockReplace.mockClear();
 });
 
 test('profile preserves legacy decisions, billing, and account controls', async () => {
@@ -65,8 +74,10 @@ test('profile preserves legacy decisions, billing, and account controls', async 
   await fireEvent.press(screen.getByText('Import progress'));
   await fireEvent.press(screen.getByText('Not mine'));
   await fireEvent.press(screen.getByText('Manage Pro'));
+  await fireEvent.press(screen.getByLabelText('Back to learning'));
 
   expect(mockImportLegacyProgress).toHaveBeenCalledTimes(1);
   expect(mockDismissLegacyProgress).toHaveBeenCalledTimes(1);
   expect(mockPush).toHaveBeenCalledWith('/subscription');
+  expect(mockReplace).toHaveBeenCalledWith('/');
 });

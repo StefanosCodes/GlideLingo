@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "portable-language-profile",
+  "version": "1.0.0",
+  "courseId": "en-x-glide-portability",
+  "writingSystem": {
+    "name": "Fictional Latin fixture symbols",
+    "direction": "ltr",
+    "segmentation": "Whitespace-delimited fixture tokens"
+  },
+  "pronunciationPriorities": ["No pronunciation claim is made by this fixture"],
+  "transliterationPolicy": "The fixture uses its authored symbols directly.",
+  "scriptSupportPolicy": "Every symbol is paired with an English fixture meaning.",
+  "morphologySyntaxProgressionNotes": ["The fixture contains one invariant request pattern."],
+  "lexicalSelectionPolicy": {
+    "principles": ["Use only invented tokens that cannot be mistaken for reviewed language content."],
+    "sources": ["https://example.invalid/glidelingo/portability-fixture"]
+  },
+  "formulaicLanguagePolicy": "Only the single authored request formula is permitted.",
+  "pragmaticNorms": ["No real-world pragmatic claim is made."],
+  "regionalVariation": ["No regional variants exist for the fixture."],
+  "culturalRepresentationRules": ["Do not represent the fixture as a real community or culture."],
+  "speechConstraints": ["Speech assessment is disabled."],
+  "ttsConstraints": ["No generated audio is required."],
+  "asrConstraints": ["No recognition provider is required."],
+  "accessibilityInputConstraints": ["All tasks have non-audio text input or selection."],
+  "externalReferences": ["https://example.invalid/glidelingo/portability-fixture"],
+  "requiredReviewerQualifications": ["Repository maintainer reviewing schema portability only"],
+  "knownLimitations": ["This fixture proves schema portability, not language-course quality."]
+}

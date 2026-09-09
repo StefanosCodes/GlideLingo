@@ -62,6 +62,9 @@ focused branch
 → merge
 ```
 
+When course JSON or schemas change, run `npm run course:validate` before `npm run verify`. The
+validator is local and deterministic; it does not need an AI, audio, or network credential.
+
 Use `npm run verify:full` when Expo dependencies/configuration, Electron packaging, FastAPI, the
 private tutor service, or database wiring changed. User-facing desktop behavior also needs a visible
 Electron run; compilation alone is not acceptance.

@@ -1,0 +1,14 @@
+{
+  "description": "An activity asks the runtime to render an unknown type.",
+  "operations": [
+    {
+      "op": "replace",
+      "file": "missions/portable-request-mission.json",
+      "path": "/lessons/0/activities/0/rendererType",
+      "value": "telepathy"
+    }
+  ],
+  "expectedCode": "schema",
+  "expectedFile": "missions/portable-request-mission.json",
+  "expectedPointer": "/lessons/0/activities/0/rendererType"
+}

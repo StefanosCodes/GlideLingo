@@ -1,5 +1,11 @@
 # GlideLingo Design System
 
+## Selected visual evolution
+
+The user selected a new premium blue-and-white, themed-photography direction for the authenticated app. Read [the implementation brief](docs/design/premium-learning/IMPLEMENTATION_BRIEF.md) and open its three primary screenshots before implementing that refresh. The brief defines the selected target and how it changes the visual foundation below; the remaining sections describe the currently implemented system until the refresh lands.
+
+For that scoped refresh, use the brief's visual target while preserving semantic-token ownership, shared component boundaries, accessibility, native behavior, and evidence-backed learning state. This documentation/reference PR does not itself change runtime styling or enable features.
+
 GlideLingo follows the exact visual foundation used by the OpenFDE Hackathon frontend, adapted to Expo and React Native. It is compact, neutral, direct, and tool-like.
 
 ## Source lineage

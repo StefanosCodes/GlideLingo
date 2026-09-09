@@ -62,6 +62,7 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
 - Validate local development environment files offline: `npm run env:check`
 - Compare local environment files with pinned GCP versions: `npm run env:check:provenance`
 - Start PostgreSQL: `npm run db:up`
+- Start PostgreSQL and apply the current local schema: `npm run db:prepare`
 - Stop PostgreSQL while preserving data: `npm run db:down`
 - Start FastAPI: `npm run api`
 - Start PostgreSQL, FastAPI, and interactive Expo: `npm run dev`

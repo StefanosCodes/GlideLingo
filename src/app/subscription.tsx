@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { ScreenFrame } from '@/components/screen-frame';
 import { ThemedText } from '@/components/themed-text';
@@ -31,7 +31,6 @@ export default function SubscriptionScreen() {
     packages,
     purchaseState,
     managementState,
-    errorMessage,
     manage,
     purchase,
     refresh,
@@ -43,28 +42,45 @@ export default function SubscriptionScreen() {
   const managementLoading = managementState.status === 'loading';
   const actionBusy = loading || purchaseLoading || managementLoading;
   const accessLabel = loading
-    ? 'Checking…'
+    ? 'Checking your plan…'
     : status === 'error'
-      ? 'Access verification unavailable'
+      ? 'We couldn’t check your plan'
       : isPro
         ? 'Pro is active'
         : 'Free plan';
+  const accessDescription = mode === 'mock'
+    ? 'Test mode is on. Plan changes stay on this device and no charge is made.'
+    : mode === 'unavailable'
+      ? 'Purchases are not available in this build.'
+      : status === 'error'
+        ? 'Your plan has not changed. Check your connection and try again.'
+        : isPro
+          ? 'Tutor help is ready whenever you need it inside a lesson.'
+          : 'Keep learning for free, or choose Pro for tutor help inside lessons.';
+
+  function goBack() {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace('/profile');
+  }
 
   return (
     <ScreenFrame chrome={false} includeTabInset={false} testID="subscription-screen">
       <View style={styles.intro}>
         <ThemedText type="eyebrow" themeColor="textSecondary">
-          GLIDELINGO PRO · {mode === 'mock' ? 'MVP PREVIEW' : mode === 'unavailable' ? 'UNAVAILABLE' : 'REVENUECAT'}
+          GLIDELINGO PRO{mode === 'mock' ? ' · TEST MODE' : ''}
         </ThemedText>
         <ThemedText type="display">Get tutor help when you need it.</ThemedText>
         <ThemedText type="body" themeColor="textSecondary" style={styles.copy}>
-          Choose monthly or annual Pro for lesson tutor assistance. Your purchase stays connected to your GlideLingo
-          account, not your email address or phone number.
+          Choose Pro for lesson tutor assistance. Your purchase stays connected to your GlideLingo account, not your
+          email address or phone number.
         </ThemedText>
       </View>
 
       <GlideSurface
-        accessibilityLabel={loading ? 'Checking subscription access' : isPro ? 'Pro is active' : 'Free plan'}
+        accessibilityLabel={accessLabel}
         padding="roomy"
         variant={isPro ? 'success' : 'tinted'}
         style={styles.card}>
@@ -73,11 +89,7 @@ export default function SubscriptionScreen() {
         </ThemedText>
         <ThemedText type="title2">{accessLabel}</ThemedText>
         <ThemedText type="footnote" themeColor="textSecondary">
-          {mode === 'mock'
-            ? 'Mock billing was explicitly enabled for development, so access changes only in memory for this account.'
-            : mode === 'unavailable'
-              ? 'This build has no platform RevenueCat key. Purchases stay disabled rather than granting preview access.'
-              : 'Tutor access is enabled only after the GlideLingo server verifies RevenueCat’s active “pro” entitlement for this signed-in account.'}
+          {accessDescription}
         </ThemedText>
       </GlideSurface>
 
@@ -111,9 +123,7 @@ export default function SubscriptionScreen() {
                     ? purchaseState.status === 'syncing'
                       ? 'Confirming Pro access…'
                       : 'Opening secure checkout…'
-                    : mode === 'mock'
-                      ? `Simulate ${planName(item.interval, item.title)}`
-                      : `Choose ${planName(item.interval, item.title)}`
+                    : `Choose ${planName(item.interval, item.title)}`
                 }
                 onPress={() => void purchase(item.identifier)}
                 testID={`purchase-${item.identifier}`}
@@ -122,11 +132,11 @@ export default function SubscriptionScreen() {
           ))}
           {packages.length === 0 ? (
             <GlideSurface padding="roomy" style={styles.card}>
-              <ThemedText type="title3">No subscription offering is available.</ThemedText>
+              <ThemedText type="title3">Plans are temporarily unavailable.</ThemedText>
               <ThemedText type="footnote" themeColor="textSecondary">
-                Make the monthly and annual packages current in RevenueCat, then refresh this screen.
+                We couldn’t load the available plans. Try again in a moment.
               </ThemedText>
-              <GlideButton label="Refresh offerings" onPress={() => void refresh()} variant="secondary" />
+              <GlideButton label="Reload plans" onPress={() => void refresh()} variant="secondary" />
             </GlideSurface>
           ) : null}
         </View>
@@ -170,20 +180,11 @@ export default function SubscriptionScreen() {
         </GlideSurface>
       ) : null}
 
-      {errorMessage ? (
-        <GlideSurface accessibilityRole="alert" padding="regular">
-          <ThemedText type="headline" style={{ color: theme.danger }}>
-            Purchase status unavailable
-          </ThemedText>
-          <ThemedText type="footnote" themeColor="textSecondary">
-            {errorMessage}
-          </ThemedText>
-        </GlideSurface>
-      ) : null}
-
       <View style={styles.actions}>
-        {mode === 'unavailable' ? null : mode === 'mock' && isPro ? (
-          <GlideButton label="Reset mock access" onPress={resetMockAccess} variant="secondary" />
+        {status === 'error' && mode !== 'unavailable' ? (
+          <GlideButton disabled={actionBusy} label="Try again" onPress={() => void refresh()} variant="secondary" />
+        ) : mode === 'unavailable' ? null : mode === 'mock' && isPro ? (
+          <GlideButton label="Return to Free plan" onPress={resetMockAccess} variant="secondary" />
         ) : (
           <>
             {isPro && mode === 'revenuecat' ? (
@@ -196,16 +197,13 @@ export default function SubscriptionScreen() {
             ) : null}
             <GlideButton
               disabled={actionBusy || status === 'signed-out'}
-              label={Platform.OS === 'web' ? 'Refresh access' : 'Restore purchases'}
+              label="Restore purchases"
               onPress={() => void restore()}
               variant="secondary"
             />
           </>
         )}
-        {status === 'error' && mode !== 'unavailable' ? (
-          <GlideButton label="Try again" onPress={() => void refresh()} variant="secondary" />
-        ) : null}
-        <GlideButton label="Back" onPress={() => router.back()} variant="tertiary" />
+        <GlideButton label="Back" onPress={goBack} variant="tertiary" />
       </View>
 
       {managementState.status !== 'idle' && managementState.status !== 'loading' ? (

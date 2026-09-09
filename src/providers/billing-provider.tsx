@@ -40,16 +40,16 @@ const MOCK_PACKAGES: BillingPackage[] = [
   {
     identifier: 'mock_pro_monthly',
     interval: 'monthly',
-    title: 'Monthly Pro preview',
-    description: 'Preview monthly tutor access with the development-only mock setting.',
-    priceLabel: 'Mock monthly',
+    title: 'Monthly Pro',
+    description: 'Tutor help with a flexible monthly plan.',
+    priceLabel: 'Test purchase',
   },
   {
     identifier: 'mock_pro_annual',
     interval: 'annual',
-    title: 'Annual Pro preview',
-    description: 'Preview annual tutor access with the development-only mock setting.',
-    priceLabel: 'Mock annual',
+    title: 'Annual Pro',
+    description: 'Tutor help for a full year.',
+    priceLabel: 'Test purchase',
   },
 ];
 

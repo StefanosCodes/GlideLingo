@@ -5,6 +5,7 @@ import { ScreenFrame } from '@/components/screen-frame';
 import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
+import { GlideSwitch } from '@/components/ui/glide-switch';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { availableModulesForCourse } from '@/constants/catalog';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
@@ -14,7 +15,7 @@ import {
   strongestCapabilityEvidence,
 } from '@/features/learning-progress/evidence-policy';
 import type { WeeklyPracticeGoal } from '@/features/learning-progress/rhythm-policy';
-import { useTheme } from '@/hooks/use-theme';
+import { useTheme, useThemeController } from '@/hooks/use-theme';
 import { useLearning } from '@/providers/learning-provider';
 
 const skillProfile = [
@@ -37,6 +38,7 @@ const stateLabel = {
 export default function ProfileScreen() {
   const router = useRouter();
   const theme = useTheme();
+  const { scheme, setPreference } = useThemeController();
   const {
     language,
     enrolledCourse,
@@ -46,12 +48,8 @@ export default function ProfileScreen() {
     practiceDaysThisWeek,
     weeklyPracticeGoal,
     completedModuleIds,
-    legacyProgressAvailable,
-    legacyProgressError,
     persistenceStatus,
     setWeeklyPracticeGoal,
-    dismissLegacyProgress,
-    importLegacyProgress,
   } = useLearning();
   const percent = Math.round(progress * 100);
   const capabilities = strongestCapabilityEvidence(lessonEvidence);
@@ -150,28 +148,6 @@ export default function ProfileScreen() {
         </GlideSurface>
       ) : null}
 
-      {legacyProgressAvailable ? (
-        <GlideSurface padding="roomy" style={styles.block} variant="tinted">
-          <ThemedText type="eyebrow" themeColor="textSecondary">
-            EXISTING PROGRESS FOUND
-          </ThemedText>
-          <ThemedText type="title3">Bring this device’s earlier progress into your account?</ThemedText>
-          <ThemedText type="footnote" themeColor="textSecondary">
-            Import only if this progress is yours. Lessons, ability evidence, practice dates, and weekly goals are combined
-            with this account before the older shared copy is removed.
-          </ThemedText>
-          <View style={styles.legacyActions}>
-            <GlideButton label="Import progress" onPress={importLegacyProgress} size="regular" />
-            <GlideButton label="Not mine" onPress={dismissLegacyProgress} size="regular" variant="tertiary" />
-          </View>
-          {legacyProgressError ? (
-            <ThemedText accessibilityRole="alert" type="footnote" style={{ color: theme.danger }}>
-              {legacyProgressError}
-            </ThemedText>
-          ) : null}
-        </GlideSurface>
-      ) : null}
-
       <GlideSurface padding="roomy" style={styles.block}>
         <ThemedText type="eyebrow" themeColor="textSecondary">
           MEMBERSHIP
@@ -184,6 +160,31 @@ export default function ProfileScreen() {
       </GlideSurface>
 
       <AccountSummary />
+
+      <View style={styles.section}>
+        <View style={styles.sectionHeading}>
+          <ThemedText type="eyebrow" themeColor="textSecondary">
+            SETTINGS
+          </ThemedText>
+          <ThemedText type="title2">Appearance</ThemedText>
+        </View>
+        <GlideSurface padding="none">
+          <View style={styles.settingRow}>
+            <View style={styles.settingCopy}>
+              <ThemedText type="headline">Dark appearance</ThemedText>
+              <ThemedText type="footnote" themeColor="textSecondary">
+                Use a dark theme throughout GlideLingo.
+              </ThemedText>
+            </View>
+            <GlideSwitch
+              accessibilityLabel="Dark appearance"
+              onValueChange={(enabled) => setPreference(enabled ? 'dark' : 'light')}
+              testID="dark-appearance-switch"
+              value={scheme === 'dark'}
+            />
+          </View>
+        </GlideSurface>
+      </View>
 
       <View style={styles.section}>
         <View style={styles.sectionHeading}>
@@ -290,8 +291,16 @@ const styles = StyleSheet.create({
   identityCopy: { flex: 1, gap: Spacing.half },
   section: { gap: Spacing.three },
   sectionHeading: { gap: Spacing.one },
+  settingCopy: { flex: 1, gap: Spacing.half },
+  settingRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: Spacing.three,
+    minHeight: 64,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.twoHalf,
+  },
   block: { gap: Spacing.twoHalf },
-  legacyActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   rhythmChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, paddingTop: Spacing.one },
   rhythmChoice: {
     alignItems: 'center',

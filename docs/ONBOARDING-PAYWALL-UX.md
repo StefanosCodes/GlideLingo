@@ -4,7 +4,7 @@ Status: signed-in web/Electron slice implemented in PR #69; pre-auth onboarding,
 
 Audience: product, design, engineering, and growth
 
-Primary surface: iOS and Android, responsive to web and Electron
+Primary surface now: Electron and web. The shared Expo implementation remains responsive and keeps the same route, state, and component boundaries available for later iOS and Android work.
 
 Initial course assumption: Modern Greek (`Greek from zero`, A0–A1)
 

@@ -48,25 +48,48 @@ export function CredentialAuthScreen({
 }
 
 export function AuthField({
+  accessibilityHint,
+  errorMessage,
   label,
   testID,
   ...props
-}: TextInputProps & { label: string; testID: string }) {
+}: TextInputProps & { errorMessage?: string | null; label: string; testID: string }) {
   const theme = useTheme();
+  const errorID = `${testID}-error`;
+  const webErrorProps = errorMessage
+    ? ({ 'aria-describedby': errorID, 'aria-invalid': true } as unknown as TextInputProps)
+    : {};
 
   return (
     <View style={styles.field}>
       <ThemedText type="headline">{label}</ThemedText>
       <TextInput
+        accessibilityHint={errorMessage ?? accessibilityHint}
         accessibilityLabel={label}
         placeholderTextColor={theme.textTertiary}
         style={[
           styles.input,
-          { backgroundColor: theme.backgroundElement, borderColor: theme.border, color: theme.text },
+          {
+            backgroundColor: theme.backgroundElement,
+            borderColor: errorMessage ? theme.danger : theme.border,
+            color: theme.text,
+          },
         ]}
         testID={testID}
         {...props}
+        {...webErrorProps}
       />
+      {errorMessage ? (
+        <ThemedText
+          accessibilityLiveRegion="polite"
+          accessibilityRole="alert"
+          nativeID={errorID}
+          style={{ color: theme.danger }}
+          testID={errorID}
+          type="footnote">
+          {errorMessage}
+        </ThemedText>
+      ) : null}
     </View>
   );
 }

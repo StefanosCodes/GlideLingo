@@ -44,6 +44,18 @@ it exactly matches `GLIDELINGO_CLERK_AUTHORIZED_PARTIES`; native tokens without 
 Existing unscoped browser learning progress is never assigned automatically. The Progress screen asks the signed-in user
 to import or reject it; importing moves the legacy data into that Clerk user's storage and removes the shared legacy copy.
 
+## User-facing error contract
+
+- Validate obvious email, password, confirmation, and verification-code problems before sending a request.
+- Put a recoverable error beside the field the learner can change, mark that field invalid for assistive technology, and
+  clear the message when the learner edits the form.
+- Translate stable Clerk error codes into concise next steps. Keep security-check, rate-limit, unsupported-state, and
+  service failures at form level when no field can resolve them.
+- Never display raw Clerk messages, exception text, identifiers, tokens, or infrastructure details. Unknown failures use a
+  safe, non-blaming retry message.
+- Keep Clerk's `clerk-captcha` mount point in the custom sign-up form. Bot protection remains enabled in development and
+  production; tests must not bypass an interactive challenge.
+
 ## Release prerequisites
 
 1. The app is linked to `@stefanoscodes/glidelingo` in Expo EAS. Configure signing and create development builds; Expo Go
@@ -90,6 +102,8 @@ to import or reject it; importing moves the legacy data into that Clerk user's s
 - Confirm each new user is stopped at the one-field first-name screen before seeing learning content.
 - Confirm sign-out returns to `/sign-in`, and another account cannot see the first account's browser learning state or Pro
   entitlement.
+- Attempt to register an existing email and confirm the message identifies the email field, explains that the account
+  already exists, clears after editing, and offers the normal sign-in path.
 - Call `GET /v1/auth/session` with and without the Clerk bearer token; expect `200` and `401` respectively.
 - Confirm Google, Apple, and phone are absent from the MVP interface while their provider configuration remains intact.
 

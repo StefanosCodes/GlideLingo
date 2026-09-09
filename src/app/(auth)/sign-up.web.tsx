@@ -11,7 +11,8 @@ import {
   emailValidationMessage,
   normalizeAuthEmail,
   passwordValidationMessage,
-  safeAuthErrorMessage,
+  safeAuthIssue,
+  type AuthIssueField,
   unsupportedAuthStateMessage,
 } from '@/features/auth/credential-auth';
 import {
@@ -36,8 +37,20 @@ export default function SignUpRoute() {
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorField, setErrorField] = useState<AuthIssueField | null>(null);
   const [resendSeconds, setResendSeconds] = useState(0);
   const busy = submitting || fetchStatus === 'fetching';
+
+  const clearError = () => {
+    setErrorMessage(null);
+    setErrorField(null);
+  };
+
+  const showAuthError = (error: unknown, fallback: string) => {
+    const issue = safeAuthIssue(error, fallback);
+    setErrorMessage(issue.message);
+    setErrorField(issue.field);
+  };
 
   useEffect(() => {
     if (resendSeconds <= 0) return;
@@ -48,11 +61,12 @@ export default function SignUpRoute() {
   const finish = async () => {
     if (signUp.status !== 'complete') {
       setErrorMessage(unsupportedAuthStateMessage());
+      setErrorField(null);
       return;
     }
     const finalized = await signUp.finalize();
     if (finalized.error) {
-      setErrorMessage(safeAuthErrorMessage(finalized.error, 'We could not finish creating your account. Please try again.'));
+      showAuthError(finalized.error, 'Your account is ready, but sign-in did not finish. Please sign in again.');
       return;
     }
     setPassword('');
@@ -63,21 +77,25 @@ export default function SignUpRoute() {
 
   const createAccount = async () => {
     if (busy) return;
-    const validationError =
-      emailValidationMessage(email) ??
-      passwordValidationMessage(password) ??
-      confirmationValidationMessage(password, confirmation);
-    if (validationError) {
-      setErrorMessage(validationError);
+    const emailError = emailValidationMessage(email);
+    const passwordError = passwordValidationMessage(password);
+    const confirmationError = confirmationValidationMessage(password, confirmation);
+    const validationIssue =
+      (emailError && { field: 'email' as const, message: emailError }) ??
+      (passwordError && { field: 'password' as const, message: passwordError }) ??
+      (confirmationError && { field: 'confirmation' as const, message: confirmationError });
+    if (validationIssue) {
+      setErrorMessage(validationIssue.message);
+      setErrorField(validationIssue.field);
       return;
     }
 
     setSubmitting(true);
-    setErrorMessage(null);
+    clearError();
     try {
       const result = await signUp.password({ emailAddress: normalizeAuthEmail(email), password });
       if (result.error) {
-        setErrorMessage(safeAuthErrorMessage(result.error, 'We could not create your account. Check your details and try again.'));
+        showAuthError(result.error, 'We could not create your account right now. Check your connection and try again.');
         return;
       }
       if (signUp.status === 'complete') {
@@ -86,12 +104,13 @@ export default function SignUpRoute() {
       }
       if (!signUp.unverifiedFields.includes('email_address')) {
         setErrorMessage(unsupportedAuthStateMessage());
+        setErrorField(null);
         return;
       }
 
       const sent = await signUp.verifications.sendEmailCode();
       if (sent.error) {
-        setErrorMessage(safeAuthErrorMessage(sent.error, 'We could not send the verification code. Please try again.'));
+        showAuthError(sent.error, 'We could not send the verification code right now. Please try again.');
         return;
       }
       setPassword('');
@@ -99,7 +118,7 @@ export default function SignUpRoute() {
       setStep('verification');
       setResendSeconds(AUTH_CODE_RESEND_SECONDS);
     } catch (error) {
-      setErrorMessage(safeAuthErrorMessage(error, 'We could not create your account. Please try again.'));
+      showAuthError(error, 'We could not create your account right now. Check your connection and try again.');
     } finally {
       setSubmitting(false);
     }
@@ -110,20 +129,21 @@ export default function SignUpRoute() {
     const validationError = codeValidationMessage(code);
     if (validationError) {
       setErrorMessage(validationError);
+      setErrorField('code');
       return;
     }
 
     setSubmitting(true);
-    setErrorMessage(null);
+    clearError();
     try {
       const result = await signUp.verifications.verifyEmailCode({ code: code.trim() });
       if (result.error) {
-        setErrorMessage(safeAuthErrorMessage(result.error, 'We could not verify that code. Please try again.'));
+        showAuthError(result.error, 'We could not verify that code right now. Please try again.');
         return;
       }
       await finish();
     } catch (error) {
-      setErrorMessage(safeAuthErrorMessage(error, 'We could not verify that code. Please try again.'));
+      showAuthError(error, 'We could not verify that code right now. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -132,16 +152,16 @@ export default function SignUpRoute() {
   const resendCode = async () => {
     if (busy || resendSeconds > 0) return;
     setSubmitting(true);
-    setErrorMessage(null);
+    clearError();
     try {
       const result = await signUp.verifications.sendEmailCode();
       if (result.error) {
-        setErrorMessage(safeAuthErrorMessage(result.error, 'We could not send another code. Please try again.'));
+        showAuthError(result.error, 'We could not send another code right now. Please try again.');
         return;
       }
       setResendSeconds(AUTH_CODE_RESEND_SECONDS);
     } catch (error) {
-      setErrorMessage(safeAuthErrorMessage(error, 'We could not send another code. Please try again.'));
+      showAuthError(error, 'We could not send another code right now. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -152,7 +172,7 @@ export default function SignUpRoute() {
     await signUp.reset();
     setStep('credentials');
     setCode('');
-    setErrorMessage(null);
+    clearError();
   };
 
   if (step === 'verification') {
@@ -169,7 +189,7 @@ export default function SignUpRoute() {
           label="Verification code"
           onChangeText={(value) => {
             setCode(value);
-            setErrorMessage(null);
+            clearError();
           }}
           onSubmitEditing={() => void verifyEmail()}
           placeholder="Enter code"
@@ -177,8 +197,9 @@ export default function SignUpRoute() {
           testID="sign-up-code"
           textContentType="oneTimeCode"
           value={code}
+          errorMessage={errorField === 'code' ? errorMessage : null}
         />
-        {errorMessage ? <AuthAlert>{errorMessage}</AuthAlert> : null}
+        {errorMessage && errorField !== 'code' ? <AuthAlert>{errorMessage}</AuthAlert> : null}
         <View style={credentialAuthStyles.actions}>
           <GlideButton
             disabled={busy}
@@ -219,7 +240,8 @@ export default function SignUpRoute() {
         editable={!busy}
         keyboardType="email-address"
         label="Email address"
-        onChangeText={(value) => { setEmail(value); setErrorMessage(null); }}
+        errorMessage={errorField === 'email' ? errorMessage : null}
+        onChangeText={(value) => { setEmail(value); clearError(); }}
         placeholder="you@example.com"
         testID="sign-up-email"
         textContentType="emailAddress"
@@ -230,7 +252,8 @@ export default function SignUpRoute() {
         autoComplete="new-password"
         editable={!busy}
         label="Password"
-        onChangeText={(value) => { setPassword(value); setErrorMessage(null); }}
+        errorMessage={errorField === 'password' ? errorMessage : null}
+        onChangeText={(value) => { setPassword(value); clearError(); }}
         placeholder="At least 8 characters"
         secureTextEntry
         testID="sign-up-password"
@@ -242,7 +265,8 @@ export default function SignUpRoute() {
         autoComplete="new-password"
         editable={!busy}
         label="Confirm password"
-        onChangeText={(value) => { setConfirmation(value); setErrorMessage(null); }}
+        errorMessage={errorField === 'confirmation' ? errorMessage : null}
+        onChangeText={(value) => { setConfirmation(value); clearError(); }}
         onSubmitEditing={() => void createAccount()}
         placeholder="Repeat your password"
         returnKeyType="done"
@@ -253,7 +277,9 @@ export default function SignUpRoute() {
       />
       <AuthHint>Your password stays private. GlideLingo never stores it.</AuthHint>
       <View nativeID="clerk-captcha" testID="clerk-captcha" />
-      {errorMessage ? <AuthAlert>{errorMessage}</AuthAlert> : null}
+      {errorMessage && !['email', 'password', 'confirmation'].includes(errorField ?? '') ? (
+        <AuthAlert>{errorMessage}</AuthAlert>
+      ) : null}
       <GlideButton
         disabled={busy}
         fullWidth

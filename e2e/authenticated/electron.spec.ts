@@ -7,6 +7,7 @@ import {
   registerAndReachHome,
   signOutAndSignBackIn,
   signOutForCleanup,
+  verifySignUpErrorGuidance,
 } from '../support/authenticated-journey';
 import { createClerkTestAccount, deleteClerkTestAccount } from '../support/clerk-test-account';
 import {
@@ -61,11 +62,18 @@ test('a learner can register, onboard, finish a lesson, and relaunch the secure 
 
     await expectCompletedCourseHome(page);
     await signOutForCleanup(page);
+    expect(observer.errors(), observer.format(observer.errors())).toEqual([]);
+    await verifySignUpErrorGuidance(page, account);
   } finally {
     await closeGlideLingoElectron(runtime);
     await deleteClerkTestAccount(account.email);
     await observer.attach(testInfo);
   }
 
-  expect(observer.errors(), observer.format(observer.errors())).toEqual([]);
+  expect(observer.errors(), observer.format(observer.errors())).toEqual([
+    expect.objectContaining({
+      source: 'electron-renderer:console',
+      message: 'Failed to load resource: the server responded with a status of 422 (Unprocessable Entity)',
+    }),
+  ]);
 });

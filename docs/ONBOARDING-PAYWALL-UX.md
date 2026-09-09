@@ -1,6 +1,6 @@
 # GlideLingo onboarding and paywall UX
 
-Status: proposed product direction
+Status: signed-in web/Electron slice implemented in PR #69; pre-auth onboarding, live store purchase, mission-boundary conversion, analytics, and server-synced onboarding remain future slices
 
 Audience: product, design, engineering, and growth
 
@@ -8,7 +8,7 @@ Primary surface: iOS and Android, responsive to web and Electron
 
 Initial course assumption: Modern Greek (`Greek from zero`, A0–A1)
 
-Implementation note: the first coded slice is stacked on the Clerk/RevenueCat MVP and therefore runs after sign-in and first-name completion, when a stable billing identity exists. Moving the learning sample before authentication remains the preferred product direction, but requires a coordinated change to the authentication boundary and is not hidden inside this onboarding PR. This slice implements the full signed-in sequence and soft paywall; premium lesson gating and the mission-boundary paywall remain separate work after the free mission is complete and validated.
+Implementation note: the first coded slice is stacked on the Clerk/RevenueCat MVP and therefore runs after sign-in and first-name completion, when a stable billing identity exists. Moving the learning sample before authentication remains the preferred product direction, but requires a coordinated change to the authentication boundary and is not hidden inside this onboarding PR. This slice implements the signed-in goal, rhythm, plan, sample, result, and truthful free/Pro decision screens. The starting-point screen is intentionally omitted until placement exists. The selected rhythm becomes the learner's real weekly target, including seven days for `Every day` and no target for `I'll decide as I go`. Real purchase, premium lesson gating, analytics, and the mission-boundary paywall remain separate work after the free mission is complete and validated.
 
 ## Decision
 

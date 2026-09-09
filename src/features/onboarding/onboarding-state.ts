@@ -1,3 +1,5 @@
+import type { WeeklyPracticeGoal } from '@/features/learning-progress/rhythm-policy';
+
 export const ONBOARDING_VERSION = 1;
 
 export const ONBOARDING_STEPS = ['welcome', 'goal', 'rhythm', 'plan', 'sample', 'result', 'paywall'] as const;
@@ -73,4 +75,11 @@ export function previousOnboardingStep(step: OnboardingStep): OnboardingStep | n
 export function onboardingProgress(step: OnboardingStep) {
   const index = ONBOARDING_STEPS.indexOf(step);
   return Math.max(0, index) / (ONBOARDING_STEPS.length - 1);
+}
+
+export function weeklyPracticeGoalForRhythm(rhythm: OnboardingRhythm): WeeklyPracticeGoal | null {
+  if (rhythm === 'three') return 3;
+  if (rhythm === 'five') return 5;
+  if (rhythm === 'daily') return 7;
+  return null;
 }

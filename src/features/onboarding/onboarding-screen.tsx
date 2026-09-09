@@ -14,6 +14,7 @@ import {
   previousOnboardingStep,
   type OnboardingGoal,
   type OnboardingRhythm,
+  weeklyPracticeGoalForRhythm,
 } from '@/features/onboarding/onboarding-state';
 import {
   type PronunciationStatus,
@@ -65,7 +66,7 @@ export function OnboardingScreen() {
   const theme = useTheme();
   const { state, storageError, setStep, selectGoal, selectRhythm, completeSample, completeOnboarding } =
     useOnboarding();
-  const { startCourse } = useLearning();
+  const { setWeeklyPracticeGoal, startCourse } = useLearning();
   const billing = useBilling();
   const [sampleChoice, setSampleChoice] = useState<string | null>(null);
   const [sampleChecked, setSampleChecked] = useState(false);
@@ -86,6 +87,7 @@ export function OnboardingScreen() {
       setCompletionPending(false);
       return;
     }
+    if (state.rhythm) setWeeklyPracticeGoal(weeklyPracticeGoalForRhythm(state.rhythm));
     await completeOnboarding(access);
     router.replace('/');
   }
@@ -341,7 +343,7 @@ export function OnboardingScreen() {
           ) : null}
           {!billing.isPro ? (
             <GlideButton
-              disabled={completionPending}
+              disabled={billing.status === 'loading' || completionPending}
               fullWidth
               label="Continue with the free first mission"
               onPress={() => void finishOnboarding('free')}

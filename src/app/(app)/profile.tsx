@@ -23,7 +23,7 @@ const skillProfile = [
   { id: 'writing', label: 'Writing' },
 ] as const;
 
-const rhythmOptions = [2, 3, 5] as const;
+const rhythmOptions = [2, 3, 5, 7] as const;
 
 const stateLabel = {
   unseen: 'Not yet',

@@ -7,6 +7,7 @@ import {
   onboardingStorageKey,
   parseOnboardingState,
   previousOnboardingStep,
+  weeklyPracticeGoalForRhythm,
 } from '../onboarding-state.ts';
 
 test('creates a truthful incomplete onboarding state', () => {
@@ -68,4 +69,11 @@ test('models bounded back navigation and progress', () => {
   assert.equal(previousOnboardingStep('plan'), 'rhythm');
   assert.equal(onboardingProgress('welcome'), 0);
   assert.equal(onboardingProgress('paywall'), 1);
+});
+
+test('maps every onboarding rhythm to the durable weekly target contract', () => {
+  assert.equal(weeklyPracticeGoalForRhythm('three'), 3);
+  assert.equal(weeklyPracticeGoalForRhythm('five'), 5);
+  assert.equal(weeklyPracticeGoalForRhythm('daily'), 7);
+  assert.equal(weeklyPracticeGoalForRhythm('flexible'), null);
 });

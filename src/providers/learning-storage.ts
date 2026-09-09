@@ -63,7 +63,7 @@ function isLanguageId(value: unknown): value is LanguageId {
 }
 
 function isWeeklyPracticeGoal(value: unknown): value is WeeklyPracticeGoal {
-  return value === 2 || value === 3 || value === 5;
+  return value === 2 || value === 3 || value === 5 || value === 7;
 }
 
 function stringArray(value: unknown) {

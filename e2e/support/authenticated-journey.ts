@@ -77,6 +77,17 @@ export async function completeFirstLesson(page: Page) {
   throw new Error('The authored first lesson did not reach its completion state.');
 }
 
+export async function verifySidebarTransition(page: Page) {
+  const sidebar = page.getByRole('tablist');
+  await expect(sidebar).toHaveCSS('width', '288px');
+
+  await page.getByRole('button', { name: 'Close sidebar' }).click();
+  await expect(sidebar).toHaveCSS('width', '52px');
+
+  await page.getByRole('button', { name: 'GlideLingo' }).click();
+  await expect(sidebar).toHaveCSS('width', '288px');
+}
+
 export async function signOutAndSignBackIn(page: Page, account: ClerkTestAccount) {
   await page.getByRole('button', { name: 'Profile and settings' }).filter({ visible: true }).first().click();
   await expect(page.getByText(account.email, { exact: true })).toBeVisible();

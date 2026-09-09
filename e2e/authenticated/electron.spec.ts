@@ -7,6 +7,7 @@ import {
   registerAndReachHome,
   signOutAndSignBackIn,
   signOutForCleanup,
+  verifySidebarTransition,
   verifySignUpErrorGuidance,
 } from '../support/authenticated-journey';
 import { createClerkTestAccount, deleteClerkTestAccount } from '../support/clerk-test-account';
@@ -44,6 +45,7 @@ test('a learner can register, onboard, finish a lesson, and relaunch the secure 
     expect(rendererSecurity).toEqual({ nodeRequire: 'undefined', nodeVersion: undefined });
 
     await registerAndReachHome(page, account);
+    await verifySidebarTransition(page);
     await completeFirstLesson(page);
     await signOutAndSignBackIn(page, account);
 

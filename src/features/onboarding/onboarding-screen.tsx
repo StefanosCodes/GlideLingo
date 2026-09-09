@@ -1,9 +1,9 @@
-import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useState, type PropsWithChildren, type ReactNode } from 'react';
 import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GlideLingoBrandMark } from '@/components/glidelingo-brand-mark';
 import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
@@ -132,12 +132,7 @@ export function OnboardingScreen() {
         {...sharedFrameProps}
         actions={<GlideButton fullWidth label="Build my path" onPress={() => setStep('goal')} testID="onboarding-start" />}>
         <View style={styles.welcomeMark}>
-          <Image
-            accessibilityIgnoresInvertColors
-            contentFit="contain"
-            source={require('@/assets/brand/glidelingo-bird.png')}
-            style={styles.brandMark}
-          />
+          <GlideLingoBrandMark color={theme.text} size={40} />
           <ThemedText type="headline">GlideLingo</ThemedText>
         </View>
         <ScreenIntro
@@ -714,7 +709,6 @@ const styles = StyleSheet.create({
   },
   alpha: { fontSize: 82, lineHeight: 90 },
   audioControl: { alignItems: 'center', gap: Spacing.one },
-  brandMark: { height: 40, width: 40 },
   choice: {
     alignItems: 'center',
     borderRadius: Radii.large,

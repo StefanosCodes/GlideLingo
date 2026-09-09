@@ -7,6 +7,7 @@ import {
   registerAndReachHome,
   signOutAndSignBackIn,
   signOutForCleanup,
+  verifySidebarTransition,
   verifySignUpErrorGuidance,
 } from '../support/authenticated-journey';
 import { createClerkTestAccount, deleteClerkTestAccount } from '../support/clerk-test-account';
@@ -20,6 +21,7 @@ test('a learner can register, onboard, finish a lesson, and return to the same w
   try {
     await prepareClerkPage(page);
     await registerAndReachHome(page, account);
+    await verifySidebarTransition(page);
     await completeFirstLesson(page);
     await signOutAndSignBackIn(page, account);
     await page.reload();

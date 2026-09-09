@@ -8,7 +8,7 @@ drafts provide the pre-publication client gate.
 
 | Lane | Identity | Billing | Configuration source | Purpose |
 | --- | --- | --- | --- | --- |
-| Local | Clerk development | RevenueCat sandbox | Ignored root `.env`, synchronized from pinned development Secret Manager versions | Daily coding and local acceptance |
+| Local | Clerk development | RevenueCat sandbox | Ignored `.env` plus server-only `.e2e-auth.env`, bootstrapped from pinned development Secret Manager versions | Daily coding and local acceptance |
 | Pull request | Test fixtures only | Test fixtures only | Committed examples and CI configuration | Review, tests, and contract validation |
 | Signed desktop candidate | Clerk production | Explicit sandbox or production mode | Pinned production Secret Manager versions through WIF | Draft artifact acceptance before publication |
 | Production | Clerk production | RevenueCat production | The same reviewed production versions | Live API and published desktop updates |
@@ -31,9 +31,10 @@ npm run env:check
 npm run dev:desktop
 ```
 
-`env:sync:development` updates only the managed development block in the ignored root `.env`, writes
-it with mode `0600`, and never prints secret values. `env:check` proves that every managed value still
-matches its pinned development Secret Manager version.
+`env:sync:development` bootstraps the ignored root `.env` and server-only `.e2e-auth.env`, writes
+both with mode `0600`, and never prints secret values. `env:check` validates those local files
+offline. Use `env:check:provenance` only when you need to compare them with their pinned development
+Secret Manager versions.
 
 For a RevenueCat webhook test, keep FastAPI on port `8123` and run:
 
@@ -58,6 +59,10 @@ git switch -c feat/<small-change>
 npm run env:check
 npm run dev:desktop
 ```
+
+For a real registration, onboarding, sign-in, and Electron relaunch acceptance run, use
+`npm run test:e2e:auth`. It consumes the already-bootstrapped local files and does not fetch secrets
+during the test.
 
 Before opening a normal pull request:
 

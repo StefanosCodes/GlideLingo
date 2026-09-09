@@ -70,13 +70,16 @@ Run commands from this directory—the one containing `package.json`:
 | Open Android directly | `npm run android` |
 | Open iOS directly | `npm run ios` |
 | Open the Electron desktop app | `npm run desktop` |
-| Validate local development configuration | `npm run env:check` |
+| Bootstrap local development configuration once | `npm run env:sync:development` |
+| Validate local development configuration offline | `npm run env:check` |
+| Compare local configuration with pinned GCP versions | `npm run env:check:provenance` |
 | Check the local environment | `npm run diagnose` |
 | Validate versioned course packages | `npm run course:validate` |
 | Run lint, types, and tests | `npm run verify` |
 | Run all Expo and desktop checks | `npm run verify:full` |
 | Run the database integration gate | `npm run verify:full-stack` |
 | Prepare a clean local desktop E2E | `npm run e2e:local:prepare -- --confirm glidelingo-local` |
+| Run real Clerk auth E2E in web and Electron | `npm run test:e2e:auth` |
 | Clear mobile Metro state | `npm run start:clear` |
 | Clear desktop Metro state | `npm run desktop:clear` |
 | Build a local macOS `.app` | `npm run desktop:package` |

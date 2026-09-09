@@ -24,7 +24,10 @@ Current client commands:
 | Start Electron and its web server | `npm run desktop` |
 | Attach Electron to existing Metro | `npm run desktop:window` |
 | Diagnose the environment | `npm run diagnose` |
-| Validate development configuration | `npm run env:check` |
+| Bootstrap local development configuration once | `npm run env:sync:development` |
+| Validate local development configuration offline | `npm run env:check` |
+| Compare local configuration with pinned GCP versions | `npm run env:check:provenance` |
+| Run real Clerk auth E2E in web and Electron | `npm run test:e2e:auth` |
 | Run fast verification | `npm run verify` |
 | Verify the backend without PostgreSQL | `npm run api:verify` |
 | Run static/full repository verification | `npm run verify:full` |
@@ -76,9 +79,12 @@ Only public configuration may use Expo’s `EXPO_PUBLIC_*` variables. Secrets, s
 ## Environment files
 
 The backend and Docker Compose read the root `.env` when present. Committed defaults are sufficient
-for database and unauthenticated health work, but the complete desktop auth/billing path requires
-the ignored root `.env` synchronized with `npm run env:sync:development` from the exact
-`glidelingo-development` project. Verify it with `npm run env:check`; do not hand-copy managed
+for database and unauthenticated health work, but the complete desktop auth/billing path requires a
+one-time `npm run env:sync:development` from the exact `glidelingo-development` project. The sync
+writes ordinary local configuration to the ignored root `.env` and the Clerk Backend API key to the
+ignored, server-only `.e2e-auth.env`; both files use mode `0600`. Routine `env:check`, development,
+and authenticated E2E then run from local files without GCP access. Use `env:check:provenance` or
+resync only to compare with an intentionally changed pinned version. Do not hand-copy managed
 values. Keep any explicit database URL, port, and password overrides consistent.
 
 Environment rules:

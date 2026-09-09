@@ -89,6 +89,26 @@ Playwright APIs, semantic locators, bounded event-driven waits, isolated fixture
 teardown, and failure-only trace/screenshot/video. Do not add fixed sleeps, unbounded polling,
 force clicks, private Playwright internals, custom app drivers, or success-only test-mode branches.
 
+## GlideLingo authenticated quick path
+
+For GlideLingo registration, onboarding, account persistence, or authenticated browser/Electron
+acceptance, use the repository-owned workflow instead of reconstructing a Clerk setup:
+
+1. On first setup or after an intentional pinned-secret rotation, run
+   `npm run env:sync:development`. This is the only routine step that downloads development values.
+2. Run `npm run env:check` for an offline check of the ignored, mode-`0600` `.env` and server-only
+   `.e2e-auth.env`. Use `npm run env:check:provenance` only when remote comparison is required.
+3. Run `npm run test:e2e:auth`. It owns PostgreSQL, FastAPI, Expo web, unique Clerk development test
+   identities, the real web and Electron journeys, Electron relaunch state, and teardown.
+
+Never hand-copy the Clerk Backend API key, move it into the root `.env`, or pass it to Expo or
+Electron. If `.e2e-auth.env` is missing, stop and direct the operator to the bootstrap command;
+do not silently fetch a credential during the E2E run.
+
+Production is a separate signed-release acceptance lane. Never reuse this development credential
+or the test-account creation path there. Use the guarded production preparation and desktop release
+runbook only when production mutation has been explicitly authorized.
+
 ## Handle a missing or broken harness honestly
 
 In Walkthrough or Diagnose mode, inventory the absent capability and mark the corresponding gate

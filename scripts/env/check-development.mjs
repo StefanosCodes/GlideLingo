@@ -8,6 +8,7 @@ import {
   accessSecret,
   assertDevelopmentProject,
   fingerprint,
+  loadAuthenticatedE2EContract,
   loadDevelopmentContract,
   parseEnv,
   validateLocalValues,
@@ -15,23 +16,66 @@ import {
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const environmentPath = path.join(projectRoot, '.env');
+const authenticatedE2EEnvironmentPath = path.join(projectRoot, '.e2e-auth.env');
+const checkProvenance = process.argv.includes('--provenance');
+
+function assertIgnored(relativePath) {
+  execFileSync('git', ['check-ignore', '--quiet', relativePath], {
+    cwd: projectRoot,
+    stdio: 'ignore',
+  });
+}
+
+function assertPrivateFile(filePath, label) {
+  if (!existsSync(filePath)) {
+    throw new Error(`${label} is missing. Run npm run env:sync:development.`);
+  }
+  const mode = statSync(filePath).mode & 0o777;
+  if (mode !== 0o600) throw new Error(`${label} must have mode 0600; found ${mode.toString(8)}.`);
+}
 
 try {
-  assertDevelopmentProject();
-  if (!existsSync(environmentPath)) throw new Error('Root .env is missing. Run npm run env:sync:development.');
-  execFileSync('git', ['check-ignore', '--quiet', '.env'], { cwd: projectRoot, stdio: 'ignore' });
-  const mode = statSync(environmentPath).mode & 0o777;
-  if (mode !== 0o600) throw new Error(`Root .env must have mode 0600; found ${mode.toString(8)}.`);
+  assertPrivateFile(environmentPath, 'Root .env');
+  assertPrivateFile(authenticatedE2EEnvironmentPath, '.e2e-auth.env');
+  assertIgnored('.env');
+  assertIgnored('.e2e-auth.env');
 
   const values = parseEnv(readFileSync(environmentPath, 'utf8'));
   const errors = validateLocalValues(values);
-  const contract = loadDevelopmentContract(projectRoot);
+  const authenticatedE2EValues = parseEnv(readFileSync(authenticatedE2EEnvironmentPath, 'utf8'));
+  if (Object.hasOwn(values, 'CLERK_SECRET_KEY')) {
+    errors.push('CLERK_SECRET_KEY must live only in .e2e-auth.env, never the root .env.');
+  }
+  if (
+    Object.keys(authenticatedE2EValues).length !== 1
+    || !Object.hasOwn(authenticatedE2EValues, 'CLERK_SECRET_KEY')
+  ) {
+    errors.push('.e2e-auth.env must contain only CLERK_SECRET_KEY.');
+  }
+  if (!authenticatedE2EValues.CLERK_SECRET_KEY?.startsWith('sk_test_')) {
+    errors.push('.e2e-auth.env must contain a Clerk development secret key.');
+  }
+
   const provenance = [];
-  for (const [envName, spec] of Object.entries(contract)) {
-    const authoritative = accessSecret(spec);
-    const matches = fingerprint(values[envName] ?? '') === fingerprint(authoritative);
-    if (!matches) errors.push(`${envName} does not match ${spec.id} version ${spec.version}.`);
-    provenance.push(`${envName}: ${spec.id}@${spec.version} fingerprint=${fingerprint(authoritative)} ${matches ? 'match' : 'mismatch'}`);
+  if (checkProvenance) {
+    assertDevelopmentProject();
+    const contract = loadDevelopmentContract(projectRoot);
+    for (const [envName, spec] of Object.entries(contract)) {
+      const authoritative = accessSecret(spec);
+      const matches = fingerprint(values[envName] ?? '') === fingerprint(authoritative);
+      if (!matches) errors.push(`${envName} does not match ${spec.id} version ${spec.version}.`);
+      provenance.push(`${envName}: ${spec.id}@${spec.version} fingerprint=${fingerprint(authoritative)} ${matches ? 'match' : 'mismatch'}`);
+    }
+    const clerkSecretSpec = loadAuthenticatedE2EContract(projectRoot);
+    const authoritativeClerkSecret = accessSecret(clerkSecretSpec);
+    const clerkSecretMatches = fingerprint(authenticatedE2EValues.CLERK_SECRET_KEY ?? '')
+      === fingerprint(authoritativeClerkSecret);
+    if (!clerkSecretMatches) {
+      errors.push(`CLERK_SECRET_KEY does not match ${clerkSecretSpec.id} version ${clerkSecretSpec.version}.`);
+    }
+    provenance.push(
+      `CLERK_SECRET_KEY: ${clerkSecretSpec.id}@${clerkSecretSpec.version} fingerprint=${fingerprint(authoritativeClerkSecret)} ${clerkSecretMatches ? 'match' : 'mismatch'}`,
+    );
   }
 
   if (errors.length > 0) {
@@ -41,10 +85,14 @@ try {
   console.log('Project: glidelingo-development');
   console.log('Mode: local / Clerk development / RevenueCat sandbox');
   for (const line of provenance) console.log(line);
-  console.log('PASS: root .env is ignored, mode 0600, development-only, and matches every pinned version.');
+  console.log(
+    checkProvenance
+      ? 'PASS: local environment files are private, development-only, and match every pinned version.'
+      : 'PASS: local environment files are ignored, mode 0600, and development-only (offline check).',
+  );
 } catch (error) {
   if (error && typeof error === 'object' && 'status' in error && error.status === 1) {
-    console.error('Root .env must be ignored by Git.');
+    console.error('Local environment files must be ignored by Git.');
   } else if (error instanceof Error && error.message !== 'Development environment verification failed.') {
     console.error(error.message);
   }

@@ -15,6 +15,7 @@ import {
   accessSecret,
   assertDevelopmentProject,
   fingerprint,
+  loadAuthenticatedE2EContract,
   loadDevelopmentContract,
   parseEnv,
   renderManagedBlock,
@@ -82,8 +83,12 @@ test('secret access pins project, container, and numeric version without exposin
   );
 });
 
-test('development contract uses the canonical desktop release public-key containers', () => {
+test('development contracts pin the canonical Clerk and RevenueCat containers', () => {
   const contract = loadDevelopmentContract(projectRoot);
+  assert.equal(
+    loadAuthenticatedE2EContract(projectRoot).id,
+    'glidelingo-clerk-development-secret-key',
+  );
   assert.equal(
     contract.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY.id,
     'glidelingo-desktop-clerk-publishable-key',
@@ -148,12 +153,22 @@ test('atomic writer replaces the target with mode 0600', () => {
 
 test('validation rejects production values and accepts the local sandbox contract', () => {
   assert.deepEqual(validateLocalValues(validValues), []);
+  assert.deepEqual(
+    validateLocalValues({ ...validValues, CLERK_SECRET_KEY: 'sk_test_fixture' }),
+    [],
+  );
   assert.ok(
     validateLocalValues({
       ...validValues,
       EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_live_fixture',
+      CLERK_SECRET_KEY: 'sk_live_fixture',
       GLIDELINGO_REVENUECAT_ENVIRONMENT: 'PRODUCTION',
-    }).length >= 2,
+    }).length >= 3,
+  );
+  assert.ok(
+    validateLocalValues({ ...validValues, CLERK_SECRET_KEY: 'not-a-clerk-key' }).some((error) =>
+      error.includes('Clerk development secret key'),
+    ),
   );
   for (const key of [
     'GLIDELINGO_REVENUECAT_PSEUDONYM_KEY',

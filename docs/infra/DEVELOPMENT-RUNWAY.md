@@ -18,9 +18,11 @@ npm run dev:desktop
 ```
 
 Before the first environment sync, authenticate `gcloud` and select the exact
-`glidelingo-development` project. The sync reads pinned development Secret Manager versions into
-the ignored root `.env` without printing their values. On normal days, run only `env:check` and
-`dev:desktop`; resync when the check reports an intentional secret-version change.
+`glidelingo-development` project. The one-time sync reads pinned development Secret Manager
+versions into the ignored root `.env` and server-only `.e2e-auth.env` without printing their
+values. On normal days, `env:check`, `dev:desktop`, and authenticated E2E are entirely local.
+Run `npm run env:check:provenance` only when you want to compare the local files with GCP, and
+resync after an intentional secret-version change.
 
 `npm run dev:desktop` starts local PostgreSQL, FastAPI, Expo web, and the source Electron window.
 Use `npm run diagnose` only when startup fails. Do not clear caches or reset data as routine setup.
@@ -49,6 +51,16 @@ Use `npm run e2e:local:prepare -- --confirm glidelingo-local` only when an expli
 journey is required. It deletes the reviewed local application rows while preserving the Docker
 volume, schema, and migration ledger. A genuinely new-account test still requires a never-used email
 and the verification code delivered to that address.
+
+Run `npm run test:e2e:auth` when authentication or onboarding changes. It creates isolated Clerk
+development test accounts, uses Clerk's reserved test email/code path, exercises the same register,
+first-name, onboarding, lesson, sign-out, sign-in, and Electron relaunch behavior a learner uses, and
+deletes the test identities afterward. It starts the local PostgreSQL, FastAPI, and Expo web services
+needed by that journey. The command is intentionally separate from `npm run verify`. It reads the
+server-only `CLERK_SECRET_KEY` from the ignored, mode-`0600` `.e2e-auth.env` created by the initial
+environment sync, so routine E2E runs do not need GCP access. The key is never written to the root
+`.env`, is removed from the Expo and Electron child-process environments, and is never bundled into
+a client.
 
 ## 3. Verify and open the PR
 

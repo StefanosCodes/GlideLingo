@@ -10,6 +10,7 @@ const mockPush = jest.fn();
 const mockBack = jest.fn();
 const mockCanGoBack = jest.fn(() => false);
 const mockReplace = jest.fn();
+const mockSetThemePreference = jest.fn();
 
 jest.mock('expo-router', () => ({
   useRouter: () => ({ back: mockBack, canGoBack: mockCanGoBack, push: mockPush, replace: mockReplace }),
@@ -24,6 +25,7 @@ jest.mock('@/features/auth/account-summary', () => {
 jest.mock('@/hooks/use-theme', () => ({
   useTheme: () =>
     jest.requireActual<typeof import('@/constants/theme')>('@/constants/theme').Colors.light,
+  useThemeController: () => ({ scheme: 'light', setPreference: mockSetThemePreference }),
 }));
 jest.mock('@/providers/learning-provider', () => ({
   useLearning: () => ({
@@ -61,6 +63,7 @@ beforeEach(() => {
   mockCanGoBack.mockClear();
   mockCanGoBack.mockReturnValue(false);
   mockReplace.mockClear();
+  mockSetThemePreference.mockClear();
 });
 
 test('profile preserves legacy decisions, billing, and account controls', async () => {
@@ -74,10 +77,12 @@ test('profile preserves legacy decisions, billing, and account controls', async 
   await fireEvent.press(screen.getByText('Import progress'));
   await fireEvent.press(screen.getByText('Not mine'));
   await fireEvent.press(screen.getByText('Manage Pro'));
+  await fireEvent(screen.getByTestId('dark-appearance-switch'), 'valueChange', true);
   await fireEvent.press(screen.getByLabelText('Back to learning'));
 
   expect(mockImportLegacyProgress).toHaveBeenCalledTimes(1);
   expect(mockDismissLegacyProgress).toHaveBeenCalledTimes(1);
   expect(mockPush).toHaveBeenCalledWith('/subscription');
+  expect(mockSetThemePreference).toHaveBeenCalledWith('dark');
   expect(mockReplace).toHaveBeenCalledWith('/');
 });

@@ -11,12 +11,10 @@ import {
   ChartIcon,
   HouseIcon,
   MapIcon,
-  MoonIcon,
   PanelLeftIcon,
   PhrasesIcon,
   ProfileIcon,
   ReviewIcon,
-  SunIcon,
 } from './ui/hackathon-icons.web';
 
 import { Fonts, Motion, Radii } from '@/constants/theme';
@@ -86,7 +84,7 @@ function TabButton({
   ...props
 }: TabTriggerSlotProps & { icon: PrimaryDestinationId }) {
   const theme = useTheme();
-  const { collapsed } = useContext(CollapsedContext);
+  const { collapsed, transitionDuration } = useContext(CollapsedContext);
   const color = isFocused ? theme.text : theme.textSecondary;
 
   return (
@@ -98,6 +96,7 @@ function TabButton({
       onPress={onPress}
       style={({ pressed, hovered }: PressState) => [
         styles.link,
+        transitionStyle(transitionDuration, 'padding-left, padding-right'),
         collapsed && styles.linkCollapsed,
         {
           backgroundColor: isFocused || pressed || hovered ? theme.backgroundSelected : 'transparent',
@@ -124,8 +123,9 @@ function ExpandedContent({ children, style }: PropsWithChildren<{ style?: ViewSt
       style={[
         styles.expandedContent,
         style,
-        transitionStyle(transitionDuration, 'opacity, max-width, transform'),
+        transitionStyle(transitionDuration, 'opacity, max-height, max-width, transform'),
         {
+          maxHeight: collapsed ? 0 : 48,
           maxWidth: collapsed ? 0 : 240,
           opacity: collapsed ? 0 : 1,
           pointerEvents: collapsed ? 'none' : 'auto',
@@ -140,13 +140,12 @@ function ExpandedContent({ children, style }: PropsWithChildren<{ style?: ViewSt
 function Sidebar(props: TabListProps) {
   const router = useRouter();
   const theme = useTheme();
-  const { scheme, toggleTheme } = useThemeController();
+  const { scheme } = useThemeController();
   const { width } = useWindowDimensions();
   const reducedMotion = useReducedMotion();
   const narrow = width < COLLAPSE_BREAKPOINT;
   const [userCollapsed, setUserCollapsed] = useState(false);
   const collapsed = narrow || userCollapsed;
-  const switchingToDark = scheme === 'light';
   const sidebarBg = scheme === 'dark' ? theme.surfaceElevated : theme.backgroundElement;
   const desktopUpdate = useDesktopUpdate();
   const reportLessonActive = desktopUpdate?.setLessonActive;
@@ -230,23 +229,6 @@ function Sidebar(props: TabListProps) {
             <ExpandedContent style={styles.footerCopy}>
               <ThemedText style={styles.footerLabel} themeColor="textSecondary">
                 Profile and settings
-              </ThemedText>
-            </ExpandedContent>
-          </Pressable>
-          <Pressable
-            accessibilityLabel={`Switch to ${switchingToDark ? 'dark' : 'light'} mode`}
-            accessibilityRole="button"
-            accessibilityState={{ selected: scheme === 'dark' }}
-            onPress={toggleTheme}
-            style={({ pressed, hovered }: PressState) => [
-              styles.footerButton,
-              collapsed && styles.footerButtonCollapsed,
-              { backgroundColor: pressed || hovered ? theme.backgroundSelected : 'transparent' },
-            ]}>
-            {switchingToDark ? <MoonIcon color={theme.textSecondary} /> : <SunIcon color={theme.textSecondary} />}
-            <ExpandedContent style={styles.footerCopy}>
-              <ThemedText style={styles.footerLabel} themeColor="textSecondary">
-                {switchingToDark ? 'Dark mode' : 'Light mode'}
               </ThemedText>
             </ExpandedContent>
           </Pressable>
@@ -335,7 +317,7 @@ const styles = StyleSheet.create({
     minHeight: 40,
     paddingHorizontal: 8,
   },
-  linkCollapsed: { height: 40, justifyContent: 'center', minHeight: 40, paddingHorizontal: 0, width: 44 },
+  linkCollapsed: { height: 40, justifyContent: 'center', minHeight: 40, paddingHorizontal: 0 },
   linkLabel: { flex: 1, fontFamily: Fonts.sans, fontSize: 14, lineHeight: 20 },
   linkCopy: { flex: 1 },
   linkLabelActive: { fontFamily: Fonts.sansMedium },
@@ -353,5 +335,5 @@ const styles = StyleSheet.create({
   footerCopy: { flex: 1 },
   footer: { gap: 2 },
   coursePicker: { alignItems: 'stretch', paddingBottom: 4, paddingHorizontal: 4 },
-  expandedContent: { overflow: 'hidden' },
+  expandedContent: { minWidth: 0, overflow: 'hidden' },
 });

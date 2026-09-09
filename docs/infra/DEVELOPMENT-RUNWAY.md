@@ -50,6 +50,16 @@ journey is required. It deletes the reviewed local application rows while preser
 volume, schema, and migration ledger. A genuinely new-account test still requires a never-used email
 and the verification code delivered to that address.
 
+Run `npm run test:e2e:auth` when authentication or onboarding changes. It creates isolated Clerk
+development test accounts, uses Clerk's reserved test email/code path, exercises the same register,
+first-name, onboarding, lesson, sign-out, sign-in, and Electron relaunch behavior a learner uses, and
+deletes the test identities afterward. It starts the local PostgreSQL, FastAPI, and Expo web services
+needed by that journey. The command is intentionally separate from `npm run verify`:
+the runner reads the server-only `CLERK_SECRET_KEY` just in time from the pinned
+`glidelingo-clerk-development-secret-key` Secret Manager version. The key is never written to the
+root `.env`, is removed from the Expo and Electron child-process environments, and is never bundled
+into a client.
+
 ## 3. Verify and open the PR
 
 The normal loop is intentionally short:

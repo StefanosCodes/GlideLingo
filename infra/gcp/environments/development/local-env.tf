@@ -2,6 +2,7 @@ variable "local_env_secret_versions" {
   description = "Pinned development Secret Manager versions used by the local environment sync command."
   type = object({
     clerk_publishable_key  = string
+    clerk_secret_key       = string
     revenuecat_web_api_key = string
   })
 
@@ -17,6 +18,9 @@ locals {
   local_env_public_config = {
     clerk_publishable_key  = "glidelingo-desktop-clerk-publishable-key"
     revenuecat_web_api_key = "glidelingo-revenuecat-sandbox-web-public-key"
+  }
+  local_env_test_secrets = {
+    clerk_secret_key = "glidelingo-clerk-development-secret-key"
   }
 }
 
@@ -39,9 +43,35 @@ resource "google_secret_manager_secret" "local_env_public_config" {
   depends_on = [google_project_service.required]
 }
 
+resource "google_secret_manager_secret" "local_env_test_secret" {
+  for_each = local.local_env_test_secrets
+
+  project   = var.project_id
+  secret_id = each.value
+  labels = merge(local.labels, {
+    data_class = "secret"
+    consumer   = "local-e2e"
+  })
+
+  replication {
+    user_managed {
+      replicas { location = var.region }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
 output "local_env_public_config_containers" {
   description = "Development client configuration containers; values are seeded out of band."
   value = {
     for key, secret in google_secret_manager_secret.local_env_public_config : key => secret.secret_id
+  }
+}
+
+output "local_env_test_secret_containers" {
+  description = "Development-only test credential containers; values are seeded out of band."
+  value = {
+    for key, secret in google_secret_manager_secret.local_env_test_secret : key => secret.secret_id
   }
 }

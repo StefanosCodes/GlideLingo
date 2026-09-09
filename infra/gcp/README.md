@@ -40,7 +40,7 @@ either URL is not authorization to learner data.
 - a Secret Manager secret containing the SQLAlchemy Cloud SQL connection URL;
 - a public, scale-to-zero Cloud Run service capped at three instances;
 - an IAM-private, scale-to-zero tutor service whose only invoker is the API runtime identity;
-- distinct API and tutor runtime identities plus development-only tutor and RevenueCat configuration
+- distinct API and tutor runtime identities plus development-only Clerk test, tutor, and RevenueCat configuration
   containers (Terraform creates no provider-supplied secret values or versions);
 - a project-scoped monthly budget with default IAM-recipient alerts.
 
@@ -140,9 +140,14 @@ Interactive Google and GitHub sign-ins authorize the operator only. They are not
 dependencies and should never be copied into the repository or treated as reusable deployment
 credentials.
 
-The Clerk values are non-secret configuration pinned to the development instance through validated
-Terraform defaults. Rotate the Terraform values and deployment-workflow values together, and inspect
-the Cloud Run environment diff before approval. Do not put local `.env` contents in committed tfvars.
+The Clerk issuer and publishable key are non-secret configuration pinned to the development instance.
+The separate Clerk development Backend API key is stored out of band in
+`glidelingo-clerk-development-secret-key`, pinned to an immutable version in committed tfvars, and
+read just in time by the opt-in local authenticated E2E runner. It must never enter Terraform state,
+committed tfvars, the root `.env`, an `EXPO_PUBLIC_*` value, renderer/desktop child-process
+environments, CI logs, or test artifacts. Rotate the Clerk public and secret values together when
+changing instances, and inspect the Cloud Run environment diff before approval. Do not put local
+`.env` contents in committed tfvars.
 
 ## RevenueCat authorization activation gates
 

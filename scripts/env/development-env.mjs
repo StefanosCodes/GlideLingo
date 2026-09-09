@@ -50,6 +50,10 @@ const revenueCatSecretSpecs = {
 };
 
 export const secretSpecs = { ...localSecretSpecs, ...revenueCatSecretSpecs };
+export const authenticatedE2ESecretSpec = {
+  id: 'glidelingo-clerk-development-secret-key',
+  contract: 'local_env_secret_versions.clerk_secret_key',
+};
 
 function readJson(filePath) {
   return JSON.parse(readFileSync(filePath, 'utf8'));
@@ -75,6 +79,16 @@ export function loadDevelopmentContract(projectRoot) {
   }
 
   return resolved;
+}
+
+export function loadAuthenticatedE2EContract(projectRoot) {
+  const environmentDir = path.join(projectRoot, 'infra/gcp/environments/development');
+  const local = readJson(path.join(environmentDir, 'local-env.auto.tfvars.json'));
+  const version = atPath(local, authenticatedE2ESecretSpec.contract);
+  if (typeof version !== 'string' || !/^[1-9][0-9]*$/.test(version)) {
+    throw new Error(`${authenticatedE2ESecretSpec.contract} must be an exact positive Secret Manager version.`);
+  }
+  return { ...authenticatedE2ESecretSpec, version };
 }
 
 export function parseEnv(content) {
@@ -221,6 +235,9 @@ export function validateLocalValues(values) {
   if (decodedClerkFrontend !== `${new URL(DEVELOPMENT_CLERK_ISSUER).hostname}$`) {
     errors.push('The Clerk publishable key must encode the pinned development frontend.');
   }
+  if (values.CLERK_SECRET_KEY && !values.CLERK_SECRET_KEY.startsWith('sk_test_')) {
+    errors.push('CLERK_SECRET_KEY must be a Clerk development secret key.');
+  }
   if (values.GLIDELINGO_DATABASE_URL !== DEVELOPMENT_DATABASE_URL) {
     errors.push('GLIDELINGO_DATABASE_URL must target the managed local development database.');
   }
@@ -289,7 +306,7 @@ export function validateLocalValues(values) {
     errors.push('The RevenueCat desktop and server sandbox keys must match exactly.');
   }
   const serialized = JSON.stringify(values);
-  if (/pk_live_|revenuecat_environment["']?\s*[:=]\s*["']?production|https:\/\/api\.glidelingo\.com/i.test(serialized)) {
+  if (/pk_live_|sk_live_|revenuecat_environment["']?\s*[:=]\s*["']?production|https:\/\/api\.glidelingo\.com/i.test(serialized)) {
     errors.push('Production configuration is not allowed in the local development environment.');
   }
   return errors;

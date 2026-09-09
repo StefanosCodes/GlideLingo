@@ -13,8 +13,11 @@ export type RuntimeObservation = {
 function sanitize(value: unknown) {
   return String(value)
     .replace(/pk_(?:test|live)_[A-Za-z0-9_-]+/g, '[REDACTED_PUBLISHABLE_KEY]')
+    .replace(/sk_(?:test|live)_[A-Za-z0-9_-]+/g, '[REDACTED_SECRET_KEY]')
+    .replace(/[A-Za-z0-9._-]+\+clerk_test@[A-Za-z0-9.-]+/gi, '[REDACTED_TEST_EMAIL]')
+    .replace(/user_[A-Za-z0-9]+/g, '[REDACTED_USER_ID]')
     .replace(/(authorization\s*[:=]\s*)([^\s,;]+)/gi, '$1[REDACTED]')
-    .replace(/([?&](?:token|code|session|ticket)=)[^&\s]+/gi, '$1[REDACTED]')
+    .replace(/([?&](?:__clerk_testing_token|token|code|session|ticket)=)[^&\s]+/gi, '$1[REDACTED]')
     .slice(0, 2_000);
 }
 

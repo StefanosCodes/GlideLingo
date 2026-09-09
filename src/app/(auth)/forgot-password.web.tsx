@@ -11,7 +11,8 @@ import {
   emailValidationMessage,
   normalizeAuthEmail,
   passwordValidationMessage,
-  safeAuthErrorMessage,
+  safeAuthIssue,
+  type AuthIssueField,
   unsupportedAuthStateMessage,
 } from '@/features/auth/credential-auth';
 import {
@@ -35,8 +36,20 @@ export default function ForgotPasswordRoute() {
   const [confirmation, setConfirmation] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorField, setErrorField] = useState<AuthIssueField | null>(null);
   const [resendSeconds, setResendSeconds] = useState(0);
   const busy = submitting || fetchStatus === 'fetching';
+
+  const clearError = () => {
+    setErrorMessage(null);
+    setErrorField(null);
+  };
+
+  const showAuthError = (error: unknown, fallback: string) => {
+    const issue = safeAuthIssue(error, fallback);
+    setErrorMessage(issue.message);
+    setErrorField(issue.field);
+  };
 
   useEffect(() => {
     if (resendSeconds <= 0) return;
@@ -49,25 +62,26 @@ export default function ForgotPasswordRoute() {
     const validationError = emailValidationMessage(email);
     if (validationError) {
       setErrorMessage(validationError);
+      setErrorField('email');
       return;
     }
     setSubmitting(true);
-    setErrorMessage(null);
+    clearError();
     try {
       const created = await signIn.create({ identifier: normalizeAuthEmail(email) });
       if (created.error) {
-        setErrorMessage(safeAuthErrorMessage(created.error, 'We could not start password recovery. Check the email and try again.'));
+        showAuthError(created.error, 'We could not start password recovery right now. Check your connection and try again.');
         return;
       }
       const sent = await signIn.resetPasswordEmailCode.sendCode();
       if (sent.error) {
-        setErrorMessage(safeAuthErrorMessage(sent.error, 'We could not send the recovery code. Please try again.'));
+        showAuthError(sent.error, 'We could not send the recovery code right now. Please try again.');
         return;
       }
       setStep('code');
       setResendSeconds(AUTH_CODE_RESEND_SECONDS);
     } catch (error) {
-      setErrorMessage(safeAuthErrorMessage(error, 'We could not start password recovery. Please try again.'));
+      showAuthError(error, 'We could not start password recovery right now. Check your connection and try again.');
     } finally {
       setSubmitting(false);
     }
@@ -78,24 +92,26 @@ export default function ForgotPasswordRoute() {
     const validationError = codeValidationMessage(code);
     if (validationError) {
       setErrorMessage(validationError);
+      setErrorField('code');
       return;
     }
     setSubmitting(true);
-    setErrorMessage(null);
+    clearError();
     try {
       const result = await signIn.resetPasswordEmailCode.verifyCode({ code: code.trim() });
       if (result.error) {
-        setErrorMessage(safeAuthErrorMessage(result.error, 'We could not verify that code. Please try again.'));
+        showAuthError(result.error, 'We could not verify that code right now. Please try again.');
         return;
       }
       if (signIn.status !== 'needs_new_password') {
         setErrorMessage(unsupportedAuthStateMessage());
+        setErrorField(null);
         return;
       }
       setCode('');
       setStep('password');
     } catch (error) {
-      setErrorMessage(safeAuthErrorMessage(error, 'We could not verify that code. Please try again.'));
+      showAuthError(error, 'We could not verify that code right now. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -103,36 +119,39 @@ export default function ForgotPasswordRoute() {
 
   const setNewPassword = async () => {
     if (busy) return;
-    const validationError = passwordValidationMessage(password) ?? confirmationValidationMessage(password, confirmation);
-    if (validationError) {
-      setErrorMessage(validationError);
+    const passwordError = passwordValidationMessage(password);
+    const confirmationError = confirmationValidationMessage(password, confirmation);
+    if (passwordError || confirmationError) {
+      setErrorMessage(passwordError ?? confirmationError);
+      setErrorField(passwordError ? 'password' : 'confirmation');
       return;
     }
     setSubmitting(true);
-    setErrorMessage(null);
+    clearError();
     try {
       const result = await signIn.resetPasswordEmailCode.submitPassword({
         password,
         signOutOfOtherSessions: true,
       });
       if (result.error) {
-        setErrorMessage(safeAuthErrorMessage(result.error, 'We could not update your password. Please try again.'));
+        showAuthError(result.error, 'We could not update your password right now. Please try again.');
         return;
       }
       if (signIn.status !== 'complete') {
         setErrorMessage(unsupportedAuthStateMessage());
+        setErrorField(null);
         return;
       }
       const finalized = await signIn.finalize();
       if (finalized.error) {
-        setErrorMessage(safeAuthErrorMessage(finalized.error, 'Your password changed, but sign-in did not finish. Sign in again.'));
+        showAuthError(finalized.error, 'Your password changed, but sign-in did not finish. Sign in again.');
         return;
       }
       setPassword('');
       setConfirmation('');
       router.replace('/');
     } catch (error) {
-      setErrorMessage(safeAuthErrorMessage(error, 'We could not update your password. Please try again.'));
+      showAuthError(error, 'We could not update your password right now. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -141,16 +160,16 @@ export default function ForgotPasswordRoute() {
   const resendCode = async () => {
     if (busy || resendSeconds > 0) return;
     setSubmitting(true);
-    setErrorMessage(null);
+    clearError();
     try {
       const result = await signIn.resetPasswordEmailCode.sendCode();
       if (result.error) {
-        setErrorMessage(safeAuthErrorMessage(result.error, 'We could not send another code. Please try again.'));
+        showAuthError(result.error, 'We could not send another code right now. Please try again.');
         return;
       }
       setResendSeconds(AUTH_CODE_RESEND_SECONDS);
     } catch (error) {
-      setErrorMessage(safeAuthErrorMessage(error, 'We could not send another code. Please try again.'));
+      showAuthError(error, 'We could not send another code right now. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -163,7 +182,7 @@ export default function ForgotPasswordRoute() {
     setCode('');
     setPassword('');
     setConfirmation('');
-    setErrorMessage(null);
+    clearError();
   };
 
   if (step === 'code') {
@@ -178,7 +197,8 @@ export default function ForgotPasswordRoute() {
           editable={!busy}
           keyboardType="number-pad"
           label="Recovery code"
-          onChangeText={(value) => { setCode(value); setErrorMessage(null); }}
+          errorMessage={errorField === 'code' ? errorMessage : null}
+          onChangeText={(value) => { setCode(value); clearError(); }}
           onSubmitEditing={() => void verifyCode()}
           placeholder="Enter code"
           returnKeyType="done"
@@ -186,7 +206,7 @@ export default function ForgotPasswordRoute() {
           textContentType="oneTimeCode"
           value={code}
         />
-        {errorMessage ? <AuthAlert>{errorMessage}</AuthAlert> : null}
+        {errorMessage && errorField !== 'code' ? <AuthAlert>{errorMessage}</AuthAlert> : null}
         <View style={credentialAuthStyles.actions}>
           <GlideButton disabled={busy} fullWidth label={busy ? 'Checking…' : 'Continue'} onPress={() => void verifyCode()} testID="recovery-code-submit" />
           <GlideButton
@@ -206,9 +226,9 @@ export default function ForgotPasswordRoute() {
   if (step === 'password') {
     return (
       <CredentialAuthScreen heading="Choose a new password." subheading="Use at least 8 characters." testID="auth-recovery-password">
-        <AuthField autoCapitalize="none" autoComplete="new-password" editable={!busy} label="New password" onChangeText={(value) => { setPassword(value); setErrorMessage(null); }} placeholder="New password" secureTextEntry testID="recovery-password" textContentType="newPassword" value={password} />
-        <AuthField autoCapitalize="none" autoComplete="new-password" editable={!busy} label="Confirm new password" onChangeText={(value) => { setConfirmation(value); setErrorMessage(null); }} onSubmitEditing={() => void setNewPassword()} placeholder="Repeat new password" returnKeyType="done" secureTextEntry testID="recovery-password-confirmation" textContentType="newPassword" value={confirmation} />
-        {errorMessage ? <AuthAlert>{errorMessage}</AuthAlert> : null}
+        <AuthField autoCapitalize="none" autoComplete="new-password" editable={!busy} errorMessage={errorField === 'password' ? errorMessage : null} label="New password" onChangeText={(value) => { setPassword(value); clearError(); }} placeholder="New password" secureTextEntry testID="recovery-password" textContentType="newPassword" value={password} />
+        <AuthField autoCapitalize="none" autoComplete="new-password" editable={!busy} errorMessage={errorField === 'confirmation' ? errorMessage : null} label="Confirm new password" onChangeText={(value) => { setConfirmation(value); clearError(); }} onSubmitEditing={() => void setNewPassword()} placeholder="Repeat new password" returnKeyType="done" secureTextEntry testID="recovery-password-confirmation" textContentType="newPassword" value={confirmation} />
+        {errorMessage && !['password', 'confirmation'].includes(errorField ?? '') ? <AuthAlert>{errorMessage}</AuthAlert> : null}
         <GlideButton disabled={busy} fullWidth label={busy ? 'Updating password…' : 'Update password'} onPress={() => void setNewPassword()} testID="recovery-password-submit" />
       </CredentialAuthScreen>
     );
@@ -216,8 +236,8 @@ export default function ForgotPasswordRoute() {
 
   return (
     <CredentialAuthScreen heading="Reset your password." subheading="We will email you a one-time recovery code." testID="auth-forgot-password">
-      <AuthField autoCapitalize="none" autoComplete="email" editable={!busy} keyboardType="email-address" label="Email address" onChangeText={(value) => { setEmail(value); setErrorMessage(null); }} onSubmitEditing={() => void beginRecovery()} placeholder="you@example.com" returnKeyType="done" testID="recovery-email" textContentType="emailAddress" value={email} />
-      {errorMessage ? <AuthAlert>{errorMessage}</AuthAlert> : null}
+      <AuthField autoCapitalize="none" autoComplete="email" editable={!busy} errorMessage={errorField === 'email' ? errorMessage : null} keyboardType="email-address" label="Email address" onChangeText={(value) => { setEmail(value); clearError(); }} onSubmitEditing={() => void beginRecovery()} placeholder="you@example.com" returnKeyType="done" testID="recovery-email" textContentType="emailAddress" value={email} />
+      {errorMessage && errorField !== 'email' ? <AuthAlert>{errorMessage}</AuthAlert> : null}
       <GlideButton disabled={busy} fullWidth label={busy ? 'Sending code…' : 'Send recovery code'} onPress={() => void beginRecovery()} testID="recovery-email-submit" />
       <View style={credentialAuthStyles.footer}>
         <ThemedText type="body" themeColor="textSecondary">

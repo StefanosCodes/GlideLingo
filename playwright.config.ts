@@ -41,6 +41,7 @@ export default defineConfig({
     {
       name: 'expo-web',
       testMatch: 'expo-web.spec.ts',
+      testIgnore: 'authenticated/**',
       use: {
         ...devices['Desktop Chrome'],
         baseURL: 'http://localhost:8093',
@@ -49,6 +50,7 @@ export default defineConfig({
     {
       name: 'electron',
       testMatch: 'electron.spec.ts',
+      testIgnore: 'authenticated/**',
       workers: 1,
     },
     {

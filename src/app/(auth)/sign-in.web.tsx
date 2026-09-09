@@ -8,7 +8,8 @@ import {
   emailValidationMessage,
   normalizeAuthEmail,
   passwordValidationMessage,
-  safeAuthErrorMessage,
+  safeAuthIssue,
+  type AuthIssueField,
   unsupportedAuthStateMessage,
 } from '@/features/auth/credential-auth';
 import {
@@ -27,41 +28,56 @@ export default function SignInRoute() {
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorField, setErrorField] = useState<AuthIssueField | null>(null);
   const busy = submitting || fetchStatus === 'fetching';
+
+  const clearError = () => {
+    setErrorMessage(null);
+    setErrorField(null);
+  };
+
+  const showAuthError = (error: unknown, fallback: string) => {
+    const issue = safeAuthIssue(error, fallback);
+    setErrorMessage(issue.message);
+    setErrorField(issue.field);
+  };
 
   const submit = async () => {
     if (busy) return;
-    const validationError = emailValidationMessage(email) ?? passwordValidationMessage(password);
-    if (validationError) {
-      setErrorMessage(validationError);
+    const emailError = emailValidationMessage(email);
+    const passwordError = passwordValidationMessage(password);
+    if (emailError || passwordError) {
+      setErrorMessage(emailError ?? passwordError);
+      setErrorField(emailError ? 'email' : 'password');
       return;
     }
 
     setSubmitting(true);
-    setErrorMessage(null);
+    clearError();
     try {
       const result = await signIn.password({
         emailAddress: normalizeAuthEmail(email),
         password,
       });
       if (result.error) {
-        setErrorMessage(safeAuthErrorMessage(result.error, 'We could not sign you in. Check your details and try again.'));
+        showAuthError(result.error, 'We could not sign you in right now. Check your connection and try again.');
         return;
       }
       if (signIn.status !== 'complete') {
         setErrorMessage(unsupportedAuthStateMessage());
+        setErrorField(null);
         return;
       }
 
       const finalized = await signIn.finalize();
       if (finalized.error) {
-        setErrorMessage(safeAuthErrorMessage(finalized.error, 'We could not finish signing you in. Please try again.'));
+        showAuthError(finalized.error, 'We could not finish signing you in. Please try again.');
         return;
       }
       setPassword('');
       router.replace('/');
     } catch (error) {
-      setErrorMessage(safeAuthErrorMessage(error, 'We could not sign you in. Please try again.'));
+      showAuthError(error, 'We could not sign you in right now. Check your connection and try again.');
     } finally {
       setSubmitting(false);
     }
@@ -78,9 +94,10 @@ export default function SignInRoute() {
         editable={!busy}
         keyboardType="email-address"
         label="Email address"
+        errorMessage={errorField === 'email' ? errorMessage : null}
         onChangeText={(value) => {
           setEmail(value);
-          setErrorMessage(null);
+          clearError();
         }}
         placeholder="you@example.com"
         returnKeyType="next"
@@ -93,9 +110,10 @@ export default function SignInRoute() {
         autoComplete="current-password"
         editable={!busy}
         label="Password"
+        errorMessage={errorField === 'password' ? errorMessage : null}
         onChangeText={(value) => {
           setPassword(value);
-          setErrorMessage(null);
+          clearError();
         }}
         onSubmitEditing={() => void submit()}
         placeholder="Your password"
@@ -105,7 +123,9 @@ export default function SignInRoute() {
         textContentType="password"
         value={password}
       />
-      {errorMessage ? <AuthAlert>{errorMessage}</AuthAlert> : null}
+      {errorMessage && !['email', 'password'].includes(errorField ?? '') ? (
+        <AuthAlert>{errorMessage}</AuthAlert>
+      ) : null}
       <View style={credentialAuthStyles.actions}>
         <GlideButton
           disabled={busy}

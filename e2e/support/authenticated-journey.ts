@@ -89,6 +89,32 @@ export async function signOutForCleanup(page: Page) {
   await expect(page.getByText('Welcome back.', { exact: true }).filter({ visible: true })).toBeVisible();
 }
 
+export async function verifySignUpErrorGuidance(
+  page: Page,
+  existingAccount: ClerkTestAccount,
+) {
+  await page.getByRole('link', { name: 'Create an account' }).filter({ visible: true }).click();
+  const emailField = page.getByLabel('Email address').filter({ visible: true });
+  const passwordField = page.getByLabel('Password', { exact: true }).filter({ visible: true });
+  const confirmationField = page.getByLabel('Confirm password').filter({ visible: true });
+
+  await emailField.fill(existingAccount.email);
+  await passwordField.fill(existingAccount.password);
+  await confirmationField.fill(existingAccount.password);
+  await page.getByRole('button', { name: 'Create account' }).filter({ visible: true }).click();
+
+  await expect(page.getByTestId('sign-up-email-error')).toHaveText(
+    'An account already exists for that email. Sign in instead.',
+  );
+  await expect(emailField).toHaveAttribute('aria-invalid', 'true');
+
+  await emailField.fill(`corrected-${existingAccount.email}`);
+  await expect(page.getByTestId('sign-up-email-error')).toHaveCount(0);
+  await expect(emailField).not.toHaveAttribute('aria-invalid', 'true');
+  await page.getByRole('link', { name: 'Sign in', exact: true }).filter({ visible: true }).click();
+  await expect(page.getByText('Welcome back.', { exact: true }).filter({ visible: true })).toBeVisible();
+}
+
 export async function expectCompletedCourseHome(page: Page) {
   await expect(page.getByText('COURSE', { exact: true }).filter({ visible: true })).toBeVisible();
   await expect(page.getByText('100%', { exact: true }).filter({ visible: true })).toBeVisible();

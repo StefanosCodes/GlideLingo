@@ -19,7 +19,8 @@ const mockBridge = {
   openOfficialDownloadPage: jest.fn<DesktopUpdateBridge['openOfficialDownloadPage']>(async () => undefined),
 };
 let pushedSnapshot: ((value: unknown) => void) | null = null;
-const storedValues = new Map<string, string>();
+const localStorageGetItem = jest.fn<(key: string) => string | null>(() => null);
+const localStorageSetItem = jest.fn<(key: string, value: string) => void>();
 
 jest.mock('@/hooks/use-theme', () => ({
   useTheme: () =>
@@ -32,12 +33,12 @@ jest.mock('../bridge.web', () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
-  storedValues.clear();
+  localStorageGetItem.mockReturnValue(null);
   Object.defineProperty(window, 'localStorage', {
     configurable: true,
     value: {
-      getItem: (key: string) => storedValues.get(key) ?? null,
-      setItem: (key: string, value: string) => storedValues.set(key, value),
+      getItem: localStorageGetItem,
+      setItem: localStorageSetItem,
     },
   });
   pushedSnapshot = null;
@@ -54,7 +55,7 @@ beforeEach(() => {
   });
 });
 
-it('persists Later while retaining the sidebar restart action', async () => {
+it('keeps Later session-scoped while retaining the sidebar restart action', async () => {
   await render(
     <DesktopUpdateProvider>
       <DesktopUpdateSidebarStatus collapsed={false} />
@@ -67,18 +68,18 @@ it('persists Later while retaining the sidebar restart action', async () => {
   fireEvent.press(screen.getByText('Restart to update'));
   expect(mockBridge.restartAndInstall).toHaveBeenCalledTimes(1);
   expect(mockBridge.subscribe).toHaveBeenCalledTimes(1);
-  expect(storedValues.get('glidelingo.desktop-update.dismissed-target')).toBe('1.1.0');
+  expect(localStorageSetItem).not.toHaveBeenCalled();
 });
 
-it('restores Later after window recreation for the same target', async () => {
-  storedValues.set('glidelingo.desktop-update.dismissed-target', '1.1.0');
+it('shows the prompt in a new window even when a legacy dismissal is stored', async () => {
+  localStorageGetItem.mockReturnValue('1.1.0');
   await render(
     <DesktopUpdateProvider>
       <DesktopUpdateSidebarStatus collapsed={false} />
     </DesktopUpdateProvider>,
   );
-  await waitFor(() => expect(screen.getByText('Restart to update')).toBeTruthy());
-  expect(screen.queryByTestId('desktop-update-ready')).toBeNull();
+  await waitFor(() => expect(screen.getByTestId('desktop-update-ready')).toBeTruthy());
+  expect(localStorageGetItem).not.toHaveBeenCalled();
 });
 
 it('does not let a stale initial snapshot overwrite a newer required push', async () => {

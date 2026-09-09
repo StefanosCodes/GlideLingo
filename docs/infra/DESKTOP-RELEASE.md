@@ -184,9 +184,10 @@ The packaged updater is fixed to the public `StefanosCodes/GlideLingo` GitHub Re
 It runs once at launch only from a packaged macOS app; development and non-macOS builds never contact
 the update service. Release-time gates remain responsible for signing and validating the application
 and updater ZIP. A newer published release downloads automatically, but never installs on quit. When
-ready, GlideLingo offers one restart prompt; choosing **Later** leaves a persistent **Restart to
-update** action for the rest of that launch. Draft releases are intentionally invisible to installed
-clients.
+ready, GlideLingo offers one restart prompt; choosing **Later** leaves a **Restart to update** action
+in the signed-in sidebar for the rest of that launch. If the update remains uninstalled, the prompt
+returns on the next launch so a logged-out learner cannot permanently hide it. Draft releases are
+intentionally invisible to installed clients.
 
 Before the release check, the app requests the unauthenticated, database-free desktop policy from the
 configured API with a two-second timeout. An outage or malformed response fails open. A valid minimum

@@ -6,28 +6,6 @@ import { DesktopUpdateContext } from './context';
 import { DesktopUpdatePrompt } from './desktop-update-view.web';
 import type { DesktopUpdateContextValue, DesktopUpdateSnapshot } from './types';
 
-const DISMISSED_TARGET_STORAGE_KEY = 'glidelingo.desktop-update.dismissed-target';
-
-function readDismissedTarget(targetVersion: string | null) {
-  if (!targetVersion) return null;
-  try {
-    return window.localStorage?.getItem(DISMISSED_TARGET_STORAGE_KEY) === targetVersion
-      ? targetVersion
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function persistDismissedTarget(targetVersion: string | null) {
-  if (!targetVersion) return;
-  try {
-    window.localStorage?.setItem(DISMISSED_TARGET_STORAGE_KEY, targetVersion);
-  } catch {
-    // Storage denial must not make the update controls unusable.
-  }
-}
-
 export function DesktopUpdateProvider({ children }: PropsWithChildren) {
   const bridge = useMemo(() => getDesktopUpdateBridge(), []);
   const [snapshot, setSnapshot] = useState<DesktopUpdateSnapshot | null>(null);
@@ -44,7 +22,7 @@ export function DesktopUpdateProvider({ children }: PropsWithChildren) {
       if (mounted && parsed) {
         if (targetRef.current !== parsed.targetVersion) {
           targetRef.current = parsed.targetVersion;
-          setDismissedTarget(readDismissedTarget(parsed.targetVersion));
+          setDismissedTarget(null);
         }
         setSnapshot(parsed);
         return true;
@@ -74,7 +52,6 @@ export function DesktopUpdateProvider({ children }: PropsWithChildren) {
     lessonActive,
     dismissReadyPrompt: () => {
       const targetVersion = snapshot?.targetVersion ?? null;
-      persistDismissedTarget(targetVersion);
       setDismissedTarget(targetVersion);
     },
     openOfficialDownloadPage: () => run(bridge?.openOfficialDownloadPage.bind(bridge)),

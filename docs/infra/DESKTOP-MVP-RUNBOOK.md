@@ -124,8 +124,9 @@ the approved GitHub release makes it visible to already-installed apps and the w
 GitHub Releases page. Activating the website's direct DMG link is a separate approved deployment.
 Packaged macOS apps check once per launch and download a newer published release automatically. When
 the update is ready, the learner can restart immediately or choose Later; the restart action remains
-available in the sidebar. The public API can mark versions below its reviewed numeric-SemVer minimum
-as required, which removes Later while preserving retry, official-download, and quit recovery paths.
+available in the signed-in sidebar for that launch, and the prompt returns on the next launch if the
+update remains uninstalled. The public API can mark versions below its reviewed numeric-SemVer
+minimum as required, which removes Later while preserving retry, official-download, and quit recovery paths.
 
 ## Current fail-closed gates
 

@@ -24,8 +24,8 @@ One repository does not require all artifacts to release together.
 
 - Expo/Metro on the developer machine.
 - Electron on the developer machine.
-- FastAPI on the developer machine when introduced.
-- PostgreSQL through a project-owned local container when introduced.
+- FastAPI on the developer machine.
+- PostgreSQL through a project-owned local container.
 - Safe local credentials only.
 
 ### Staging
@@ -43,8 +43,8 @@ One repository does not require all artifacts to release together.
 - Android through Google Play testing tracks and production.
 - Signed and notarized Electron macOS distribution.
 - Web hosting only if a public web product is intentionally released.
-- API on the chosen container/application platform.
-- Managed PostgreSQL with backups and recovery.
+- API on Google Cloud Run.
+- Cloud SQL for PostgreSQL with backups and point-in-time recovery.
 - Workers and object storage only for features that need them.
 
 ## iOS lane
@@ -94,7 +94,7 @@ Required configuration includes a permanent Android application ID, signing keys
 
 The current Electron builder targets DMG and ZIP, so the recommended first macOS release is direct distribution rather than the Mac App Store.
 
-The implemented release path builds one universal application for Intel and Apple Silicon. `npm run desktop:package:dry-run` is the explicit unsigned packaging check; `npm run desktop:release` is the fail-safe public release command. The latter requires an exact HTTPS API configuration, Developer ID signing, and notarization credentials. The tag-triggered GitHub workflow validates the signature, stapled notarization ticket, Gatekeeper acceptance, and both architecture slices before staging an exact draft release. Publishing remains disabled until clean-Mac evidence can be verified by a dedicated promotion gate.
+The implemented release path builds one universal application for Intel and Apple Silicon. `npm run desktop:package:dry-run` is the explicit unsigned packaging check; `npm run desktop:release` is the fail-safe public release command. The latter requires an exact HTTPS API configuration, Developer ID signing, and notarization credentials. The tag-triggered GitHub workflow validates the signature, stapled notarization ticket, Gatekeeper acceptance, and both architecture slices before staging an exact draft release. The workflow stops at that draft; publication is a separate operator decision after clean-Mac and forward-update evidence.
 
 ```text
 Verify Expo and Electron
@@ -130,7 +130,11 @@ The existing internal Electron protocol for loading packaged content is not, by 
 
 ## API lane
 
-The future FastAPI deployment should produce an immutable artifact and run migrations as a controlled release step.
+The implemented API lane produces a commit-addressed container. Every `main` push runs the single
+`Verify` job; after it passes, GitHub Actions authenticates with short-lived OIDC credentials,
+pushes the image to Artifact Registry, deploys Cloud Run, and smoke-tests liveness and readiness.
+Schema migrations remain a separate guarded operator action so ordinary application startup never
+receives DDL authority.
 
 ```text
 Backend checks
@@ -145,11 +149,11 @@ Backend checks
 
 Exact ordering depends on the migration. Prefer additive expand-and-contract changes so old mobile clients and rolling server replicas remain compatible.
 
-### Google Cloud development platform
+### Google Cloud platform
 
-The implemented development lane uses one public Cloud Run service, one Cloud SQL for
-PostgreSQL instance, Artifact Registry, Secret Manager, and GitHub Workload Identity
-Federation. Terraform configuration and the operating procedure live in
+The implemented production lane uses one public Cloud Run service, one Cloud SQL for PostgreSQL
+instance, Artifact Registry, Secret Manager, and GitHub Workload Identity Federation. Terraform
+configuration and the operating procedure live in
 [`infra/gcp/README.md`](../../infra/gcp/README.md).
 
 Cloud Run remains public at the network edge for installed clients. FastAPI owns application
@@ -252,13 +256,9 @@ Every production release should prove the relevant gates:
 ## Decisions still intentionally open
 
 - Permanent company bundle/application identifier namespace.
-- Production hosting provider.
-- CI/CD provider and approval model.
-- Direct-download hosting and update mechanism for Electron.
 - Whether a Mac App Store build is commercially useful.
-- Identity provider confirmation after mobile and signed-desktop OAuth spike.
 - Speech, storage, and job-provider selection after measured evaluation.
-- Exact billing/store architecture immediately before monetization work.
+- Mobile store build, submission, and staged-rollout configuration.
 
 ## Official references
 

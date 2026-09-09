@@ -1,0 +1,7 @@
+interface:
+  display_name: "Deslopify"
+  short_description: "Prove and remove GlideLingo codebase slop"
+  default_prompt: "Use $deslopify to audit this GlideLingo change or development lane, remove only proven slop, and preserve intentional product, security, and release boundaries."
+
+policy:
+  allow_implicit_invocation: true

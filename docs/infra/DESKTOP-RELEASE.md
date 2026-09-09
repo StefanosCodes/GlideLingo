@@ -162,8 +162,9 @@ inputs from Secret Manager. After signing and notarization, the workflow creates
 `.blockmap` files, `latest-mac.yml`, and `SHA256SUMS.txt`. It verifies the names, upload state,
 byte sizes, and GitHub SHA-256 digests. A run refuses to replace an already-published release.
 Sandbox drafts are additionally marked as internal prereleases and carry a do-not-publish warning.
-The workflow contains no public-publish or website-activation step. Only a production-mode draft
-may proceed to the separately approved clean-Mac promotion process.
+The workflow contains no public-publish or website-activation step. Publishing remains a separate
+operator action after exact-artifact acceptance. Before accepting real payments, only a
+production-billing draft may proceed to customer production promotion.
 
 After the workflow succeeds, check out the exact tagged release commit and run:
 
@@ -220,12 +221,12 @@ The automated workflow proves:
 
 Before linking a release from the public landing page, download the DMG onto a second clean Mac or a fresh macOS test profile, drag GlideLingo to Applications, and launch it normally. Exercise email/password signup, email-code verification, first-name onboarding, persistence, sign-out, sign-in, recovery, billing, lessons, audio, and production API access. Quit and relaunch to prove the stored Clerk session and local learning state restore cleanly. This installed-app smoke remains an activation gate even after automated draft acceptance passes.
 
-The clean-Mac smoke test is currently external, so the workflow intentionally leaves every
-release in draft state and contains no publish step. A sandbox build must remain a draft even when
-its tests pass. Do not publish any sandbox draft or set
-`PUBLIC_MAC_DOWNLOAD_STATE=active` until a later promotion lane can consume machine-verifiable
-clean-Mac evidence from a production-mode build and an authorized approval. Until then, the landing
-page remains in its explicit disabled state.
+The clean-Mac smoke test is external, so the workflow intentionally leaves every release in draft
+state and contains no publish step. The currently published `desktop-v1.0.8` channel is a prelaunch
+distribution using sandbox billing; it proves signed delivery and updater behavior, not live
+commerce readiness. Before onboarding paying users, create and accept a new production-billing
+forward release, complete the clean-Mac and forward-update gates, publish it as **Latest**, and only
+then activate the public download/customer path.
 
 Before calling automatic updates release-ready, complete one real forward-update acceptance test:
 install and launch a published signed/notarized version `N`, publish separately signed/notarized

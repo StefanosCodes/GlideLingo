@@ -74,7 +74,7 @@ type BillingState = {
 
 type BillingContextValue = Omit<BillingState, 'ownerUserId'> & {
   isPro: boolean;
-  purchase: (identifier: string) => Promise<void>;
+  purchase: (identifier: string) => Promise<boolean>;
   refresh: () => Promise<void>;
   restore: () => Promise<void>;
   manage: () => Promise<void>;
@@ -405,7 +405,7 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
   const purchase = useCallback(
     async (identifier: string) => {
       const ownerUserId = userIdRef.current;
-      if (!ownerUserId) return;
+      if (!ownerUserId) return false;
       const generation = identityGenerationRef.current;
 
       setState((current) => ({
@@ -427,16 +427,16 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
           },
           errorMessage: null,
         }));
-        return;
+        return true;
       }
       if (mode === 'unavailable') {
         setState(emptyState(ownerUserId, mode));
-        return;
+        return false;
       }
 
       try {
         const snapshot = await purchaseRevenueCatPackage(ownerUserId, identifier);
-        if (!ownsCurrentIdentity(ownerUserId, generation)) return;
+        if (!ownsCurrentIdentity(ownerUserId, generation)) return false;
         applyClientMetadata(ownerUserId, generation, snapshot);
         setState((current) =>
           current.ownerUserId === ownerUserId && ownsCurrentIdentity(ownerUserId, generation)
@@ -454,11 +454,13 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
         try {
           const entitlement = await reconcileServerProEntitlement();
           applyConfirmedEntitlement(ownerUserId, generation, entitlementRequestSequence, entitlement);
+          return serverEntitlementIsActive(entitlement);
         } catch (error) {
           applyEntitlementFailure(ownerUserId, generation, entitlementRequestSequence, error);
+          return false;
         }
       } catch (error) {
-        if (!ownsCurrentIdentity(ownerUserId, generation)) return;
+        if (!ownsCurrentIdentity(ownerUserId, generation)) return false;
         const failure = classifyPurchaseFailure(error);
         setState((current) =>
           current.ownerUserId === ownerUserId && ownsCurrentIdentity(ownerUserId, generation)
@@ -469,6 +471,7 @@ export function BillingProvider({ children, userId }: BillingProviderProps) {
               }
             : current,
         );
+        return false;
       }
     },
     [

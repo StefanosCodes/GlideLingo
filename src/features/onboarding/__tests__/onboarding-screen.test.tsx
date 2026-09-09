@@ -1,5 +1,5 @@
 import { beforeEach, expect, jest, test } from '@jest/globals';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { OnboardingScreen } from '@/features/onboarding/onboarding-screen';
@@ -12,11 +12,24 @@ const mockBilling = {
   errorMessage: null as string | null,
   isPro: false,
   mode: 'revenuecat' as const,
-  packages: [],
-  purchase: jest.fn(async () => undefined),
+  packages: [
+    {
+      identifier: '$rc_monthly',
+      interval: 'monthly' as const,
+      title: 'Monthly',
+      description: 'Monthly Pro access',
+      priceLabel: '$9.99',
+    },
+  ],
+  purchase: jest.fn(async () => false),
+  purchaseState: {
+    packageIdentifier: null as string | null,
+    status: 'idle' as 'idle' | 'loading' | 'syncing' | 'success' | 'cancelled' | 'declined' | 'sync-unavailable' | 'error',
+    message: null as string | null,
+  },
   refresh: jest.fn(async () => undefined),
   restore: jest.fn(async () => undefined),
-  status: 'loading' as 'loading' | 'free',
+  status: 'loading' as 'loading' | 'free' | 'pro' | 'error',
 };
 
 jest.mock('expo-router', () => ({
@@ -73,31 +86,70 @@ const safeAreaMetrics = {
 
 beforeEach(() => {
   mockBilling.status = 'loading';
+  mockBilling.isPro = false;
+  mockBilling.purchaseState.status = 'idle';
+  mockBilling.purchase.mockClear();
   mockCompleteOnboarding.mockClear();
   mockReplace.mockClear();
   mockSetWeeklyPracticeGoal.mockClear();
   mockStartCourse.mockClear().mockReturnValue(true);
 });
 
-test('waits for entitlement resolution, then applies the onboarding rhythm before entering Home', async () => {
+test('Free remains available while Pro access loads and applies the onboarding rhythm before entering Home', async () => {
   const screen = await render(
     <SafeAreaProvider initialMetrics={safeAreaMetrics}>
       <OnboardingScreen />
     </SafeAreaProvider>,
   );
 
-  expect(screen.getByTestId('onboarding-free-continue').props.accessibilityState.disabled).toBe(true);
-
-  mockBilling.status = 'free';
-  await screen.rerender(
-    <SafeAreaProvider initialMetrics={safeAreaMetrics}>
-      <OnboardingScreen />
-    </SafeAreaProvider>,
-  );
+  fireEvent.press(screen.getByTestId('onboarding-plan-free'));
+  await waitFor(() => {
+    expect(screen.getByTestId('onboarding-free-continue').props.accessibilityState.disabled).toBe(false);
+  });
   fireEvent.press(screen.getByTestId('onboarding-free-continue'));
 
   await waitFor(() => expect(mockCompleteOnboarding).toHaveBeenCalledWith('free'));
   expect(mockStartCourse).toHaveBeenCalledWith('el-from-zero');
   expect(mockSetWeeklyPracticeGoal).toHaveBeenCalledWith(7);
+  expect(mockReplace).toHaveBeenCalledWith('/');
+});
+
+test('presents real sandbox package terms and starts the configured development checkout', async () => {
+  mockBilling.status = 'free';
+  const screen = await render(
+    <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+      <OnboardingScreen />
+    </SafeAreaProvider>,
+  );
+
+  expect(screen.getByText('Choose how you want to begin.')).toBeTruthy();
+  expect(screen.getByText('$9.99')).toBeTruthy();
+  expect(screen.queryByText('Subscription status unavailable')).toBeNull();
+
+  fireEvent.press(screen.getByTestId('onboarding-package-$rc_monthly'));
+  await waitFor(() => expect(screen.getByTestId('onboarding-plan-continue')).toBeTruthy());
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('onboarding-plan-continue'));
+  });
+
+  await waitFor(() => expect(mockBilling.purchase).toHaveBeenCalledWith('$rc_monthly'));
+  expect(mockCompleteOnboarding).not.toHaveBeenCalled();
+});
+
+test('enters the first mission only after Pro entitlement is confirmed', async () => {
+  mockBilling.status = 'free';
+  mockBilling.purchase.mockResolvedValueOnce(true);
+  const screen = await render(
+    <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+      <OnboardingScreen />
+    </SafeAreaProvider>,
+  );
+
+  fireEvent.press(screen.getByTestId('onboarding-package-$rc_monthly'));
+  await waitFor(() => expect(screen.getByTestId('onboarding-plan-continue')).toBeTruthy());
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('onboarding-plan-continue'));
+  });
+  await waitFor(() => expect(mockCompleteOnboarding).toHaveBeenCalledWith('pro'));
   expect(mockReplace).toHaveBeenCalledWith('/');
 });

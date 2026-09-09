@@ -1,6 +1,6 @@
 # GlideLingo onboarding and paywall UX
 
-Status: signed-in web/Electron slice implemented in PR #69; pre-auth onboarding, live store purchase, mission-boundary conversion, analytics, and server-synced onboarding remain future slices
+Status: signed-in web/Electron onboarding is implemented. Local development supports the complete Free path and an explicitly sandboxed Pro checkout; live production purchase, mission-boundary conversion, analytics, and server-synced onboarding remain future slices.
 
 Audience: product, design, engineering, and growth
 
@@ -8,7 +8,7 @@ Primary surface now: Electron and web. The shared Expo implementation remains re
 
 Initial course assumption: Modern Greek (`Greek from zero`, A0–A1)
 
-Implementation note: the first coded slice is stacked on the Clerk/RevenueCat MVP and therefore runs after sign-in and first-name completion, when a stable billing identity exists. Moving the learning sample before authentication remains the preferred product direction, but requires a coordinated change to the authentication boundary and is not hidden inside this onboarding PR. This slice implements the signed-in goal, rhythm, plan, sample, result, and truthful free/Pro decision screens. The starting-point screen is intentionally omitted until placement exists. The selected rhythm becomes the learner's real weekly target, including seven days for `Every day` and no target for `I'll decide as I go`. Real purchase, premium lesson gating, analytics, and the mission-boundary paywall remain separate work after the free mission is complete and validated.
+Implementation note: the first coded slice is stacked on the Clerk/RevenueCat MVP and therefore runs after sign-in and first-name completion, when a stable billing identity exists. Moving the learning sample before authentication remains the preferred product direction, but requires a coordinated change to the authentication boundary. The signed-in sequence implements goal, rhythm, plan, sample, result, and a Free/Pro decision. The selected rhythm becomes the learner's real weekly target, including seven days for `Every day` and no target for `I'll decide as I go`. Free never waits on billing readiness. In development, Pro uses the configured RevenueCat sandbox (or the explicit in-memory fallback when no SDK key exists), and onboarding completes as Pro only after the entitlement is confirmed. Production checkout remains disabled until live plans, customer terms, and release approval ship together.
 
 ## Decision
 
@@ -480,6 +480,11 @@ Connect payment directly to continuing the course while preserving an understand
 
 ### Required behavior
 
+- Present Free and the available store-provided Pro choice(s) as one understandable decision in development.
+- Keep the primary action disabled until the learner selects a plan; do not silently preselect a paid option.
+- Free remains available while packages or entitlement status load or fail.
+- Development identifies sandbox checkout clearly and never creates a real charge.
+- Production does not expose onboarding checkout until the live commerce release is explicitly enabled.
 - No package is shown until offerings finish loading.
 - If offerings are empty or fail, preserve the free route and provide `Try again`.
 - Disable duplicate purchase taps while a purchase is processing.
@@ -671,6 +676,8 @@ First-mission completion and later retrieval performance. Purchase conversion al
 - Persist and resume onboarding locally.
 - Verify every branch without a live store purchase.
 
+Status: implemented for the signed-in flow.
+
 Success: a new learner can complete, interrupt/resume, choose Pro or Free, and reach the correct Today state.
 
 ### Slice 2 — Stable identity and durable learner state
@@ -687,6 +694,8 @@ Success: onboarding choices, learning progress, and Pro access survive reinstall
 - Load localized RevenueCat offerings.
 - Implement purchase, cancellation, restore, empty-offering, retry, and entitlement refresh behavior.
 - Validate store-compliant package and renewal copy per platform.
+
+Status: implemented for development sandbox checkout; live production purchase remains gated.
 
 Success: sandbox/Test Store purchase and restore pass on supported platforms, and server-protected paid behavior does not trust client entitlement state alone.
 

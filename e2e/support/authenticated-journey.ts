@@ -23,6 +23,8 @@ export async function registerAndReachHome(page: Page, account: ClerkTestAccount
   await page.getByRole('button', { name: 'Verify email' }).filter({ visible: true }).click();
 
   await expect(page.getByText('What should we call you?', { exact: true }).filter({ visible: true })).toBeVisible();
+  await expect(page.getByText(account.email, { exact: true }).filter({ visible: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Not you? Sign out', exact: true })).toBeVisible();
   await page.getByLabel('First name').filter({ visible: true }).fill(account.firstName);
   await page.getByRole('button', { name: 'Continue', exact: true }).filter({ visible: true }).click();
 
@@ -37,6 +39,10 @@ export async function registerAndReachHome(page: Page, account: ClerkTestAccount
   await page.getByTestId('onboarding-sample-check').click();
   await page.getByTestId('onboarding-sample-continue').click();
   await page.getByRole('button', { name: 'See my options' }).click();
+  await expect(page.getByText('Choose how you want to begin.', { exact: true })).toBeVisible();
+  await expect(page.getByText('SANDBOX CHECKOUT', { exact: true })).toBeVisible();
+  await expect(page.getByRole('radio').filter({ hasText: 'Pro · Monthly' })).toBeVisible();
+  await page.getByTestId('onboarding-plan-free').click();
   await page.getByTestId('onboarding-free-continue').click();
 
   await expect(page.getByText('Keep your course moving.', { exact: true })).toBeVisible();

@@ -58,6 +58,9 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
 - Install exactly: `npm ci`
 - Install backend exactly: `npm run setup:backend`
 - Install private tutor exactly: `npm run setup:tutor`
+- Bootstrap ignored local development environment files: `npm run env:sync:development`
+- Validate local development environment files offline: `npm run env:check`
+- Compare local environment files with pinned GCP versions: `npm run env:check:provenance`
 - Start PostgreSQL: `npm run db:up`
 - Stop PostgreSQL while preserving data: `npm run db:down`
 - Start FastAPI: `npm run api`
@@ -78,6 +81,7 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
 - Environment report: `npm run diagnose`
 - Expo dependency/configuration checks: `npm run doctor`
 - Execute desktop tests: `npm run test:desktop`
+- Execute real Clerk registration/sign-in E2E in web and Electron: `npm run test:e2e:auth`
 - Build a local macOS app: `npm run desktop:package`
 - Build desktop distribution artifacts: `npm run desktop:dist`
 - Build a signed and notarized universal macOS release: `npm run desktop:release`
@@ -87,6 +91,7 @@ Codex and Cursor agents use skills to guide multiplatform development, architect
 ## Required verification
 
 - Shared TypeScript/UI changes: run `npm run verify`.
+- Authentication, onboarding, or account-persistence changes: also run `npm run test:e2e:auth`.
 - Expo dependency or configuration changes: also run `npm run doctor`.
 - Electron runtime or packaging changes: also run `npm run test:desktop`, `npm run desktop:export`, and the relevant development or packaged smoke test.
 - Desktop release changes: also produce a universal artifact and verify its signature, notarization ticket, Gatekeeper acceptance, and x64/arm64 slices. Never weaken `desktop:release` credential or HTTPS checks to make a build pass.

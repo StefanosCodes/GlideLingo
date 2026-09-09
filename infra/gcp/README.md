@@ -143,11 +143,13 @@ credentials.
 The Clerk issuer and publishable key are non-secret configuration pinned to the development instance.
 The separate Clerk development Backend API key is stored out of band in
 `glidelingo-clerk-development-secret-key`, pinned to an immutable version in committed tfvars, and
-read just in time by the opt-in local authenticated E2E runner. It must never enter Terraform state,
-committed tfvars, the root `.env`, an `EXPO_PUBLIC_*` value, renderer/desktop child-process
-environments, CI logs, or test artifacts. Rotate the Clerk public and secret values together when
-changing instances, and inspect the Cloud Run environment diff before approval. Do not put local
-`.env` contents in committed tfvars.
+downloaded during the explicit `npm run env:sync:development` bootstrap into the ignored,
+mode-`0600`, server-only `.e2e-auth.env`. Routine authenticated E2E reads that local file without
+calling GCP. The key must never enter Terraform state, committed tfvars, the root `.env`, an
+`EXPO_PUBLIC_*` value, renderer/desktop child-process environments, CI logs, or test artifacts.
+Rotate the Clerk public and secret values together when changing instances, rerun the bootstrap,
+and inspect the Cloud Run environment diff before approval. Do not put local `.env` contents in
+committed tfvars.
 
 ## RevenueCat authorization activation gates
 

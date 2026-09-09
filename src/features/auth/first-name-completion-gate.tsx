@@ -17,7 +17,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useClerk, useUser } from '@/providers/clerk-runtime';
 
 import { authErrorMessage } from './auth-error-message';
-import { hasFirstName, normalizedFirstName } from './auth-profile';
+import { accountIdentity, hasFirstName, normalizedFirstName } from './auth-profile';
 import { signOutFromProfileCompletion } from './profile-completion-session';
 
 const MAX_FIRST_NAME_LENGTH = 64;
@@ -64,7 +64,7 @@ export function FirstNameCompletionGate({ children }: PropsWithChildren) {
     }
   };
 
-  const handleUseAnotherAccount = async () => {
+  const handleSignOut = async () => {
     if (saving) return;
     setSaving(true);
     setErrorMessage(null);
@@ -74,6 +74,8 @@ export function FirstNameCompletionGate({ children }: PropsWithChildren) {
       setSaving(false);
     }
   };
+
+  const identity = accountIdentity(user);
 
   return (
     <KeyboardAvoidingView
@@ -96,6 +98,14 @@ export function FirstNameCompletionGate({ children }: PropsWithChildren) {
         </View>
 
         <GlideSurface padding="roomy" style={styles.card}>
+          <View style={styles.signedInAs}>
+            <ThemedText type="caption" themeColor="textTertiary">
+              SIGNED IN AS
+            </ThemedText>
+            <ThemedText type="footnote" themeColor="textSecondary">
+              {identity.contact}
+            </ThemedText>
+          </View>
           <ThemedText nativeID="first-name-label" type="headline">
             First name
           </ThemedText>
@@ -131,8 +141,8 @@ export function FirstNameCompletionGate({ children }: PropsWithChildren) {
           <GlideButton
             disabled={saving}
             fullWidth
-            label="Use another account"
-            onPress={() => void handleUseAnotherAccount()}
+            label="Not you? Sign out"
+            onPress={() => void handleSignOut()}
             testID="profile-completion-sign-out"
             variant="tertiary"
           />
@@ -162,6 +172,7 @@ const styles = StyleSheet.create({
   intro: { alignItems: 'center', gap: Spacing.two },
   loading: { alignItems: 'center', flex: 1, justifyContent: 'center' },
   screen: { flex: 1 },
+  signedInAs: { gap: Spacing.half },
   scrollContent: {
     alignItems: 'center',
     flexGrow: 1,

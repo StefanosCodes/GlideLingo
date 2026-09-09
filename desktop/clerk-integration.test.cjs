@@ -33,6 +33,10 @@ test('desktop uses Clerk official Electron bridge end to end', () => {
 
   assert.equal(rootPackage.dependencies['@clerk/electron'], '0.0.36');
   assert.equal(rootPackage.dependencies['electron-store'], '8.2.0');
+  assert.match(
+    rootPackage.scripts['desktop:window'],
+    /electron --user-data-dir=\.expo\/electron-development-profile desktop/,
+  );
   assert.equal(desktopPackage.dependencies['@clerk/electron'], '0.0.36');
   assert.equal(desktopPackage.dependencies['electron-store'], '8.2.0');
   assert.match(mainSource, /createClerkBridge\(\{/);

@@ -20,8 +20,12 @@ function birdPath(svg) {
 test('desktop icon uses the exact approved website bird', () => {
   const website = read('website/public/brand/glidelingo-bird-black.svg').toString('utf8');
   const desktop = read('assets/brand/glidelingo-desktop-icon.svg').toString('utf8');
+  const webApp = read('src/components/glidelingo-brand-mark.web.tsx').toString('utf8');
+  const webAppPath = webApp.match(/GLIDELINGO_BIRD_PATH = '([^']+)'/);
 
   assert.equal(birdPath(desktop), birdPath(website));
+  assert.ok(webAppPath, 'web app brand mark must expose the approved bird path');
+  assert.equal(webAppPath[1], birdPath(website));
   assert.match(desktop, /fill="#0A0A0A"/);
   assert.match(desktop, /fill="#F7F8FA"/);
 });

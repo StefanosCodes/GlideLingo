@@ -92,7 +92,7 @@
     "desktop:clear": "concurrently --kill-others --success first \"npm:desktop:web:clear\" \"npm:desktop:window\"",
     "desktop:web": "cross-env BROWSER=none expo start --web --localhost --port 8081",
     "desktop:web:clear": "cross-env BROWSER=none expo start --web --localhost --port 8081 --clear",
-    "desktop:window": "wait-on http-get://localhost:8081 && cross-env ELECTRON_RENDERER_URL=http://localhost:8081 electron desktop",
+    "desktop:window": "wait-on http-get://localhost:8081 && cross-env ELECTRON_RENDERER_URL=http://localhost:8081 electron --user-data-dir=.expo/electron-development-profile desktop",
     "desktop:smoke": "cross-env ELECTRON_SMOKE_TEST=1 npm run desktop",
     "desktop:audio-smoke": "npm run desktop:export && cross-env ELECTRON_AUDIO_SMOKE_TEST=1 electron desktop",
     "desktop:export": "expo export --platform web",

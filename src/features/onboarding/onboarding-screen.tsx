@@ -1,9 +1,9 @@
-import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useState, type PropsWithChildren, type ReactNode } from 'react';
 import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GlideLingoBrandMark } from '@/components/glidelingo-brand-mark';
 import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideSurface } from '@/components/ui/glide-surface';
@@ -60,6 +60,23 @@ const RHYTHMS: { id: OnboardingRhythm; label: string; detail: string }[] = [
 ];
 
 const SAMPLE_CHOICES = ['α', 'ε', 'ι'] as const;
+const FREE_PLAN_ID = 'free';
+
+function proPlanName(interval: 'monthly' | 'annual' | 'other', fallback: string) {
+  if (interval === 'monthly') return 'Pro · Monthly';
+  if (interval === 'annual') return 'Pro · Annual';
+  return fallback;
+}
+
+function purchaseFeedback(status: ReturnType<typeof useBilling>['purchaseState']['status']) {
+  if (status === 'cancelled') return 'No changes were made. Choose a plan whenever you are ready.';
+  if (status === 'declined') return 'That payment method was not accepted. Try another or continue with Free.';
+  if (status === 'sync-unavailable') {
+    return 'Checkout completed, but Pro access is still being confirmed. Refresh access before trying again.';
+  }
+  if (status === 'error') return 'We could not start Pro. Try again or continue with Free.';
+  return null;
+}
 
 export function OnboardingScreen() {
   const router = useRouter();
@@ -70,14 +87,14 @@ export function OnboardingScreen() {
   const billing = useBilling();
   const [sampleChoice, setSampleChoice] = useState<string | null>(null);
   const [sampleChecked, setSampleChecked] = useState(false);
-  const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [completionError, setCompletionError] = useState<string | null>(null);
   const [completionPending, setCompletionPending] = useState(false);
   const pronunciation = usePronunciationPlayer();
   const audioState = pronunciation.stateFor('el-letter-alpha');
   const previousStep = previousOnboardingStep(state.step);
-  const selectedPackage =
-    billing.packages.find((item) => item.identifier === selectedPackageId) ?? billing.packages[0] ?? null;
+  const selectedPackage = billing.packages.find((item) => item.identifier === selectedPlanId) ?? null;
+  const purchasePending = billing.purchaseState.status === 'loading' || billing.purchaseState.status === 'syncing';
 
   async function finishOnboarding(access: 'free' | 'pro') {
     setCompletionError(null);
@@ -92,6 +109,17 @@ export function OnboardingScreen() {
     router.replace('/');
   }
 
+  async function continueWithSelectedPlan() {
+    if (selectedPlanId === FREE_PLAN_ID) {
+      await finishOnboarding('free');
+      return;
+    }
+    if (!__DEV__ || !selectedPackage) return;
+
+    const proConfirmed = await billing.purchase(selectedPackage.identifier);
+    if (proConfirmed) await finishOnboarding('pro');
+  }
+
   const sharedFrameProps = {
     onBack: previousStep ? () => setStep(previousStep) : undefined,
     progress: state.step === 'welcome' ? undefined : onboardingProgress(state.step),
@@ -104,12 +132,7 @@ export function OnboardingScreen() {
         {...sharedFrameProps}
         actions={<GlideButton fullWidth label="Build my path" onPress={() => setStep('goal')} testID="onboarding-start" />}>
         <View style={styles.welcomeMark}>
-          <Image
-            accessibilityIgnoresInvertColors
-            contentFit="contain"
-            source={require('@/assets/brand/glidelingo-bird.png')}
-            style={styles.brandMark}
-          />
+          <GlideLingoBrandMark color={theme.text} size={40} />
           <ThemedText type="headline">GlideLingo</ThemedText>
         </View>
         <ScreenIntro
@@ -332,96 +355,106 @@ export function OnboardingScreen() {
               onPress={() => void finishOnboarding('pro')}
               testID="onboarding-pro-continue"
             />
-          ) : billing.mode === 'mock' ? (
+          ) : (
             <GlideButton
-              disabled={!selectedPackage || billing.status === 'loading' || completionPending}
+              disabled={!selectedPlanId || purchasePending || completionPending}
               fullWidth
-              label="Unlock Pro preview"
-              onPress={() => selectedPackage && void billing.purchase(selectedPackage.identifier)}
-              testID="onboarding-purchase"
+              label={
+                completionPending
+                  ? 'Preparing your first mission…'
+                  : purchasePending
+                    ? billing.purchaseState.status === 'syncing'
+                      ? 'Confirming Pro access…'
+                      : 'Opening secure checkout…'
+                    : selectedPlanId === FREE_PLAN_ID
+                      ? 'Continue with Free'
+                      : selectedPackage
+                        ? `Choose ${proPlanName(selectedPackage.interval, selectedPackage.title)}`
+                        : 'Choose a plan'
+              }
+              onPress={() => void continueWithSelectedPlan()}
+              testID={selectedPlanId === FREE_PLAN_ID ? 'onboarding-free-continue' : 'onboarding-plan-continue'}
             />
-          ) : null}
-          {!billing.isPro ? (
-            <GlideButton
-              disabled={billing.status === 'loading' || completionPending}
-              fullWidth
-              label="Continue with the free first mission"
-              onPress={() => void finishOnboarding('free')}
-              testID="onboarding-free-continue"
-              variant="tertiary"
-            />
-          ) : null}
+          )}
         </View>
       }>
       <ScreenIntro
-        eyebrow={`GLIDELINGO PRO${billing.mode === 'mock' ? ' · DESIGN PREVIEW' : ' · NOT YET FOR SALE'}`}
-        title={billing.isPro ? 'Your Pro access is active.' : 'Keep your Greek moving.'}
+        eyebrow={billing.isPro ? 'YOUR PLAN' : __DEV__ ? 'CHOOSE YOUR PLAN' : 'YOUR FIRST MISSION'}
+        title={
+          billing.isPro
+            ? 'Your Pro access is active.'
+            : __DEV__
+              ? 'Choose how you want to begin.'
+              : 'Your first Greek mission is ready.'
+        }
         copy={
           billing.isPro
             ? 'Pro access is active for this account. Your first full lesson is ready.'
-            : billing.mode === 'mock'
-              ? 'Preview the Pro decision in development, or begin with the free first mission.'
-              : 'Paid onboarding stays disabled until the Pro course boundary and complete renewal terms are ready. Begin with the free first mission.'
+            : __DEV__
+              ? 'Start free with the first complete mission, or add Pro tutor help. You can change your plan later.'
+              : 'Begin with a complete guided lesson. Your progress stays connected to your account.'
         }
       />
 
-      <View style={styles.benefits}>
-        <BenefitRow>One complete authored mission free</BenefitRow>
-        <BenefitRow>Guided listening and practice</BenefitRow>
-        <BenefitRow>Account-linked progress and access</BenefitRow>
-      </View>
-
-      {billing.status === 'loading' ? (
-        <View accessibilityLabel="Checking subscription options" accessibilityRole="progressbar" style={styles.loadingPlans}>
-          <ActivityIndicator color={theme.tint} />
-          <ThemedText type="footnote" themeColor="textSecondary">
-            Checking subscription options…
-          </ThemedText>
-        </View>
-      ) : null}
-
-      {!billing.isPro && billing.mode === 'mock' && billing.status !== 'loading' ? (
+      {!billing.isPro ? (
         <View style={styles.choiceList}>
-          {billing.packages.map((item) => (
+          <ChoiceRow
+            detail="Complete the first Greek mission with guided listening and practice."
+            label="Free"
+            meta="$0"
+            onPress={() => setSelectedPlanId(FREE_PLAN_ID)}
+            selected={selectedPlanId === FREE_PLAN_ID}
+            testID="onboarding-plan-free"
+          />
+          {__DEV__ ? billing.packages.map((item) => (
             <ChoiceRow
               key={item.identifier}
-              detail={item.description}
-              label={item.title}
+              detail="Everything in Free, plus on-demand tutor help inside lessons."
+              label={proPlanName(item.interval, item.title)}
               meta={item.priceLabel}
-              onPress={() => setSelectedPackageId(item.identifier)}
-              selected={selectedPackage?.identifier === item.identifier}
+              onPress={() => setSelectedPlanId(item.identifier)}
+              selected={selectedPlanId === item.identifier}
               testID={`onboarding-package-${item.identifier}`}
             />
-          ))}
-          {billing.packages.length === 0 && billing.status !== 'error' ? (
-            <GlideSurface padding="roomy" style={styles.emptyPlan}>
-              <ThemedText type="title3">Plans are temporarily unavailable.</ThemedText>
-              <ThemedText type="footnote" themeColor="textSecondary">
-                You can refresh the store or continue with the free first mission.
-              </ThemedText>
-              <GlideButton label="Refresh plans" onPress={() => void billing.refresh()} variant="secondary" />
-            </GlideSurface>
-          ) : null}
+          )) : null}
         </View>
       ) : null}
 
-      {billing.errorMessage ? (
-        <GlideSurface accessibilityRole="alert" padding="regular">
-          <ThemedText type="headline" style={{ color: theme.danger }}>
-            Subscription status unavailable
-          </ThemedText>
-          <ThemedText type="footnote" themeColor="textSecondary">
-            {billing.errorMessage}
-          </ThemedText>
-          <GlideButton label="Try again" onPress={() => void billing.refresh()} variant="secondary" />
+      {!billing.isPro && __DEV__ && (billing.status === 'loading' || billing.packages.length === 0) ? (
+        <GlideSurface padding="regular" variant="tinted" style={styles.planNotice}>
+          {billing.status === 'loading' ? <ActivityIndicator color={theme.tint} /> : null}
+          <View style={styles.planNoticeCopy}>
+            <ThemedText type="headline">
+              {billing.status === 'loading' ? 'Loading Pro options…' : 'Pro is temporarily unavailable.'}
+            </ThemedText>
+            <ThemedText type="footnote" themeColor="textSecondary">
+              You can continue with Free now, or refresh the Pro options.
+            </ThemedText>
+          </View>
+          {billing.status !== 'loading' ? (
+            <GlideButton label="Refresh Pro options" onPress={() => void billing.refresh()} variant="secondary" />
+          ) : null}
         </GlideSurface>
       ) : null}
 
-      {!billing.isPro && billing.mode !== 'mock' ? (
-        <GlideSurface padding="roomy" style={styles.emptyPlan} variant="tinted">
-          <ThemedText type="title3">Start with the free first mission.</ThemedText>
+      {purchaseFeedback(billing.purchaseState.status) ? (
+        <GlideSurface accessibilityRole="alert" padding="regular" variant="tinted">
+          <ThemedText type="headline">
+            {billing.purchaseState.status === 'cancelled' ? 'Checkout cancelled' : 'Pro needs another try'}
+          </ThemedText>
           <ThemedText type="footnote" themeColor="textSecondary">
-            This onboarding screen will not start a real purchase until the paid course boundary and complete package terms ship together.
+            {purchaseFeedback(billing.purchaseState.status)}
+          </ThemedText>
+        </GlideSurface>
+      ) : null}
+
+      {!billing.isPro && __DEV__ ? (
+        <GlideSurface padding="regular" style={styles.sandboxNote} variant="tinted">
+          <ThemedText type="eyebrow" themeColor="textSecondary">
+            SANDBOX CHECKOUT
+          </ThemedText>
+          <ThemedText type="footnote" themeColor="textSecondary">
+            This development build uses test billing. No real charge is created.
           </ThemedText>
         </GlideSurface>
       ) : null}
@@ -432,19 +465,14 @@ export function OnboardingScreen() {
         </ThemedText>
       ) : null}
 
-      <View style={styles.storeActions}>
+      {!billing.isPro ? (
         <GlideButton
-          disabled={billing.status === 'loading'}
-          label={Platform.OS === 'web' ? 'Refresh access' : 'Restore purchases'}
+          disabled={purchasePending}
+          label={Platform.OS === 'web' ? 'Refresh existing access' : 'Restore purchases'}
           onPress={() => void billing.restore()}
           variant="tertiary"
         />
-        <ThemedText type="caption" themeColor="textTertiary" style={styles.termsCopy}>
-          {billing.mode === 'mock'
-            ? 'Development preview only. No store charge is created.'
-            : 'No onboarding purchase will be started from this screen.'}
-        </ThemedText>
-      </View>
+      ) : null}
     </OnboardingFrame>
   );
 }
@@ -634,15 +662,6 @@ function SampleChoice({
   );
 }
 
-function BenefitRow({ children }: PropsWithChildren) {
-  return (
-    <View style={styles.benefitRow}>
-      <ThemedText type="headline">✓</ThemedText>
-      <ThemedText type="body">{children}</ThemedText>
-    </View>
-  );
-}
-
 function SampleAudioControl({
   audioId,
   phrase,
@@ -690,9 +709,6 @@ const styles = StyleSheet.create({
   },
   alpha: { fontSize: 82, lineHeight: 90 },
   audioControl: { alignItems: 'center', gap: Spacing.one },
-  benefitRow: { alignItems: 'center', flexDirection: 'row', gap: Spacing.two },
-  benefits: { gap: Spacing.two },
-  brandMark: { height: 40, width: 40 },
   choice: {
     alignItems: 'center',
     borderRadius: Radii.large,
@@ -723,17 +739,17 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.four,
     width: '100%',
   },
-  emptyPlan: { gap: Spacing.two },
   header: { alignSelf: 'center', gap: Spacing.two, paddingHorizontal: Spacing.threeHalf, width: '100%', maxWidth: 560 },
   headerRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', minHeight: 40 },
   intro: { gap: Spacing.two },
   introCopy: { maxWidth: 520 },
-  loadingPlans: { alignItems: 'center', flexDirection: 'row', gap: Spacing.two, minHeight: 48 },
   milestone: { alignItems: 'flex-start', flexDirection: 'row', gap: Spacing.three },
   milestoneCopy: { flex: 1, gap: Spacing.half },
   milestoneIndex: { alignItems: 'center', justifyContent: 'center', minHeight: 24, width: 28 },
   pathLine: { height: Spacing.four, marginLeft: 13, width: StyleSheet.hairlineWidth },
   paywallActions: { gap: Spacing.one },
+  planNotice: { alignItems: 'center', flexDirection: 'row', gap: Spacing.two },
+  planNoticeCopy: { flex: 1, gap: Spacing.half },
   planCard: { gap: 0 },
   previewList: { marginTop: Spacing.two },
   previewRow: {
@@ -758,7 +774,6 @@ const styles = StyleSheet.create({
   sampleHero: { alignItems: 'center', gap: Spacing.two, paddingVertical: Spacing.three },
   sampleQuestion: { gap: Spacing.three },
   screen: { flex: 1 },
-  storeActions: { alignItems: 'center', gap: Spacing.one },
-  termsCopy: { maxWidth: 420, textAlign: 'center' },
+  sandboxNote: { gap: Spacing.half },
   welcomeMark: { alignItems: 'center', flexDirection: 'row', gap: Spacing.two },
 });

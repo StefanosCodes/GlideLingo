@@ -173,7 +173,7 @@ test('a purchase finishing after an account switch cannot update the new account
   );
   await waitFor(() => expect(billing().status).toBe('free'));
 
-  let pendingPurchase: Promise<void> | undefined;
+  let pendingPurchase: Promise<boolean> | undefined;
   await act(async () => {
     pendingPurchase = billing().purchase('$rc_monthly');
     await Promise.resolve();
@@ -186,11 +186,13 @@ test('a purchase finishing after an account switch cannot update the new account
     </BillingProvider>,
   );
   await waitFor(() => expect(billing().status).toBe('free'));
+  let purchaseConfirmed: boolean | undefined;
   await act(async () => {
     resolvePurchase?.(proSnapshot);
-    await pendingPurchase;
+    purchaseConfirmed = await pendingPurchase;
   });
 
+  expect(purchaseConfirmed).toBe(false);
   expect(billing().status).toBe('free');
   expect(billing().purchaseState.status).toBe('idle');
 });
@@ -230,7 +232,7 @@ test('successful checkout exposes success only after the refreshed entitlement i
   );
   await waitFor(() => expect(billing().status).toBe('free'));
 
-  let pendingPurchase: Promise<void> | undefined;
+  let pendingPurchase: Promise<boolean> | undefined;
   await act(async () => {
     pendingPurchase = billing().purchase('$rc_monthly');
     await Promise.resolve();
@@ -240,11 +242,13 @@ test('successful checkout exposes success only after the refreshed entitlement i
   expect(billing().status).toBe('free');
   expect(billing().isPro).toBe(false);
 
+  let purchaseConfirmed: boolean | undefined;
   await act(async () => {
     resolveReconciliation?.(activeServerEntitlement);
-    await pendingPurchase;
+    purchaseConfirmed = await pendingPurchase;
   });
 
+  expect(purchaseConfirmed).toBe(true);
   expect(billing().status).toBe('pro');
   expect(billing().purchaseState).toMatchObject({
     packageIdentifier: '$rc_monthly',

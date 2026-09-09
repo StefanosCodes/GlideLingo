@@ -25,6 +25,10 @@ Run `npm run env:check:provenance` only when you want to compare the local files
 resync after an intentional secret-version change.
 
 `npm run dev:desktop` starts local PostgreSQL, FastAPI, Expo web, and the source Electron window.
+That window uses the ignored `.expo/electron-development-profile` inside the current worktree, so
+an installed GlideLingo release cannot capture the single-instance lock or make an old build look
+like the current source. The profile persists local development sign-in between launches without
+sharing the installed app's session.
 Use `npm run diagnose` only when startup fails. Do not clear caches or reset data as routine setup.
 
 ## 2. Register and sign in locally

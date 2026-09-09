@@ -39,6 +39,11 @@ the guarded scripts documented in `infra/gcp/README.md`, never application start
 Compose database applies only the schema explicitly exercised by the selected development or
 integration path.
 
+The `desktop` and `desktop:window` commands use the current worktree's ignored
+`.expo/electron-development-profile`. This keeps the source Electron window and its login session
+separate from `/Applications/GlideLingo.app`, preventing the installed release's single-instance
+lock from silently replacing the development window.
+
 ## Port ownership
 
 Do not assume common ports are available. Before assigning or stopping a process:

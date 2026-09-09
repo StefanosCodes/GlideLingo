@@ -1,10 +1,11 @@
-import { createContext, useContext, useEffect, useState } from 'react';
-import { Image } from 'expo-image';
+import { createContext, useContext, useEffect, useState, type PropsWithChildren } from 'react';
 import { usePathname, useRouter } from 'expo-router';
 import { Tabs, TabList, TabTrigger, TabSlot, type TabListProps, type TabTriggerSlotProps } from 'expo-router/ui';
-import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View, type ViewStyle } from 'react-native';
+import { useReducedMotion } from 'react-native-reanimated';
 
 import { CoursePicker } from './course-picker';
+import { GlideLingoBrandMark } from './glidelingo-brand-mark';
 import { ThemedText } from './themed-text';
 import {
   ChartIcon,
@@ -18,7 +19,7 @@ import {
   SunIcon,
 } from './ui/hackathon-icons.web';
 
-import { Fonts, Radii } from '@/constants/theme';
+import { Fonts, Motion, Radii } from '@/constants/theme';
 import { primaryDestinations, type PrimaryDestinationId } from '@/features/product-shell/navigation';
 import { useTheme, useThemeController } from '@/hooks/use-theme';
 import { useDesktopUpdate } from '@/features/desktop-update/context';
@@ -31,7 +32,30 @@ const COLLAPSE_BREAKPOINT = 760;
 
 type PressState = { pressed: boolean; hovered?: boolean };
 
-const CollapsedContext = createContext(false);
+type WebTransitionStyle = ViewStyle & {
+  transitionDuration: string;
+  transitionProperty: string;
+  transitionTimingFunction: string;
+};
+
+type SidebarState = {
+  collapsed: boolean;
+  transitionDuration: string;
+};
+
+const CollapsedContext = createContext<SidebarState>({ collapsed: false, transitionDuration: `${Motion.standard}ms` });
+
+export function sidebarTransitionDuration(reducedMotion: boolean) {
+  return reducedMotion ? '0ms' : `${Motion.standard}ms`;
+}
+
+function transitionStyle(duration: string, property: string): WebTransitionStyle {
+  return {
+    transitionDuration: duration,
+    transitionProperty: property,
+    transitionTimingFunction: 'cubic-bezier(0.2, 0, 0, 1)',
+  };
+}
 
 export function isVisibleLessonActive(activeLessonId: string | null, pathname: string) {
   return Boolean(activeLessonId && pathname === '/');
@@ -62,7 +86,7 @@ function TabButton({
   ...props
 }: TabTriggerSlotProps & { icon: PrimaryDestinationId }) {
   const theme = useTheme();
-  const collapsed = useContext(CollapsedContext);
+  const { collapsed } = useContext(CollapsedContext);
   const color = isFocused ? theme.text : theme.textSecondary;
 
   return (
@@ -80,14 +104,36 @@ function TabButton({
         },
       ]}>
       <NavGlyph name={icon} color={color} />
-      {!collapsed && (
+      <ExpandedContent style={styles.linkCopy}>
         <ThemedText
           style={[styles.linkLabel, isFocused && styles.linkLabelActive]}
           themeColor={isFocused ? 'text' : 'textSecondary'}>
           {children}
         </ThemedText>
-      )}
+      </ExpandedContent>
     </Pressable>
+  );
+}
+
+function ExpandedContent({ children, style }: PropsWithChildren<{ style?: ViewStyle }>) {
+  const { collapsed, transitionDuration } = useContext(CollapsedContext);
+
+  return (
+    <View
+      accessibilityElementsHidden={collapsed}
+      style={[
+        styles.expandedContent,
+        style,
+        transitionStyle(transitionDuration, 'opacity, max-width, transform'),
+        {
+          maxWidth: collapsed ? 0 : 240,
+          opacity: collapsed ? 0 : 1,
+          pointerEvents: collapsed ? 'none' : 'auto',
+          transform: [{ translateX: collapsed ? -4 : 0 }],
+        },
+      ]}>
+      {children}
+    </View>
   );
 }
 
@@ -96,6 +142,7 @@ function Sidebar(props: TabListProps) {
   const theme = useTheme();
   const { scheme, toggleTheme } = useThemeController();
   const { width } = useWindowDimensions();
+  const reducedMotion = useReducedMotion();
   const narrow = width < COLLAPSE_BREAKPOINT;
   const [userCollapsed, setUserCollapsed] = useState(false);
   const collapsed = narrow || userCollapsed;
@@ -105,6 +152,7 @@ function Sidebar(props: TabListProps) {
   const reportLessonActive = desktopUpdate?.setLessonActive;
   const { activeLessonId } = useLearning();
   const pathname = usePathname();
+  const transitionDuration = sidebarTransitionDuration(reducedMotion);
 
   useEffect(() => {
     reportLessonActive?.(isVisibleLessonActive(activeLessonId, pathname));
@@ -112,12 +160,13 @@ function Sidebar(props: TabListProps) {
   }, [activeLessonId, pathname, reportLessonActive]);
 
   return (
-    <CollapsedContext.Provider value={collapsed}>
+    <CollapsedContext.Provider value={{ collapsed, transitionDuration }}>
       <View
         {...props}
         accessibilityRole="tablist"
         style={[
           styles.sidebar,
+          transitionStyle(transitionDuration, 'width, padding-left, padding-right'),
           {
             backgroundColor: sidebarBg,
             borderRightColor: theme.border,
@@ -137,16 +186,13 @@ function Sidebar(props: TabListProps) {
               collapsed && styles.brandCollapsed,
               { backgroundColor: pressed || hovered ? theme.backgroundSelected : 'transparent' },
             ]}>
-            <Image
-              accessibilityIgnoresInvertColors
-              contentFit="contain"
-              source={require('@/assets/brand/glidelingo-bird.png')}
-              style={styles.brandMark}
-            />
-            {!collapsed && <ThemedText style={styles.brandName}>GlideLingo</ThemedText>}
+            <GlideLingoBrandMark color={theme.text} size={32} />
+            <ExpandedContent>
+              <ThemedText style={styles.brandName}>GlideLingo</ThemedText>
+            </ExpandedContent>
           </Pressable>
 
-          {!collapsed && (
+          <ExpandedContent>
             <Pressable
               accessibilityLabel="Close sidebar"
               accessibilityRole="button"
@@ -157,7 +203,7 @@ function Sidebar(props: TabListProps) {
               ]}>
               <PanelLeftIcon color={theme.textSecondary} />
             </Pressable>
-          )}
+          </ExpandedContent>
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} style={styles.nav} contentContainerStyle={styles.navContent}>
@@ -165,11 +211,11 @@ function Sidebar(props: TabListProps) {
         </ScrollView>
 
         <View style={styles.footer}>
-          {!collapsed ? (
+          <ExpandedContent>
             <View style={styles.coursePicker}>
               <CoursePicker />
             </View>
-          ) : null}
+          </ExpandedContent>
           <DesktopUpdateSidebarStatus collapsed={collapsed} />
           <Pressable
             accessibilityLabel="Profile and settings"
@@ -181,11 +227,11 @@ function Sidebar(props: TabListProps) {
               { backgroundColor: pressed || hovered ? theme.backgroundSelected : 'transparent' },
             ]}>
             <ProfileIcon color={theme.textSecondary} />
-            {!collapsed && (
+            <ExpandedContent style={styles.footerCopy}>
               <ThemedText style={styles.footerLabel} themeColor="textSecondary">
                 Profile and settings
               </ThemedText>
-            )}
+            </ExpandedContent>
           </Pressable>
           <Pressable
             accessibilityLabel={`Switch to ${switchingToDark ? 'dark' : 'light'} mode`}
@@ -198,11 +244,11 @@ function Sidebar(props: TabListProps) {
               { backgroundColor: pressed || hovered ? theme.backgroundSelected : 'transparent' },
             ]}>
             {switchingToDark ? <MoonIcon color={theme.textSecondary} /> : <SunIcon color={theme.textSecondary} />}
-            {!collapsed && (
+            <ExpandedContent style={styles.footerCopy}>
               <ThemedText style={styles.footerLabel} themeColor="textSecondary">
                 {switchingToDark ? 'Dark mode' : 'Light mode'}
               </ThemedText>
-            )}
+            </ExpandedContent>
           </Pressable>
         </View>
       </View>
@@ -233,6 +279,7 @@ const styles = StyleSheet.create({
     height: '100%',
     paddingBottom: 8,
     paddingTop: 12,
+    overflow: 'hidden',
   },
   header: {
     alignItems: 'center',
@@ -255,13 +302,14 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   brandCollapsed: {
-    flex: 0,
+    flexBasis: 44,
+    flexGrow: 0,
+    flexShrink: 0,
     justifyContent: 'center',
     minHeight: 36,
     paddingHorizontal: 0,
     width: 44,
   },
-  brandMark: { height: 32, width: 32 },
   brandName: {
     fontFamily: Fonts.sansSemibold,
     fontSize: 18,
@@ -289,6 +337,7 @@ const styles = StyleSheet.create({
   },
   linkCollapsed: { height: 40, justifyContent: 'center', minHeight: 40, paddingHorizontal: 0, width: 44 },
   linkLabel: { flex: 1, fontFamily: Fonts.sans, fontSize: 14, lineHeight: 20 },
+  linkCopy: { flex: 1 },
   linkLabelActive: { fontFamily: Fonts.sansMedium },
   footerButton: {
     alignItems: 'center',
@@ -301,6 +350,8 @@ const styles = StyleSheet.create({
   },
   footerButtonCollapsed: { justifyContent: 'center', paddingHorizontal: 0 },
   footerLabel: { fontFamily: Fonts.sans, fontSize: 14, lineHeight: 20 },
+  footerCopy: { flex: 1 },
   footer: { gap: 2 },
   coursePicker: { alignItems: 'stretch', paddingBottom: 4, paddingHorizontal: 4 },
+  expandedContent: { overflow: 'hidden' },
 });

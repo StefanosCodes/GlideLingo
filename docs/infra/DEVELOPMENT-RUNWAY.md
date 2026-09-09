@@ -115,7 +115,8 @@ bump desktop/package.json
 
 The packaged macOS app checks once on launch. Draft releases are invisible. When a newer published
 release exists, the app downloads it and offers **Restart and update**; choosing **Later** leaves a
-restart action for that launch. It does not install silently on quit. A valid API minimum-version
+restart action in the signed-in sidebar for that launch, and the prompt returns on the next launch
+if the update remains uninstalled. It does not install silently on quit. A valid API minimum-version
 policy can require an update, but the current default minimum is `0.0.0`.
 
 The currently published channel is `desktop-v1.0.8`. It proves signed direct distribution and the

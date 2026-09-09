@@ -100,6 +100,10 @@ test('development auth popup navigation stays on reviewed OAuth or renderer orig
 });
 
 test('packaged CSP includes exact API and Clerk origins plus web checkout providers', () => {
+  assert.equal(
+    PRODUCTION_API_ORIGIN,
+    'https://glidelingo-api-production-5rz5hpjmca-uw.a.run.app',
+  );
   const policy = buildContentSecurityPolicy();
 
   assert.match(policy, new RegExp(PRODUCTION_API_ORIGIN.replaceAll('.', '\\.')));

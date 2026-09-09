@@ -41,8 +41,8 @@ issuer, expiry, and subject against Clerk's JWKS. When a token includes Clerk's 
 it exactly matches `GLIDELINGO_CLERK_AUTHORIZED_PARTIES`; native tokens without `azp` remain valid. An optional
 `GLIDELINGO_CLERK_AUDIENCE` can add audience validation when the app later requests a matching Clerk JWT template.
 
-Existing unscoped browser learning progress is never assigned automatically. The Progress screen asks the signed-in user
-to import or reject it; importing moves the legacy data into that Clerk user's storage and removes the shared legacy copy.
+Learning progress is stored only under the verified Clerk user ID. Pre-account, unscoped browser data is not loaded or
+offered inside the signed-in product, so a shared device cannot present one person's old progress to another account.
 
 ## User-facing error contract
 

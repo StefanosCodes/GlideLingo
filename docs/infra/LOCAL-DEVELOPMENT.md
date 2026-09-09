@@ -12,6 +12,7 @@ Current client commands:
 | Install locked Python dependencies | `npm run setup:backend` |
 | Install locked tutor dependencies | `npm run setup:tutor` |
 | Start local PostgreSQL | `npm run db:up` |
+| Start PostgreSQL and apply the current local schema | `npm run db:prepare` |
 | Stop PostgreSQL and preserve its data | `npm run db:down` |
 | Follow PostgreSQL logs | `npm run db:logs` |
 | Start FastAPI | `npm run api` |
@@ -34,10 +35,11 @@ Current client commands:
 | Add real PostgreSQL integration verification | `npm run verify:full-stack` |
 
 These root scripts are the source of truth for humans, CI, and coding agents. Versioned SQL lives
-under `backend/migrations`; production migration and maintenance commands are operator-run through
-the guarded scripts documented in `infra/gcp/README.md`, never application startup. The local
-Compose database applies only the schema explicitly exercised by the selected development or
-integration path.
+under `backend/migrations`. `npm run dev`, `npm run dev:desktop`, authenticated E2E, and full-stack
+verification run `db:prepare`, which applies any missing versioned migrations to the local Compose
+database and verifies their checksums. Production migration and maintenance commands remain
+operator-run through the guarded scripts documented in `infra/gcp/README.md`, never application
+startup.
 
 The `desktop` and `desktop:window` commands use the current worktree's ignored
 `.expo/electron-development-profile`. This keeps the source Electron window and its login session

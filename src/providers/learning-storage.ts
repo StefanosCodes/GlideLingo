@@ -11,7 +11,6 @@ import {
 
 export const LEARNING_STORAGE_KEY = 'glidelingo-learning';
 export const LEARNING_STORAGE_VERSION = 2;
-export const LEGACY_IMPORT_OWNER_KEY = `${LEARNING_STORAGE_KEY}:legacy-import-owner`;
 
 export type LearningWriteStamp = {
   at: number;
@@ -141,10 +140,6 @@ export function legacyScopedLearningStorageKey(storageScope: string) {
   return `${LEARNING_STORAGE_KEY}:${storageScope}`;
 }
 
-export function legacyDecisionStorageKey(storageScope: string) {
-  return `${LEARNING_STORAGE_KEY}:legacy-decision:${storageScope}`;
-}
-
 export function getLearningStorage(): LearningStorage | undefined {
   try {
     return globalThis.localStorage;
@@ -189,25 +184,6 @@ export async function withLearningStorageLock<T>(
     if (storageQueues.get(storageKey) === settled) storageQueues.delete(storageKey);
   });
   return run;
-}
-
-/**
- * Acquires multiple storage locks in one canonical lexical order. Callers must
- * never acquire an earlier key while already holding a later key. In
- * particular, legacy imports acquire the shared source before the scoped
- * destination; ordinary scoped saves acquire only their destination.
- */
-export function withLearningStorageLocks<T>(
-  storageKeys: string[],
-  work: () => Promise<T> | T,
-  options: LearningStorageLockOptions = {},
-): Promise<T> {
-  const orderedKeys = [...new Set(storageKeys)].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
-  const acquire = (index: number): Promise<T> =>
-    index >= orderedKeys.length
-      ? Promise.resolve().then(work)
-      : withLearningStorageLock(orderedKeys[index], () => acquire(index + 1), options);
-  return acquire(0);
 }
 
 export function parseStoredLearningResult(

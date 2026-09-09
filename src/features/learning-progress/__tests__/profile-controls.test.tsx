@@ -4,8 +4,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import ProfileScreen from '@/app/profile';
 
-const mockDismissLegacyProgress = jest.fn();
-const mockImportLegacyProgress = jest.fn();
 const mockPush = jest.fn();
 const mockBack = jest.fn();
 const mockCanGoBack = jest.fn(() => false);
@@ -40,12 +38,8 @@ jest.mock('@/providers/learning-provider', () => ({
     weeklyPracticeGoal: null,
     rhythmSummary: { activeGoal: null, currentStreakWeeks: 0, practiceDaysThisWeek: 0 },
     completedModuleIds: [],
-    legacyProgressAvailable: true,
-    legacyProgressError: null,
     persistenceStatus: 'available',
     setWeeklyPracticeGoal: jest.fn(),
-    dismissLegacyProgress: mockDismissLegacyProgress,
-    importLegacyProgress: mockImportLegacyProgress,
     switchCourse: jest.fn(),
   }),
 }));
@@ -56,8 +50,6 @@ const safeAreaMetrics = {
 };
 
 beforeEach(() => {
-  mockDismissLegacyProgress.mockClear();
-  mockImportLegacyProgress.mockClear();
   mockPush.mockClear();
   mockBack.mockClear();
   mockCanGoBack.mockClear();
@@ -66,7 +58,7 @@ beforeEach(() => {
   mockSetThemePreference.mockClear();
 });
 
-test('profile preserves legacy decisions, billing, and account controls', async () => {
+test('profile preserves billing, account, and appearance controls', async () => {
   const screen = await render(
     <SafeAreaProvider initialMetrics={safeAreaMetrics}>
       <ProfileScreen />
@@ -74,14 +66,11 @@ test('profile preserves legacy decisions, billing, and account controls', async 
   );
 
   expect(screen.getByLabelText('Account controls')).toBeTruthy();
-  await fireEvent.press(screen.getByText('Import progress'));
-  await fireEvent.press(screen.getByText('Not mine'));
+  expect(screen.queryByText('EXISTING PROGRESS FOUND')).toBeNull();
   await fireEvent.press(screen.getByText('Manage Pro'));
   await fireEvent(screen.getByTestId('dark-appearance-switch'), 'valueChange', true);
   await fireEvent.press(screen.getByLabelText('Back to learning'));
 
-  expect(mockImportLegacyProgress).toHaveBeenCalledTimes(1);
-  expect(mockDismissLegacyProgress).toHaveBeenCalledTimes(1);
   expect(mockPush).toHaveBeenCalledWith('/subscription');
   expect(mockSetThemePreference).toHaveBeenCalledWith('dark');
   expect(mockReplace).toHaveBeenCalledWith('/');

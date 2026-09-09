@@ -42,25 +42,16 @@ import {
   type WeeklyGoalChange,
   type WeeklyPracticeGoal,
 } from '@/features/learning-progress/rhythm-policy';
-import {
-  LegacyLearningImportFailure,
-  mergeConcurrentLearning,
-  mergeLegacyLearning,
-  persistLegacyLearningImport,
-} from '@/providers/learning-migration';
+import { mergeConcurrentLearning } from '@/providers/learning-migration';
 import {
   getLearningStorage,
-  LEGACY_IMPORT_OWNER_KEY,
-  LEARNING_STORAGE_KEY,
   learningStorageKey,
-  legacyDecisionStorageKey,
   legacyScopedLearningStorageKey,
   readStoredLearning,
   type LearningPersistenceStatus,
   type LearningWriteStamp,
   type StoredLearningV2,
   withLearningStorageLock,
-  withLearningStorageLocks,
   writeStoredLearning,
 } from '@/providers/learning-storage';
 
@@ -88,8 +79,6 @@ type LearningContextValue = {
   weeklyGoalChanges: WeeklyGoalChange[];
   rhythmSummary: RhythmSummary;
   persistenceStatus: LearningPersistenceStatus;
-  legacyProgressAvailable: boolean;
-  legacyProgressError: string | null;
   setLanguage: (id: LanguageId) => void;
   switchCourse: (courseId: string) => boolean;
   startCourse: (courseId: string) => boolean;
@@ -97,8 +86,6 @@ type LearningContextValue = {
   openLesson: (lessonId: string | null, mode?: LessonMode) => void;
   completeLesson: (completion: LessonCompletionInput) => LessonCompletionResult;
   setWeeklyPracticeGoal: (goal: WeeklyPracticeGoal | null) => void;
-  dismissLegacyProgress: () => void;
-  importLegacyProgress: () => void;
 };
 
 const LearningContext = createContext<LearningContextValue | null>(null);
@@ -174,27 +161,11 @@ function initializeLearning(storageScope: string) {
   return { canPersist: true, status: 'available' as const, value: destination.value };
 }
 
-function legacyProgressNeedsDecision(storageScope: string) {
-  const storage = getLearningStorage();
-  if (!storage) return false;
-  let decision: string | null;
-  try {
-    decision = storage.getItem(legacyDecisionStorageKey(storageScope));
-    const owner = storage.getItem(LEGACY_IMPORT_OWNER_KEY);
-    if (owner && owner !== storageScope) return false;
-  } catch {
-    return false;
-  }
-  if (decision === 'dismissed') return false;
-  return readStoredLearning(LEARNING_STORAGE_KEY, storage).kind === 'found';
-}
-
 export function LearningProvider({
   children,
   storageScope,
 }: PropsWithChildren<{ storageScope: string }>) {
   const storageKey = learningStorageKey(storageScope);
-  const legacyDecisionKey = legacyDecisionStorageKey(storageScope);
   const [initial] = useState(() => initializeLearning(storageScope));
   const canPersistRef = useRef(initial.canPersist);
   const [learning, setLearning] = useState<StoredLearningV2>(initial.value);
@@ -203,10 +174,6 @@ export function LearningProvider({
   const writerIdRef = useRef(writerId);
   const writerSequenceRef = useRef(0);
   const latestWriteTimeRef = useRef(latestWriteTime(initial.value));
-  const [legacyProgressAvailable, setLegacyProgressAvailable] = useState(() =>
-    legacyProgressNeedsDecision(storageScope),
-  );
-  const [legacyProgressError, setLegacyProgressError] = useState<string | null>(null);
   const [persistenceState, setPersistenceState] = useState<LearningPersistenceStatus>(initial.status);
   const [focusedModuleId, setFocusedModuleId] = useState<string | null>(null);
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
@@ -420,96 +387,6 @@ export function LearningProvider({
     }));
   }, [nextWriteStamp, updateLearning]);
 
-  const dismissLegacyProgress = useCallback(() => {
-    const storage = getLearningStorage();
-    if (!storage) {
-      setLegacyProgressError('This choice could not be saved on this device. Nothing was removed.');
-      return;
-    }
-    try {
-      storage.setItem(legacyDecisionKey, 'dismissed');
-    } catch {
-      setLegacyProgressError('This choice could not be saved on this device. Nothing was removed.');
-      return;
-    }
-    setLegacyProgressError(null);
-    setLegacyProgressAvailable(false);
-  }, [legacyDecisionKey]);
-
-  const importLegacyProgress = useCallback(() => {
-    const storage = getLearningStorage();
-    if (!storage) {
-      setLegacyProgressError('Progress could not be saved on this device. Nothing was removed.');
-      return;
-    }
-
-    void withLearningStorageLocks(
-      [LEARNING_STORAGE_KEY, storageKey],
-      () => {
-        let claimOwner: string | null;
-        try {
-          claimOwner = storage.getItem(LEGACY_IMPORT_OWNER_KEY);
-        } catch {
-          throw new Error('legacy-unsafe');
-        }
-        if (claimOwner && claimOwner !== storageScope) throw new Error('legacy-missing');
-        const legacy = readStoredLearning(LEARNING_STORAGE_KEY, storage);
-        if (legacy.kind !== 'found') {
-          throw new Error(legacy.kind === 'missing' ? 'legacy-missing' : 'legacy-unsafe');
-        }
-        const destination = readStoredLearning(storageKey, storage);
-        if (destination.kind === 'corrupt' || destination.kind === 'read-error') {
-          throw new Error('destination-unsafe');
-        }
-        const durableCurrent = destination.kind === 'found'
-          ? mergeConcurrentLearning(destination.value, learningRef.current)
-          : learningRef.current;
-        const merged = mergeLegacyLearning(durableCurrent, legacy.value);
-        try {
-          persistLegacyLearningImport(storage, {
-            claimKey: LEGACY_IMPORT_OWNER_KEY,
-            claimOwner: storageScope,
-            decisionKey: legacyDecisionKey,
-            destinationKey: storageKey,
-            legacyKey: LEARNING_STORAGE_KEY,
-            merged,
-          });
-          return { cleanupFailed: false, merged };
-        } catch (error) {
-          if (error instanceof LegacyLearningImportFailure && error.destinationPersisted) {
-            return { cleanupFailed: true, merged };
-          }
-          throw new Error('import-not-persisted');
-        }
-      },
-      { requireBrowserLock: Platform.OS === 'web' },
-    )
-      .then(({ cleanupFailed, merged }) => {
-        canPersistRef.current = true;
-        reconcileLearning(merged);
-        setFocusedModuleId(null);
-        setActiveLessonId(null);
-        setActiveLessonMode('learn');
-        setPersistenceState('available');
-        setLegacyProgressError(
-          cleanupFailed ? 'Progress was copied, but cleanup did not finish. Retry to complete the import safely.' : null,
-        );
-        setLegacyProgressAvailable(cleanupFailed);
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : '';
-        setLegacyProgressError(
-          message === 'legacy-missing'
-            ? 'The earlier progress is no longer available.'
-            : message === 'destination-unsafe'
-              ? 'Your account progress could not be read safely. Nothing was overwritten or removed.'
-              : message === 'import-not-persisted'
-                ? 'Progress could not be saved on this device. The earlier progress is still available.'
-              : 'The earlier progress could not be read safely. Nothing was removed.',
-        );
-      });
-  }, [legacyDecisionKey, reconcileLearning, storageKey, storageScope]);
-
   const value = useMemo<LearningContextValue>(
     () => ({
       language,
@@ -533,8 +410,6 @@ export function LearningProvider({
       weeklyGoalChanges,
       rhythmSummary,
       persistenceStatus: persistenceState,
-      legacyProgressAvailable,
-      legacyProgressError,
       setLanguage,
       switchCourse,
       startCourse,
@@ -542,8 +417,6 @@ export function LearningProvider({
       openLesson,
       completeLesson,
       setWeeklyPracticeGoal,
-      dismissLegacyProgress,
-      importLegacyProgress,
     }),
     [
       activeLessonId,
@@ -552,15 +425,11 @@ export function LearningProvider({
       completedLessonIds,
       completedModuleIds,
       courses,
-      dismissLegacyProgress,
       enrolledCourse,
       focusedModuleId,
       focusModule,
-      importLegacyProgress,
       language,
       languageId,
-      legacyProgressAvailable,
-      legacyProgressError,
       lessonEvidence,
       lessonNow,
       moduleNow,

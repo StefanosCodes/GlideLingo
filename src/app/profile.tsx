@@ -48,12 +48,8 @@ export default function ProfileScreen() {
     practiceDaysThisWeek,
     weeklyPracticeGoal,
     completedModuleIds,
-    legacyProgressAvailable,
-    legacyProgressError,
     persistenceStatus,
     setWeeklyPracticeGoal,
-    dismissLegacyProgress,
-    importLegacyProgress,
   } = useLearning();
   const percent = Math.round(progress * 100);
   const capabilities = strongestCapabilityEvidence(lessonEvidence);
@@ -149,28 +145,6 @@ export default function ProfileScreen() {
               ? 'GlideLingo left the stored value untouched instead of replacing it with an empty profile.'
               : 'Device storage is unavailable. Your session still works, but changes may not survive a restart.'}
           </ThemedText>
-        </GlideSurface>
-      ) : null}
-
-      {legacyProgressAvailable ? (
-        <GlideSurface padding="roomy" style={styles.block} variant="tinted">
-          <ThemedText type="eyebrow" themeColor="textSecondary">
-            EXISTING PROGRESS FOUND
-          </ThemedText>
-          <ThemedText type="title3">Bring this device’s earlier progress into your account?</ThemedText>
-          <ThemedText type="footnote" themeColor="textSecondary">
-            Import only if this progress is yours. Lessons, ability evidence, practice dates, and weekly goals are combined
-            with this account before the older shared copy is removed.
-          </ThemedText>
-          <View style={styles.legacyActions}>
-            <GlideButton label="Import progress" onPress={importLegacyProgress} size="regular" />
-            <GlideButton label="Not mine" onPress={dismissLegacyProgress} size="regular" variant="tertiary" />
-          </View>
-          {legacyProgressError ? (
-            <ThemedText accessibilityRole="alert" type="footnote" style={{ color: theme.danger }}>
-              {legacyProgressError}
-            </ThemedText>
-          ) : null}
         </GlideSurface>
       ) : null}
 
@@ -327,7 +301,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.twoHalf,
   },
   block: { gap: Spacing.twoHalf },
-  legacyActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   rhythmChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, paddingTop: Spacing.one },
   rhythmChoice: {
     alignItems: 'center',

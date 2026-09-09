@@ -10,6 +10,7 @@ Current client commands:
 | --- | --- |
 | Install locked Node dependencies | `npm ci` |
 | Install locked Python dependencies | `npm run setup:backend` |
+| Install locked tutor dependencies | `npm run setup:tutor` |
 | Start local PostgreSQL | `npm run db:up` |
 | Stop PostgreSQL and preserve its data | `npm run db:down` |
 | Follow PostgreSQL logs | `npm run db:logs` |
@@ -23,12 +24,17 @@ Current client commands:
 | Start Electron and its web server | `npm run desktop` |
 | Attach Electron to existing Metro | `npm run desktop:window` |
 | Diagnose the environment | `npm run diagnose` |
+| Validate development configuration | `npm run env:check` |
 | Run fast verification | `npm run verify` |
 | Verify the backend without PostgreSQL | `npm run api:verify` |
 | Run static/full repository verification | `npm run verify:full` |
 | Add real PostgreSQL integration verification | `npm run verify:full-stack` |
 
-These root scripts are the source of truth for humans, CI, and coding agents. There is no migration command because this slice creates no product schema.
+These root scripts are the source of truth for humans, CI, and coding agents. Versioned SQL lives
+under `backend/migrations`; production migration and maintenance commands are operator-run through
+the guarded scripts documented in `infra/gcp/README.md`, never application startup. The local
+Compose database applies only the schema explicitly exercised by the selected development or
+integration path.
 
 ## Port ownership
 
@@ -69,7 +75,11 @@ Only public configuration may use Expo’s `EXPO_PUBLIC_*` variables. Secrets, s
 
 ## Environment files
 
-The backend reads the root `.env` file when present, and Docker Compose reads the same file. The committed local defaults require no file. Copy `.env.example` to `.env` only for explicit overrides, and keep `GLIDELINGO_DATABASE_URL`, `GLIDELINGO_DB_PORT`, and `GLIDELINGO_DB_PASSWORD` consistent.
+The backend and Docker Compose read the root `.env` when present. Committed defaults are sufficient
+for database and unauthenticated health work, but the complete desktop auth/billing path requires
+the ignored root `.env` synchronized with `npm run env:sync:development` from the exact
+`glidelingo-development` project. Verify it with `npm run env:check`; do not hand-copy managed
+values. Keep any explicit database URL, port, and password overrides consistent.
 
 Environment rules:
 

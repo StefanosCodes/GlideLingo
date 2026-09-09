@@ -1,4 +1,4 @@
-export type WeeklyPracticeGoal = 2 | 3 | 5;
+export type WeeklyPracticeGoal = 2 | 3 | 5 | 7;
 
 export type WeeklyGoalChange = {
   effectiveWeekKey: string;
@@ -86,7 +86,11 @@ export function isWeeklyGoalChange(value: unknown): value is WeeklyGoalChange {
   return (
     isLocalDayKey(candidate.effectiveWeekKey) &&
     candidate.effectiveWeekKey === weekKeyForDayKey(candidate.effectiveWeekKey) &&
-    (candidate.goal === null || candidate.goal === 2 || candidate.goal === 3 || candidate.goal === 5)
+    (candidate.goal === null ||
+      candidate.goal === 2 ||
+      candidate.goal === 3 ||
+      candidate.goal === 5 ||
+      candidate.goal === 7)
   );
 }
 

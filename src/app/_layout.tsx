@@ -12,13 +12,14 @@ import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { FirstNameCompletionGate } from '@/features/auth/first-name-completion-gate';
+import { DesktopUpdateProvider } from '@/features/desktop-update/desktop-update-provider';
 import { useTheme, useThemeController } from '@/hooks/use-theme';
 import { AppThemeProvider } from '@/providers/app-theme-provider';
 import { BillingProvider } from '@/providers/billing-provider';
 import { GlideLingoClerkProvider } from '@/providers/clerk-provider';
 import { useAuth } from '@/providers/clerk-runtime';
-import { LearningProvider } from '@/providers/learning-provider';
-import { DesktopUpdateProvider } from '@/features/desktop-update/desktop-update-provider';
+import { LearningProvider, useLearning } from '@/providers/learning-provider';
+import { OnboardingProvider, useOnboarding } from '@/providers/onboarding-provider';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -72,12 +73,14 @@ function ClerkApp() {
     <BillingProvider userId={signedIn ? userId : null}>
       {signedIn && userId ? (
         <LearningProvider key={userId} storageScope={userId}>
-          <FirstNameCompletionGate>
-            <AppNavigation signedIn />
-          </FirstNameCompletionGate>
+          <OnboardingProvider storageScope={userId}>
+            <FirstNameCompletionGate>
+              <SignedInNavigation />
+            </FirstNameCompletionGate>
+          </OnboardingProvider>
         </LearningProvider>
       ) : (
-        <AppNavigation signedIn={false} />
+        <AppNavigation onboardingComplete={false} signedIn={false} />
       )}
     </BillingProvider>
   );
@@ -101,7 +104,28 @@ function AuthLoadingScreen() {
   );
 }
 
-function AppNavigation({ signedIn }: { signedIn: boolean }) {
+function SignedInNavigation() {
+  const colors = useTheme();
+  const { enrolledCourse } = useLearning();
+  const { ready } = useOnboarding();
+
+  if (!ready) {
+    return (
+      <View
+        accessibilityLabel="Restoring onboarding progress"
+        accessibilityRole="progressbar"
+        style={[styles.loadingScreen, { backgroundColor: colors.background }]}>
+        <ActivityIndicator color={colors.tint} size="large" />
+      </View>
+    );
+  }
+
+  // LearningProvider does not yet persist native enrollment. Requiring the course
+  // prevents a durable onboarding flag from opening an empty app after restart.
+  return <AppNavigation onboardingComplete={Boolean(enrolledCourse)} signedIn />;
+}
+
+function AppNavigation({ signedIn, onboardingComplete }: { signedIn: boolean; onboardingComplete: boolean }) {
   const colors = useTheme();
   const { scheme } = useThemeController();
   const isDark = scheme === 'dark';
@@ -125,7 +149,10 @@ function AppNavigation({ signedIn }: { signedIn: boolean }) {
         <Stack.Protected guard={!signedIn}>
           <Stack.Screen name="(auth)" />
         </Stack.Protected>
-        <Stack.Protected guard={signedIn}>
+        <Stack.Protected guard={signedIn && !onboardingComplete}>
+          <Stack.Screen name="onboarding" />
+        </Stack.Protected>
+        <Stack.Protected guard={signedIn && onboardingComplete}>
           <Stack.Screen name="(app)" />
           <Stack.Screen name="course/[id]" />
           <Stack.Screen name="lesson/[id]" />
@@ -169,4 +196,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: Spacing.threeHalf,
   },
+  loadingScreen: { alignItems: 'center', flex: 1, justifyContent: 'center' },
 });
